@@ -62,6 +62,11 @@ Everything happens in the app: upload a PDF or a folder of scanned pages (drag &
 watch progress / stop, review any page or segment, redraw boxes, write book rules, undo/redo, export.
 CLI equivalents: `process --book DIR [--pages 3,5-7]`, `reproject --book DIR`, `render --book DIR`, `doctor PDF`.
 
+Importing: **Ανέβασμα φακέλου / PDF** use the browser's picker and upload the files; **Από τον υπολογιστή…** opens
+the macOS Finder panel from the local server (files and folders together) and copies the files straight from disk
+(no upload; best for large folders; home folder only). For page images both open the same page-order dialog
+(by name, by date, reversed, or drag to rearrange) before anything is imported. HEIC/HEIF is converted locally.
+
 ### What happens to a review decision
 Nothing is patched in place. Raw OCR (`raw/`) is immutable; every human action is appended to the book's
 `events.jsonl` (event sourcing). A light background job then **re-projects** the book: `canonical.json`,

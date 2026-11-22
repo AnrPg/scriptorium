@@ -1071,3 +1071,23 @@ def test_ocr_and_excerpts_never_render_below_the_scan_density(tmp_path):
     assert abs(rec['width_px'] - 100 * 300 / 72) <= 2                        # every scan pixel kept
     region = ex.region_pdf(tmp_path / 'hi.pdf', 1, [100, 100, 200, 200], tmp_path / 'r.pdf')
     assert abs(pdfio.native_dpi(region, 1) - 300) < 2                         # the region carries the density on
+
+
+def test_native_picker_items_are_described_and_confined_to_home(tmp_path, monkeypatch):
+    """«Από τον υπολογιστή»: the OS picker returns paths; the service classifies them (folder / PDF / page image)
+    and refuses anything outside the home folder. No real panel is opened in tests."""
+    from scientific_ocr.adapters import os_picker
+    from scientific_ocr.application.use_cases.library import LibraryService
+    home = tmp_path / 'home'
+    (home / 'scans').mkdir(parents=True)
+    (home / 'a.pdf').write_bytes(b'%PDF-1.4')
+    (home / 'scans' / 'p1.jpg').write_bytes(b'x')
+    monkeypatch.setattr(LibraryService, 'FS_ROOT', home)
+    monkeypatch.setattr(os_picker, 'available', lambda: True)
+    monkeypatch.setattr(os_picker, 'pick', lambda *a, **k: [str(home / 'scans'), str(home / 'a.pdf'),
+                                                            str(home / 'scans' / 'p1.jpg'), str(tmp_path / 'x.pdf')])
+    r = App(Library(tmp_path / 'lib'), FakeJobs()).pick_native()
+    assert [(i['type'], i['name']) for i in r['items']] == [('dir', 'scans'), ('pdf', 'a.pdf'), ('image', 'p1.jpg')]
+    assert r['items'][2]['dir'] == str((home / 'scans').resolve()) and r['outside_home'] == [str(tmp_path / 'x.pdf')]
+    monkeypatch.setattr(os_picker, 'available', lambda: False)
+    assert App(Library(tmp_path / 'lib2'), FakeJobs()).pick_native() == {'available': False, 'items': []}

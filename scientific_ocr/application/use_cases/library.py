@@ -7,6 +7,7 @@ import shutil
 import uuid
 from pathlib import Path
 
+from ...adapters import os_picker
 from ...adapters import pdf as pdfio
 from ...core.decisions import VALUE_DECISIONS
 from ...core.reasons import as_table
@@ -132,6 +133,32 @@ class LibraryService(ServiceBase):
             ([{'name': p.name, 'path': str(p)}] if p != root else [])
         return {'path': str(p), 'crumbs': crumbs, 'dirs': dirs, 'files': files,
                 'images': sum(1 for f in files if f['type'] == 'image'), 'pdfs': sum(1 for f in files if f['type'] == 'pdf')}
+
+    def pick_native(self, start: str | None = None) -> dict:
+        """Open the OS file picker (files and/or folders) and describe what was chosen, so the UI can import PDFs
+        directly and ask for the page order of image sets. Only paths inside the home folder are accepted."""
+        if not os_picker.available():
+            return {'available': False, 'items': []}
+        types = ['pdf'] + sorted(s.lstrip('.') for s in pdfio.IMAGE_SUFFIXES)
+        try:
+            paths = os_picker.pick(types, 'Διάλεξε PDF, εικόνες σελίδων ή φακέλους', 'Εισαγωγή', start)
+        except os_picker.PickerUnavailable as exc:
+            raise ServiceError(str(exc))
+        root = self.FS_ROOT.resolve()
+        items, outside = [], []
+        for raw in paths:
+            p = Path(raw).resolve()
+            if root not in p.parents:
+                outside.append(raw)
+                continue
+            if p.is_dir():
+                items.append({'type': 'dir', 'path': str(p), 'name': p.name})
+            elif p.suffix.lower() == '.pdf':
+                items.append({'type': 'pdf', 'path': str(p), 'name': p.name})
+            elif p.suffix.lower() in pdfio.IMAGE_SUFFIXES:
+                st = p.stat()
+                items.append({'type': 'image', 'path': str(p), 'name': p.name, 'mtime': st.st_mtime, 'dir': str(p.parent)})
+        return {'available': True, 'items': items, 'outside_home': outside}
 
     def _home_file(self, raw: str, suffixes: set[str]) -> Path:
         root = self.FS_ROOT.resolve()

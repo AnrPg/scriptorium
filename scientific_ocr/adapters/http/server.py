@@ -178,6 +178,10 @@ class Handler(BaseHTTPRequestHandler):
     def fs(self):
         self._json(200, self.app.browse(self.query.get('path')))
 
+    @route('POST', r'/api/fs/pick')
+    def fs_pick(self):
+        self._json(200, self.app.pick_native(self._body().get('start')))
+
     @route('GET', r'/api/fs/thumb')
     def fs_thumb(self):
         self._file(self.app.fs_thumb(self.query.get('path', ''), int(self.query.get('w', 200))), cache=False)
