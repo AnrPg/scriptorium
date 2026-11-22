@@ -1,0 +1,13 @@
+/* Design tokens shared by the app (app.css) and the page output (preview.css — in-app preview AND the PDF
+   export): one palette, so the preview and the exported document use the same colours. */
+:root{
+  --bg:#f7f7f5; --panel:#fff; --fg:#1c1c1e; --mut:#6b6b70; --line:#e2e2de; --line2:#d0d0cb; --hover-line:#a9a9a3;
+  --soft:#f6f6f3; --soft2:#fcfcfa; --soft3:#fafaf8;
+  --acc:#2457d6; --acc-weak:#e8eefc; --acc-line:#bcd0fb; --ok:#0f7b45; --ok-weak:#e3f5ea; --warn:#a15c07; --warn-weak:#fdf1dc;
+  --bad:#b42318; --bad-weak:#fde7e5; --multi:#7e22ce; --multi-weak:#faf4ff; --mate:#c2410c; --accepted:#38bdf8;
+  --excluded:#a8a29e; --sync:#0891b2; --sync-weak:rgba(8,145,178,.14); --sync-strong:rgba(8,145,178,.20);
+  --box-line:#c9c9c1; --box-bg:#fafaf7; --note:#b45309; --note-weak:#fef3c7;
+  --fam-worked:#0f766e; --fam-practice:#1d4ed8; --fam-part:#7c3aed; --fam-theory:#b45309; --fam-aside:#be185d;
+  --fam-activity:#15803d; --fam-frame:#475569; --fam-insert:#0e7490;
+  --r:8px; --sh:0 1px 2px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.06);
+}

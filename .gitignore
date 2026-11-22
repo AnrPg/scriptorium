@@ -1,0 +1,18 @@
+# Environments, models and caches (recreated by `python -m scientific_ocr install`)
+.venvs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Local data: books, engine outputs, logs (copyrighted sources and large; never committed)
+library/
+smoke/
+logs/
+ch5/
+chem/
+doctor_report.json
+
+# Local Claude Code settings
+.claude/settings.local.json

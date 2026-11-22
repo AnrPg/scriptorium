@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "document_id": "example-chapter-5",
+  "source": {
+    "path": "~/Documents/CHAPTER_5.pdf",
+    "sha256": "EXAMPLE_NOT_A_REAL_DIGEST",
+    "page_count": 24
+  },
+  "run": {
+    "parser_versions": {"marker": "RECORD_AT_RUNTIME", "docling": "RECORD_AT_RUNTIME"},
+    "mode": "local-only"
+  },
+  "pages": [{"page": 5, "width_pt": 612, "height_pt": 792}],
+  "blocks": [
+    {
+      "id": "p5_par1",
+      "page": 5,
+      "kind": "paragraph",
+      "reading_order": 1,
+      "geometry": {"bbox": [80, 100, 500, 170], "units": "pt", "origin": "TOPLEFT"},
+      "chosen": {"format": "text", "value": "Παράδειγμα κειμένου."},
+      "candidates": [{"engine": "docling", "raw_pointer": "#/texts/17"}],
+      "review": "not_needed"
+    },
+    {
+      "id": "p5_lewis1",
+      "page": 5,
+      "kind": "lewis_structure",
+      "reading_order": 2,
+      "geometry": {"bbox": [120, 210, 440, 400], "units": "pt", "origin": "TOPLEFT"},
+      "chosen": {"format": "image_only", "value": null},
+      "source_crop": {
+        "path": "assets/p5_lewis1.png",
+        "page": 5,
+        "bbox": [110, 200, 450, 410],
+        "dpi": 300,
+        "sha256": "EXAMPLE_ASSET_HASH"
+      },
+      "candidates": [
+        {"engine": "molscribe", "value_type": "SMILES", "value": "PARTIAL_ONLY", "not_authoritative": true}
+      ],
+      "reasons": ["CHEM_LEWIS_DOTS_NOT_REPRESENTABLE"],
+      "review": "image_only"
+    }
+  ],
+  "findings": [{"page": 5, "type": "STRUCTURE_IMAGE_ONLY", "severity": "warning", "block_ids": ["p5_lewis1"]}],
+  "release_status": "LLM_READY_WITH_EXCERPTS"
+}

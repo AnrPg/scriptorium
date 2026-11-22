@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scientific OCR</title>
+<link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/preview.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#/">Scientific OCR</a>
+  <div class="nav-hist" role="group" aria-label="Ιστορικό πλοήγησης">
+    <button class="icon" id="btn-back" aria-label="Πίσω" disabled>←</button>
+    <button class="icon" id="btn-fwd" aria-label="Εμπρός" disabled>→</button>
+  </div>
+  <nav class="crumbs" id="crumbs" aria-label="Διαδρομή"></nav>
+  <div class="top-actions">
+    <div id="undo-redo" class="undo-redo" hidden>
+      <button class="icon" id="btn-undo" title="Αναίρεση (⌘Z)" aria-label="Αναίρεση">↶</button>
+      <button class="icon" id="btn-redo" title="Επανάληψη (⇧⌘Z)" aria-label="Επανάληψη">↷</button>
+    </div>
+    <button class="jobs-pill" id="jobs-pill" hidden aria-haspopup="true"></button>
+    <button class="icon" id="btn-help" title="Συντομεύσεις (?)" aria-label="Συντομεύσεις">?</button>
+  </div>
+</header>
+<div id="jobs-pop" class="popover" hidden></div>
+<main id="view" tabindex="-1"></main>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<div id="drop" class="drop-overlay" hidden><div>Άφησε εδώ PDF ή φάκελο με σαρωμένες σελίδες</div></div>
+<script src="/static/vendor/katex/katex.min.js"></script>
+<script src="/static/vendor/katex/contrib/mhchem.min.js"></script>
+<script src="/static/vendor/katex/contrib/auto-render.min.js"></script>
+<script src="/static/render-math.js"></script>
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>
