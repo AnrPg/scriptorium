@@ -1091,3 +1091,16 @@ def test_native_picker_items_are_described_and_confined_to_home(tmp_path, monkey
     assert r['items'][2]['dir'] == str((home / 'scans').resolve()) and r['outside_home'] == [str(tmp_path / 'x.pdf')]
     monkeypatch.setattr(os_picker, 'available', lambda: False)
     assert App(Library(tmp_path / 'lib2'), FakeJobs()).pick_native() == {'available': False, 'items': []}
+
+
+def test_progress_names_the_careful_phase_and_its_pages(tmp_path):
+    """The automatic careful re-examination reports its own phase and pages (the UI names it and marks them);
+    the final 'done' report carries no phase."""
+    from scientific_ocr.adapters.storage import read_json
+    from scientific_ocr.application.processing import progress_for
+    careful = progress_for(tmp_path, 'process', phase='diligent', phase_pages=[3, 7])
+    careful('extract', 1, 2, engine='marker', page=7)
+    p = read_json(tmp_path / 'progress.json')
+    assert p['phase'] == 'diligent' and p['phase_pages'] == [3, 7] and p['page'] == 7 and p['step'] == 'extract'
+    progress_for(tmp_path, 'process')('done', 1, 1, code=0)
+    assert 'phase' not in read_json(tmp_path / 'progress.json')

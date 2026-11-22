@@ -1,4 +1,4 @@
-import { renderBook } from '../book/book.js';
+import { carefulLabel, carefulPages, renderBook } from '../book/book.js';
 import { B, api } from '../core/api.js';
 import { $, clear, h, isActiveJob, isTyping } from '../core/dom.js';
 import { loadBook, loadPage, navRecord, renderNav, screenTitle } from '../core/nav.js';
@@ -56,7 +56,8 @@ export async function poll() {
 export function renderJobsPill() {
   const active = S.jobs.filter(isActiveJob), pill = $('#jobs-pill');
   pill.hidden = !active.length; clear(pill);
-  if (active.length) pill.append(h('span', { class: 'spin' }), active.length === 1 ? active[0].label : `${active.length} εργασίες`);
+  const label = (j) => (S.book && j.book === S.book.id && carefulPages(S.book).size) ? carefulLabel(carefulPages(S.book).size) : j.label;
+  if (active.length) pill.append(h('span', { class: 'spin' }), active.length === 1 ? label(active[0]) : `${active.length} εργασίες`);
 }
 export function renderJobsPop() {
   const p = clear($('#jobs-pop'));

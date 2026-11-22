@@ -33,12 +33,14 @@ STEPS = {
 }
 
 
-def progress_for(out: Path, kind: str):
+def progress_for(out: Path, kind: str, **context):
+    """A progress reporter for one run of `kind`. `context` is written with every report, e.g. the phase of a
+    run (phase='diligent', phase_pages=[...]) so the UI can name it and mark its pages."""
     steps = STEPS[kind]
 
     def report(step: str, index: int = 0, total: int = 1, **detail):
         extraction.write_progress(out, kind=kind, steps=steps, step=step, stage=step, index=index, total=total,
-                                  **detail)
+                                  **context, **detail)
     return report
 
 
@@ -155,8 +157,10 @@ def process(out: Path, pdf: Path | None = None, pages_spec: str | None = None, l
         es = EventStore(out)
         es.append(*[{'type': 'page_profile', 'page': p, 'profile': 'diligent', 'auto': True} for p in retry],
                   actor='system:auto-diligent')
-        extract_pages(out, retry, log, progress)
-        code = projection.build(out, log, progress=progress)
+        careful = progress_for(out, 'process', phase='diligent', phase_pages=retry)
+        careful('extract', 0, len(retry))
+        extract_pages(out, retry, log, careful)
+        code = projection.build(out, log, progress=careful)
     progress('done', 1, 1, code=code)
     return code
 

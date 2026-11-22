@@ -1,4 +1,4 @@
-import { renderBook } from '../book/book.js';
+import { carefulPages, renderBook } from '../book/book.js';
 import { ENT, entName, famName, famOf } from '../book/entities.js';
 import { B, api } from '../core/api.js';
 import { refresh } from '../core/chrome.js';
@@ -174,6 +174,7 @@ export function tabPages(body) {
     show.length ? h('button', { class: 'ghost', title: 'Επιλογή όλων των σελίδων που φαίνονται (με το τρέχον φίλτρο)', onclick: () => {
       for (const p of show) allSel ? S.selPages.delete(p.page) : S.selPages.add(p.page); renderBook(); } }, allSel ? 'Αποεπιλογή όλων' : `Επιλογή όλων (${show.length})`) : null));
   const grid = h('div', { class: 'grid' });
+  const careful = carefulPages(b), now = (b.progress || {}).page;
   for (const p of show) {
     const cb = h('input', { type: 'checkbox', 'aria-label': `Επιλογή σελίδας ${p.page}`, onclick: (e) => {
       e.stopPropagation();
@@ -186,7 +187,10 @@ export function tabPages(body) {
     grid.append(h('div', { class: 'thumb' + (S.selPages.has(p.page) ? ' sel' : '') + (p.state === 'removed' ? ' removed' : ''), onclick: () => go(`#/b/${b.id}/p/${p.page}`) },
       h('img', { src: `${B(b.id)}/pages/${p.page}/image?w=300`, loading: 'lazy', alt: `Σελίδα ${p.page}` }), cb,
       h('div', { class: 'meta' }, h('span', {}, `σελ. ${p.page}`),
-        h('span', { class: 'chip st-' + p.state }, p.state === 'needs_review' ? `${p.required} για έλεγχο` : STATE_EL[p.state]))));
+        careful.has(p.page)
+          ? h('span', { class: 'chip st-rechecking', title: 'Προσεκτική επανεξέταση σε εξέλιξη (πολλά προβλήματα διάταξης)· οι αποφάσεις σε αυτή τη σελίδα θα ξαναζητηθούν όταν έρθει το νέο αποτέλεσμα' },
+              p.page === now ? h('span', { class: 'spin' }) : null, 'Επανεξετάζεται')
+          : h('span', { class: 'chip st-' + p.state }, p.state === 'needs_review' ? `${p.required} για έλεγχο` : STATE_EL[p.state]))));
   }
   body.append(grid);
   if (S.selPages.size) {
