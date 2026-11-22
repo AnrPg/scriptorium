@@ -1,12 +1,15 @@
-# Scientific Textbook OCR — Claude Code implementation kit
+# Scriptorium
 
-**Mission:** Convert scanned Greek/English course textbooks into a faithful, auditable, multimodal document (canonical JSON + Markdown + source-image excerpts) entirely locally. Prioritize coverage, chemistry/physics/math fidelity, and low code complexity.
+**Offline, modular pipeline that prepares scanned Greek/English textbooks for RAG.** Local AI models extract, tag
+and annotate; anything uncertain stays as a cropped image excerpt of the original page and goes to a local review UI.
+
+**Mission:** Convert scanned Greek/English course textbooks into a faithful, auditable, multimodal document (canonical JSON + Markdown + source-image excerpts) entirely locally, as input for a RAG/agent system. Prioritize coverage, scientific fidelity (math, physics, chemistry, biology), and low code complexity.
 
 **Models to INSTALL UP FRONT:** Marker, Docling, UniMERNet, MolScribe, RxnScribe. Their dependencies and local weights are installed/downloaded during setup, not introduced as surprise later phases. Installing does **not** mean every model runs for every page. The specialized models are dispatched only for relevant regions.
 
 **Absolute requirement:** Anything not confidently and faithfully parsed **remains as a cropped excerpt from the source PDF** at its approximate reading position, with a clear `image_only` / `review_required` label. Never silently drop it or hallucinate a textual transcription. If an unparsed area's extent is uncertain, show a larger safe crop (up to the whole page) rather than risk omitting information.
 
-This ZIP is an **implementation specification and setup scaffold for Claude Code**, not a finished, validated PDF converter. It is written for your Mac in `~/Documents/MyApps/` and the test PDF `~/Documents/CHAPTER_5.pdf`.
+The repository started as an implementation specification for Claude Code (the `*.md` planning documents below) and now contains the working application (`scientific_ocr/`). It is not a validated, error-free converter: outputs carry review statuses and nothing is called verified without human/source validation.
 
 ## Contents
 
@@ -76,21 +79,48 @@ paragraph around a figure) are offered as one-click "merge & re-OCR" suggestions
 re-extracts a whole page with forced OCR at higher resolution. Any segment, flagged or not, can be reported
 wrong with a note → it is re-OCR'd as a region and stays in review with the note.
 
-### Architecture (ports & adapters, event sourcing, pipes & filters)
+### Architecture
+
+**Patterns.** Hexagonal (ports & adapters) in layers, event sourcing for all human input with rebuilt projections
+(CQRS-style reads), and pipes & filters for the projection stages.
+
 ```
 scientific_ocr/
-  core/         pure domain: geometry, text/symbol comparison, chemistry keys, book rules, reason registry, model
-  ports.py      the few interfaces the pipeline depends on (SpecializedRunner, Log)
-  adapters/     engines (extraction, specialized models, engine JSON), pdf, storage (Book/Library), event store,
-                http (thin route table + static UI)
+  core/         pure domain: geometry, text/symbol comparison, chemistry keys, book rules, reason registry,
+                event vocabulary (core/decisions.py), vocabulary of entity types
+  ports.py      the few interfaces the pipeline depends on (SpecializedRunner, Progress, NoteInterpreter, PageImaging, Log)
+  adapters/     engines (extraction, specialized models, engine JSON), pdf/imaging, storage (Book/Library),
+                event store, local LLM, http (thin route table + static ES-module UI, no build step)
   pipeline/     projection stages: context, align, page assembly, checks (strategy registry), coverage, captions,
-                enrich, overlay (command handlers), flow, audit, markdown, exports, report, project (orchestrator)
-  application/  use cases (services), job queue (heavy/light lanes, cancellable), processing
-  cli.py        composition root
+                document structure, sections, entities, notation, overlay (command handlers), audit, markdown, exports
+  application/  use cases (application/use_cases/*), job queue, processing, projection orchestration
+  cli.py        composition root (the only place adapters are wired to use cases)
 ```
-Dependency rule (enforced by `tests/test_application.py::test_dependency_rule`): core imports nothing outside
-core; pipeline never imports application. What every flag means (review level, crop, finding, Greek/English
-text) is defined once in `core/reasons.py`.
+
+- **Dependency rule.** Dependencies point inward: `core` imports nothing outside core; `pipeline` sees only `core` and
+  `ports.py` (all I/O is injected); adapters never import `application` (except the driving HTTP adapter, which
+  calls use cases). Enforced by `tests/test_application.py::test_dependency_rule`.
+- **Event sourcing.** Raw engine output and the source PDF are immutable. Every human action (decisions, book rules,
+  regions, groups, merges, entity tags, page removal, undo/redo) is appended to the book's `events.jsonl`; event
+  schemas are defined once in `core/decisions.py` and validated on append. `canonical.json`, `chapter.md` and every
+  export are a projection rebuilt from raw + effective events, so review never blocks processing, nothing is lost,
+  and undo restores exactly. Decisions name the machine output they judged (`prev_hash`) and go *stale* if it changes.
+- **Command pattern.** Every review decision is a command with its own validator and handler
+  (`pipeline/overlay.py`, `COMMANDS`); services only produce validated events.
+- **Strategy registry for checks.** Content checks only observe and raise *reasons* (`pipeline/checks.py`); what a
+  reason means (review level, crop visibility, audit finding, Greek/English text) is defined once in `core/reasons.py`.
+- **Unit of work.** A bulk action is one event group, i.e. one undo step (`ServiceBase._batch`).
+- **Job queue (producer/consumer).** A *heavy* lane runs one extraction at a time; a *light* lane per book coalesces
+  many clicks into one re-projection. Jobs run in subprocesses (cancellable process groups) and are resumable.
+- **Content-addressed caches.** Every expensive step is keyed by the hash of its inputs (PDF, page, engine version,
+  arguments), so re-runs resume where they stopped and settings changes recompute only what they affect.
+
+**Principles that go with it.**
+- Book-specific knowledge is *data* (book rules and events), never code; fixes are generic and root-cause.
+- Book conventions are calibrated, checked *hints*, not hard rules.
+- Local models (LLM/VLM) only *propose*; proposals are reviewable and never become authoritative OCR.
+- The original scan wins over every interpretation; OCR and excerpts never render a page below the scan's own pixel
+  density.
 
 ### Key root-cause fixes (book-independent)
 * Symbol errors are detected by **cross-engine evidence**: tokens Marker and Docling read differently, classified
