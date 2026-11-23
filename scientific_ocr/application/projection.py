@@ -30,7 +30,7 @@ from ..adapters.storage import (
 from ..core import joblog, lineage
 from ..core.decisions import event_pages, page_of
 from ..core.reasons import flag
-from ..core.model import content_hash, page_summary, release_status
+from ..core.model import block_id, content_hash, page_summary, release_status
 from ..pipeline import (
     audit,
     captions,
@@ -283,19 +283,51 @@ def _apply_decisions(blocks, pages, contexts, inp: _Inputs):
     text). Decisions on boxes the reviewer later replaced or hid are superseded by that action, not stale."""
     human, sha = inp.human, inp.src['sha256']
     merged_ids = {merge.merged_id(sha, m) for m in human['merges']}
-    result = overlay.apply(blocks, [d for d in human['decisions'] if d['block_id'] not in merged_ids])
+    into = {mid: merge.merged_id(sha, m) for m in human['merges'] for mid in m['members']}   # part -> merged segment
+    # A decision ON a merged segment, or REFERRING to one (a caption linked to a merged figure, a move next to a
+    # merged block), applies once the merge exists. A RELATIONAL decision on a part (caption link, role, move,
+    # in/out of output) follows the part into the merged segment; content decisions on parts stay before the
+    # merge (the parts contribute their reviewed text).
+    def follow(d):
+        if d['action'] in RELATIONAL:
+            d = {**d, 'block_id': into.get(d['block_id'], d['block_id'])}
+        return {**d, **{k: into.get(d[k], d[k]) for k in ('figure_id', 'after', 'before') if d.get(k)}}
+    decisions = [follow(d) for d in human['decisions']]
+    replaced = {x['block_id'] for p in pages for x in p.get('replaced_by_region', []) + p.get('hidden', [])}
+    replaced |= removed_by_reviewer(human, sha)
+    # superseded: the segment or its target was removed by a later action of yours, or a merge made them ONE
+    gone = lambda d: d['block_id'] in replaced or any(d.get(k) in replaced or d.get(k) == d['block_id']
+                                                      for k in ('figure_id', 'after', 'before'))
+    after_merge = lambda d: bool({d['block_id'], d.get('figure_id'), d.get('after'), d.get('before')} & merged_ids)
+    result = overlay.apply(blocks, [d for d in decisions if not after_merge(d)], gone)
     merges = merge.apply(blocks, human['merges'], sha, lambda p, bid, bb: contexts[p].crop(bid, bb, pad=4), pages)
-    later = overlay.apply(blocks, [d for d in human['decisions'] if d['block_id'] in merged_ids])
+    later = overlay.apply(blocks, [d for d in decisions if after_merge(d)], gone)
     for k in ('applied', 'stale', 'ignored', 'resolved_by_overlap'):
         result[k] = result[k] + later[k]
-    replaced = {x['block_id'] for p in pages for x in p.get('replaced_by_region', []) + p.get('hidden', [])}
-    result['superseded'] = [x for x in result['stale'] if x['block_id'] in replaced] + result['ignored']
-    result['stale'] = [x for x in result['stale'] if x['block_id'] not in replaced]
+    result['superseded'] = result['ignored']                  # replaced by a later decision, or by your later action
     order: dict[int, int] = {}
     for b in blocks:                                  # reading order after possible reordering decisions
         order[b['page']] = order.get(b['page'], 0) + 1
         b['reading_order'] = order[b['page']]
     return result, merges
+
+
+RELATIONAL = {'associate_caption', 'detach_caption', 'set_caption_role', 'move_after_block', 'set_output'}
+
+
+def removed_by_reviewer(human: dict, sha: str) -> set[str]:
+    """Segments that no longer exist because of a LATER reviewer action: hidden boxes, parts merged into
+    another segment, segments of regions or merges the reviewer removed (or undid). A decision on such a
+    segment is SUPERSEDED by that action — it is not stale and does not send anything back to review."""
+    out = set(human['hidden']) | {mid for m in human['merges'] for mid in m['members']}
+    live_regions = {r['id'] for r in human['regions']}
+    live_merges = {m['id'] for m in human['merges']}
+    for e in human['history']:
+        if e['type'] == 'region_add' and e['region']['id'] not in live_regions:
+            out.add(block_id(sha, int(e['region']['page']), 'region:' + e['region']['id']))
+        elif e['type'] == 'merge_add' and e['merge']['id'] not in live_merges:
+            out.add(merge.merged_id(sha, e['merge']))
+    return out
 
 
 def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None) -> dict:

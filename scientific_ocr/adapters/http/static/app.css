@@ -224,7 +224,7 @@ svg.links .link.inferred{stroke:#a3a3a3}svg.links .link.sel{stroke:var(--acc);st
 
 .ws-box.mate{outline:2px dotted var(--mate);outline-offset:2px}
 .dd{position:fixed;z-index:70;width:330px;max-height:60vh;display:flex;flex-direction:column;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);padding:8px}
-.dd-head{display:flex;flex-direction:column;gap:6px;font-size:13px}.dd-list{overflow:auto}
+.dd-head{display:flex;flex-direction:column;gap:6px;font-size:13px}.dd-list{overflow:auto;min-height:0;flex:1 1 auto;overscroll-behavior:contain}
 .dd-sec{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:6px 4px 2px}
 .dd-item{display:flex;justify-content:space-between;gap:6px;padding:5px 8px;border-left:3px solid transparent;border-radius:4px;cursor:pointer;font-size:13px}
 .dd-item:hover,.dd-item.on{background:var(--acc-weak)}

@@ -108,3 +108,6 @@ def _carry_caption_links(blk, members, by_id):
     own_caps = [c for b in members for c in b['relations'].get('captions', []) if c not in ids]
     if own_caps:
         blk['relations']['captions'] = list(dict.fromkeys(own_caps))
+    for c in by_id.values():                          # BOTH sides: captions of the parts now belong to the merged block
+        if c['relations'].get('caption_for') in ids and c['id'] not in ids:
+            c['relations']['caption_for'] = blk['id']

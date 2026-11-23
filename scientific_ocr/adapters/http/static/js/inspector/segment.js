@@ -217,7 +217,8 @@ function propertiesCard(blk, book, decide, seg, rerender) {
   const ents = (blk.entities || []).filter(e => !(e.family === 'insert' && e.source === 'detected' && !e.verified));
   const FIGURISH = ['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table'];
   // text read as a paragraph/heading may really be a caption: offer the link when the page has something to caption
-  const mayBeCaption = ['paragraph', 'heading'].includes(blk.kind) && (S.page?.blocks || []).some(b => FIGURISH.includes(b.kind) || ['math', 'chemical_reaction'].includes(b.kind));
+  // any text segment may be a caption (same rule as pipeline/overlay.py _associate_caption)
+  const mayBeCaption = blk.kind !== 'caption' && !FIGURISH.includes(blk.kind) && !['math', 'chemical_reaction'].includes(blk.kind) && (S.page?.blocks || []).some(b => FIGURISH.includes(b.kind) || ['math', 'chemical_reaction'].includes(b.kind));
   const captionish = blk.kind === 'caption' || (blk.relations?.captions || []).length || FIGURISH.includes(blk.kind) || mayBeCaption;
   const owner = blk.relations?.caption_for && S.page.blocks.find(x => x.id === blk.relations.caption_for);
   const levelSel = ['heading', 'paragraph'].includes(blk.kind) ? (() => {

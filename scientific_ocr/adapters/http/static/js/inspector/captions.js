@@ -10,7 +10,8 @@ export function captionPanel(blk) {
   const book = S.book, byId = Object.fromEntries(S.page.blocks.map(b => [b.id, b]));
   const decide = (action, extra, msg) => act(() => api(`${B(book.id)}/decide`, { body: { block_id: blk.id, action, ...extra } }), msg);
   const startLink = (mode) => { S.linking = { mode, from: blk.id }; toast(mode === 'caption->figure' ? 'Κάνε κλικ στο σχήμα ή στην εξίσωση που ανήκει η λεζάντα (Esc: άκυρο)' : 'Κάνε κλικ στη λεζάντα που ανήκει σε αυτό (Esc: άκυρο)'); renderWorkspace(); };
-  if (blk.kind === 'caption' || ['heading', 'paragraph'].includes(blk.kind)) {
+  const FIG = ['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table', 'math', 'chemical_reaction'];
+  if (blk.kind === 'caption' || !FIG.includes(blk.kind)) {        // any text segment may be linked as a caption
     const owner = byId[blk.relations?.caption_for];
     if (blk.kind !== 'caption' && !owner) return h('details', {}, h('summary', {}, 'Λεζάντα'), h('div', {},
       h('p', { class: 'small mut' }, 'Αν αυτό το τμήμα είναι λεζάντα (π.χ. «Σχήμα 4.9»), σύνδεσέ το με το σχήμα του.'),

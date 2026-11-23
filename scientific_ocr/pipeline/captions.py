@@ -92,6 +92,7 @@ def _docling_links(figs, caps, docling_blocks) -> dict:
 def finalize(blocks: list[dict]):
     """After reviewer decisions: label and role come from the FINAL content (a corrected caption must not keep
     the role derived from a misread), unless the reviewer set the role explicitly."""
+    reconcile(blocks)
     pos = {b['id']: i for i, b in enumerate(blocks)}
     for f in blocks:                                  # caption parts follow the (possibly reviewer-changed) reading order
         if f['relations'].get('captions'):
@@ -103,6 +104,27 @@ def finalize(blocks: list[dict]):
             cap['caption_role'] = 'title' if label and len(rest) < 3 else 'text'
         if not cap['relations'].get('caption_for'):
             flag(cap, 'CAPTION_WITHOUT_FIGURE')
+
+
+def reconcile(blocks: list[dict]) -> None:
+    """ONE source of truth for caption links: the caption's own `caption_for`. Every stage (geometry, reviewer
+    decisions, merges, captions across pages) may set it; the figures' caption lists are then DERIVED from it, so
+    a caption can never be listed under one figure while pointing to another (shown twice) or point to a segment
+    that no longer exists (shown as 'no figure'). A link to a vanished segment is dropped (and flagged later)."""
+    by_id = {b['id']: b for b in blocks}
+    owner = {}
+    for b in blocks:
+        f = b['relations'].get('caption_for')
+        if f and (f not in by_id or f == b['id']):
+            b['relations']['caption_for'] = None
+            f = None
+        if f:
+            owner[b['id']] = f
+    for f in blocks:
+        old = f['relations'].get('captions') or []
+        mine = [c for c in old if owner.get(c) == f['id']] + [c for c, o in owner.items() if o == f['id'] and c not in old]
+        if mine or 'captions' in f['relations']:
+            f['relations']['captions'] = list(dict.fromkeys(mine))
 
 
 def _attach(cap, fig, inferred: bool, source: str = 'geometry'):

@@ -13,7 +13,7 @@ from typing import Callable
 
 from ..core.decisions import CONTENT_ACTIONS, VALUE_ACTIONS, VALUE_DECISIONS
 from ..core.geometry import covered_by
-from ..core.model import EQUATION_KINDS, MAX_HEADING_LEVEL, content_hash
+from ..core.model import CAPTIONABLE_KINDS, EQUATION_KINDS, MAX_HEADING_LEVEL, content_hash
 from ..core.reasons import flag
 from ..core.symbols import strip_math_delimiters
 
@@ -81,7 +81,9 @@ def _revert(b, d, ctx):
 
 def _associate_caption(b, d, ctx):
     f = ctx['by_id'].get(d.get('figure_id'))
-    if f is None or b['kind'] not in ('caption', 'paragraph', 'heading') or f['page'] != b['page']:
+    # any text segment may be a caption (paragraph, heading, list item, an excerpt the reviewer transcribed…),
+    # but not a figure/table/formula itself
+    if f is None or b['kind'] in CAPTIONABLE_KINDS | EQUATION_KINDS or f is b or f['page'] != b['page']:
         raise Stale('caption/figure missing')
     b['kind'] = 'caption'
     old = ctx['by_id'].get(b['relations'].get('caption_for'))
@@ -292,8 +294,10 @@ def select_content(decisions: list[dict]) -> tuple[dict, list[dict]]:
     return chosen, superseded
 
 
-def apply(blocks: list[dict], decisions: list[dict]) -> dict:
-    """Effective content decision per block (see select_content); structure decisions apply in sequence."""
+def apply(blocks: list[dict], decisions: list[dict], superseded=lambda d: False) -> dict:
+    """Effective content decision per block (see select_content); structure decisions apply in sequence.
+    `superseded(d)`: the decision's segment (or target) was removed by a LATER reviewer action — such a decision
+    is recorded as superseded, never flagged stale (nothing goes back to review because of it)."""
     by_id = {b['id']: b for b in blocks}
     ctx = {'blocks': blocks, 'by_id': by_id}
     latest_content, ignored = select_content(decisions)
@@ -313,7 +317,11 @@ def apply(blocks: list[dict], decisions: list[dict]) -> dict:
             b.setdefault('decisions', []).append({k: d[k] for k in ('seq', 'ts', 'actor', 'action', 'via') if k in d})
             applied.append(d['seq'])
         except Stale as exc:
-            stale.append({'seq': d['seq'], 'block_id': d['block_id'], 'action': d['action'], 'why': str(exc)})
+            rec = {'seq': d['seq'], 'block_id': d['block_id'], 'action': d['action'], 'why': str(exc)}
+            if superseded(d):
+                ignored.append({**rec, 'why': 'superseded by a later reviewer action'})
+                continue
+            stale.append(rec)
             if b is not None:
                 flag(b, 'DECISION_STALE', seq=d['seq'], why=str(exc))
     resolved = _propagate(blocks)

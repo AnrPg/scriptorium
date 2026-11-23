@@ -23,7 +23,11 @@ export function dropdown(anchor, sections, onPick, header) {
   const r = anchor.getBoundingClientRect();
   const q = h('input', { type: 'search', placeholder: 'Αναζήτηση…' });
   const list = h('div', { class: 'dd-list' });
-  const dd = h('div', { class: 'dd', style: { left: Math.min(r.left, innerWidth - 340) + 'px', top: Math.min(r.bottom + 4, innerHeight - 320) + 'px' } }, header || null, q, list);
+  const dd = h('div', { class: 'dd', style: { left: Math.max(8, Math.min(r.left, innerWidth - 340)) + 'px' } }, header || null, q, list);
+  // open where there is room: below the anchor, or above it when the space below is short; the list scrolls inside
+  const below = innerHeight - r.bottom - 12, above = r.top - 12;
+  if (below >= 280 || below >= above) { dd.style.top = (r.bottom + 4) + 'px'; dd.style.maxHeight = Math.max(160, below) + 'px'; }
+  else { dd.style.bottom = (innerHeight - r.top + 4) + 'px'; dd.style.maxHeight = Math.max(160, above) + 'px'; }
   let items = [], idx = 0;
   const paint = () => { clear(list); items = [];
     for (const sec of sections) {
@@ -32,7 +36,8 @@ export function dropdown(anchor, sections, onPick, header) {
       list.append(h('div', { class: 'dd-sec', style: { color: sec.color || 'var(--mut)' } }, sec.title));
       for (const it of its) { const i = items.length; items.push(it);
         list.append(h('div', { class: 'dd-item' + (i === idx ? ' on' : ''), style: { borderLeftColor: sec.color || 'transparent' }, onmousedown: (e) => { e.preventDefault(); close(); onPick(it); } },
-          h('span', {}, it.label), it.hint ? h('code', { class: 'mut small' }, it.hint) : null)); } } };
+          h('span', {}, it.label), it.hint ? h('code', { class: 'mut small' }, it.hint) : null)); } }
+    list.querySelector('.dd-item.on')?.scrollIntoView({ block: 'nearest' }); };
   const close = () => { dd.remove(); document.removeEventListener('mousedown', outside, true); };
   const outside = (e) => { if (!dd.contains(e.target)) close(); };
   q.addEventListener('input', () => { idx = 0; paint(); });

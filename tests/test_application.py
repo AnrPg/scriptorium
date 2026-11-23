@@ -1233,3 +1233,65 @@ def test_page_local_actions_rebuild_only_their_page_as_a_preview(app):
     assert a.page('run', 1)['preview'] is None and not list((out / 'cache' / 'page_preview').glob('*.json'))
     c, _ = load(out)
     assert next(b for b in c['blocks'] if b['id'] == blk['id'])['chosen']['text'] == 'fixed text'
+
+
+def test_dismissed_structure_suggestion_leaves_the_page_list_at_once(app):
+    """A dismissal is book-wide (banked in a slow book until the full rebuild), yet the page's suggestion list
+    drops it immediately; undoing the dismissal brings it back, still without a rebuild."""
+    import json
+    a, out = app
+    (out / 'cache').mkdir(exist_ok=True)
+    (out / 'cache' / 'build.json').write_text(json.dumps({'seconds': 400}))      # slow book: actions are banked
+    c = json.loads((out / 'canonical.json').read_text())
+    ids = [b['id'] for b in c['blocks'] if b['page'] == 1][:2]
+    sugg = {'kind': 'merge_join', 'members': ids, 'label': {'engine': 'marker', 'name': 'Text'}, 'source': 'rule',
+            'reason': 'test', 'key': 'k_test_sugg'}
+    c['pages'][0]['suggestions'] = [sugg]
+    (out / 'canonical.json').write_text(json.dumps(c))
+    assert [s['key'] for s in a.page('run', 1)['info']['suggestions']] == ['k_test_sugg']
+    a.dismiss_suggestion('run', 'k_test_sugg')
+    assert a.book('run')['pending']['count'] >= 1                                  # banked, not rebuilt
+    assert a.page('run', 1)['info']['suggestions'] == []
+    a.undo('run')
+    assert [s['key'] for s in a.page('run', 1)['info']['suggestions']] == ['k_test_sugg']
+
+
+def test_caption_links_have_one_source_of_truth():
+    """A caption's caption_for is the truth; figures' lists are derived: no caption listed under one figure while
+    pointing to another (shown twice), no link to a vanished segment (shown as 'no figure')."""
+    from scientific_ocr.pipeline import captions
+    rel = lambda **k: {'captions': [], **k}
+    blocks = [{'id': 'f1', 'kind': 'figure', 'relations': rel(captions=['c1', 'c2'])},
+              {'id': 'f2', 'kind': 'figure', 'relations': rel()},
+              {'id': 'c1', 'kind': 'caption', 'relations': rel(caption_for='f2')},      # moved to f2
+              {'id': 'c2', 'kind': 'caption', 'relations': rel(caption_for='gone')}]    # owner merged away
+    captions.reconcile(blocks)
+    by = {b['id']: b for b in blocks}
+    assert by['f1']['relations']['captions'] == [] and by['f2']['relations']['captions'] == ['c1']
+    assert by['c2']['relations']['caption_for'] is None
+
+
+def test_decisions_follow_merges_and_later_actions_supersede(app):
+    """Generic rules for decisions and merges: a caption linked to a MERGED figure is applied (not stale);
+    a decision on a segment the reviewer later hid is superseded, not sent back to review."""
+    from scientific_ocr.pipeline import merge as mergemod
+    a, out = app
+    c, _ = load(out)
+    fig = next(b for b in c['blocks'] if b['kind'] == 'figure')
+    cap = next(b for b in c['blocks'] if b['kind'] == 'caption')
+    other = next(b for b in c['blocks'] if b['page'] == fig['page'] and b['id'] not in (fig['id'], cap['id'])
+                 and b['kind'] == 'paragraph')
+    r = a.merge('run', [fig['id'], other['id']], {'engine': 'marker', 'name': 'Picture'}, mode='join')
+    assert build(out) == 0
+    c, _ = load(out)
+    merged = next(b for b in c['blocks'] if b.get('merged_from') and fig['id'] in [m['id'] for m in b['merged_from']])
+    a.decide('run', cap['id'], 'associate_caption', figure_id=merged['id'])
+    para = next(b for b in c['blocks'] if b['kind'] == 'excerpt' and not b.get('merged_from'))
+    a.decide('run', para['id'], 'mark_image_only')
+    a.hide_block('run', para['id'])                                # a later action of yours removes it
+    assert build(out) == 0
+    c, _ = load(out)
+    by = {b['id']: b for b in c['blocks']}
+    assert by[cap['id']]['relations']['caption_for'] == merged['id'] and not by[cap['id']]['relations'].get('inferred')
+    assert cap['id'] in by[merged['id']]['relations']['captions']
+    assert c['human']['stale'] == [] and not any('DECISION_STALE' in b['reasons'] for b in c['blocks'])

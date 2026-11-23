@@ -28,12 +28,18 @@ class ViewsService(ServiceBase):
         if pv:
             info = pv['info']
         blocks = [_block_view(x) for x in (pv['blocks'] if pv else [x for x in c.get('blocks', []) if x['page'] == page])]
+        st = b.events.state()
+        # A dismissal is book-wide (banked until the next full rebuild), but the reviewer's own list must drop the
+        # dismissed suggestion at once; undoing the dismissal brings it back just as fast (live event state).
+        dismissed = set(st['dismissed'])
+        view_info = {k: (info or {}).get(k) for k in ('state', 'suggestions', 'hidden', 'replaced_by_region',
+                                                       'engines', 'required', 'recommended')}
+        view_info['suggestions'] = [s for s in (view_info['suggestions'] or []) if s.get('key') not in dismissed]
         return {'page': page, 'page_count': b.page_count(), 'dims': dims, 'blocks': blocks,
                 'preview': {'applied': pv['applied'], 'built_utc': pv['built_utc']} if pv else None,
-                'info': {k: (info or {}).get(k) for k in ('state', 'suggestions', 'hidden', 'replaced_by_region',
-                                                          'engines', 'required', 'recommended')},
-                'regions': [r for r in b.events.state()['regions'] if int(r['page']) == page],
-                'profile': b.events.state()['profiles'].get(page, 'standard')}
+                'info': view_info,
+                'regions': [r for r in st['regions'] if int(r['page']) == page],
+                'profile': st['profiles'].get(page, 'standard')}
 
     def block_history(self, book_id: str, block_id: str) -> dict:
         """Every version a segment has had: machine readings, model proposals, reviewer decisions (incl. undone)."""
