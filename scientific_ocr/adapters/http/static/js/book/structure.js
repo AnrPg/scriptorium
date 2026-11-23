@@ -1,7 +1,7 @@
 import { structureReviewPanel } from '../book/quality.js';
 import { renderBook } from '../book/book.js';
 import { B, actor, api } from '../core/api.js';
-import { doRedo, doUndo, refresh, removeJobButton, showLog } from '../core/chrome.js';
+import { doRedo, doUndo, listed, refresh, removeJobButton, showLog } from '../core/chrome.js';
 import { $, clear, h, isActiveJob } from '../core/dom.js';
 import { S, go, sym } from '../core/state.js';
 import { EV_EL, SRC_EL, infoTip } from '../core/strings.js';
@@ -78,7 +78,7 @@ export async function tabHistory(body) {
     h('span', { class: 'grow' }, (EV_EL[e.type] || (x => x.type))(e))));
   body.append(h('h2', { style: { marginTop: '24px' } }, 'Εργασίες'));
   const jc = h('div', { class: 'card' }); body.append(jc);
-  for (const j of S.book.jobs) jc.append(h('div', { class: 'list-item', style: { cursor: 'default' } }, h('span', { class: 'grow' }, j.label),
+  for (const j of S.book.jobs.filter(listed)) jc.append(h('div', { class: 'list-item', style: { cursor: 'default' } }, h('span', { class: 'grow' }, j.label),
     h('span', { class: 'small mut' }, new Date(j.created * 1000).toLocaleString('el-GR')), h('span', { class: 'chip' }, j.state), h('button', { class: 'ghost', onclick: () => showLog(j) }, 'Σύνοψη'),
     isActiveJob(j) ? null : removeJobButton(j, () => renderBook())));
   if (S.book.jobs.some(j => !isActiveJob(j))) jc.append(h('div', { class: 'row end', style: { padding: '8px' } }, h('button', { class: 'ghost small', onclick: async () => {

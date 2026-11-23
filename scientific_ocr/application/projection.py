@@ -20,6 +20,7 @@ from ..adapters import latex_render, specialized
 from ..adapters import pdf as pdfio
 from ..adapters.event_store import EventError, EventStore
 from ..adapters.storage import (
+    PREVIEW_DIR,
     CorruptFile,
     atomic_write,
     book_lock,
@@ -27,6 +28,8 @@ from ..adapters.storage import (
     read_json_strict,
 )
 from ..core import joblog, lineage
+from ..core.decisions import event_pages, page_of
+from ..core.reasons import flag
 from ..core.model import content_hash, page_summary, release_status
 from ..pipeline import (
     audit,
@@ -135,6 +138,8 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
                     release_status=canonical['release_status'], seconds=round(sum(clock.values()), 1), timings=clock))
     atomic_write(out / 'cache' / 'build.json', json.dumps({'seconds': round(sum(clock.values()), 1), 'timings': clock,
                                                          'built_utc': canonical['run']['built_utc']}))
+    for f in (out / PREVIEW_DIR).glob('p*.json'):     # the full build supersedes every page preview
+        f.unlink(missing_ok=True)
     return code
 
 
@@ -384,3 +389,118 @@ def _calibration_books(out: Path) -> list[dict]:
     """Projections of the calibration books listed in book.json ('calibrate_with': sibling book ids)."""
     ids = (read_json(out / 'book.json', {}) or {}).get('calibrate_with') or []
     return [c for bid in ids if bid != out.name and (c := read_json(out.parent / bid / 'canonical.json'))]
+
+
+# ---------------------------------------------------------------- page previews (rebuild one page at once)
+# After a PAGE-LOCAL action (core.decisions.event_pages) only that page is rebuilt: the page-local stages run on it
+# (composition, specialised models from cache, decisions, notation, LaTeX check) and the result is written as a
+# PAGE PREVIEW (cache/page_preview/pNNNN.json), never into canonical.json — the book's full projection stays
+# consistent for exports and book-wide views until the next full rebuild, which deletes the previews.
+# Book-wide fields of a segment (hierarchy, furniture, groups, entities, references, cross-page captions, triage)
+# cannot be recomputed from one page: an UNCHANGED segment is taken verbatim from the full projection; a changed
+# one keeps those fields from it (BOOK_WIDE_FIELDS / BOOK_WIDE_REASONS). A preview is valid only for the full
+# build it was made from (base = run.built_utc).
+BOOK_WIDE_FIELDS = ('role', 'excluded', 'heading_level', 'heading_level_source', 'heading_style', 'heading_hints',
+                    'heading_evidence', 'heading_shift', 'section_path', 'running_head', 'engine_rank',
+                    'style_of_numbered', 'human_style', 'model', 'typography_rel', 'flow', 'entities', 'references',
+                    'box_head', 'groups', 'review_triage')
+BOOK_WIDE_REASONS = ('EXCLUDED_AS_PAGE_FURNITURE', 'ENGINE_FURNITURE_IN_BODY', 'CAPTION_CONTINUATION',
+                     'CAPTION_ACROSS_PAGES', 'HEADING_NUMBER_DUPLICATE', 'HEADING_NUMBER_OUT_OF_ORDER',
+                     'REFERENCE_AMBIGUOUS', 'TRIAGE_DOWNGRADED', 'ACCEPTED_BY_SAMPLING')
+
+
+def preview_path(out: Path, page: int) -> Path:
+    return out / PREVIEW_DIR / f'p{page:04d}.json'
+
+
+def read_preview(out: Path, page: int, canonical: dict | None) -> dict | None:
+    """The page's preview if it was made from the current full build, else None."""
+    pv = read_json(preview_path(out, page))
+    base = ((canonical or {}).get('run') or {}).get('built_utc')
+    return pv if pv and base and pv.get('base') == base else None
+
+
+def dirty_pages(out: Path) -> list[int]:
+    """Pages with page-local actions recorded after the last full build that no valid preview includes yet."""
+    c = read_json(out / 'canonical.json') or {}
+    last = (c.get('human') or {}).get('last_seq', 0)
+    evs = EventStore(out).load()
+    by_seq = {e['seq']: e for e in evs}
+    regions = {e['region']['id']: int(e['region']['page']) for e in evs if e['type'] == 'region_add'}
+    merges_ = {e['merge']['id']: int(e['merge']['page']) for e in evs if e['type'] == 'merge_add'}
+    covered: dict[int, int] = {}
+    dirty: set[int] = set()
+    for e in evs:
+        if e['seq'] <= last:
+            continue
+        for p in event_pages(e, by_seq, regions, merges_) or ():
+            if p not in covered:
+                pv = read_preview(out, p, c)
+                covered[p] = pv['last_seq'] if pv else last
+            if e['seq'] > covered[p]:
+                dirty.add(p)
+    return sorted(dirty)
+
+
+def build_page(out: Path, page: int, log: Log = print, runner: SpecializedRunner = specialized.run) -> int:
+    """Rebuild ONE page as a preview (see above). 0 ok; 2 nothing to do (no full build yet / page not processed);
+    other codes as build()."""
+    with book_lock(out):
+        prev = read_json(out / 'canonical.json')
+        if not prev:
+            return 2
+        inp = _load_inputs(out, log)
+        if isinstance(inp, int):
+            return inp
+        if page not in inp.src['pages_processed']:
+            return 2
+        t0 = time.perf_counter()
+        one = _Inputs({**inp.src, 'pages_processed': [page]}, inp.pdf, inp.extraction, inp.regions_index, inp.human)
+        blocks, pages, contexts, _ = _compose_pages(out, one, lambda *a, **k: None)
+        enrich.enrich(out, blocks, runner, True, log)
+        _seal_machine_result(blocks)
+        sha = inp.src['sha256']
+        page_merges = [m for m in inp.human['merges'] if int(m['page']) == page]
+        ids = {b['id'] for b in blocks} | {merge.merged_id(sha, m) for m in page_merges}
+        human = {**inp.human, 'merges': page_merges, 'decisions': [d for d in inp.human['decisions'] if d['block_id'] in ids]}
+        result, _ = _apply_decisions(blocks, pages, contexts, _Inputs(one.src, one.pdf, one.extraction, one.regions_index, human))
+        notation.annotate(blocks)
+        captions.finalize(blocks)
+        old = {b['id']: b for b in prev.get('blocks', []) if b['page'] == page}
+        merged = [_preview_block(b, old.get(b['id'])) for b in blocks]
+        latex_check.annotate(merged, latex_render.check)
+        info = {**pages[0], **page_summary(merged)}
+        last = max((e['seq'] for e in inp.human['history']), default=0)
+        atomic_write(preview_path(out, page), json.dumps({
+            'base': prev['run']['built_utc'], 'page': page, 'last_seq': last, 'built_utc': datetime.now(timezone.utc).isoformat(),
+            'applied': result['applied'], 'stale': result['stale'], 'info': info, 'blocks': merged}, ensure_ascii=False))
+        log(f'page {page} preview: {len(merged)} segments, {sum(b["review"] == "required" for b in merged)} required, '
+            f'{round(time.perf_counter() - t0, 1)} s')
+        return 0
+
+
+def _same(a: dict, b: dict) -> bool:
+    seqs = lambda x: [d['seq'] for d in x.get('decisions', [])]
+    return (a.get('auto_hash') == b.get('auto_hash') and seqs(a) == seqs(b) and a['chosen'] == b['chosen']
+            and a['geometry']['bbox'] == b['geometry']['bbox'] and a['kind'] == b['kind'])
+
+
+def _preview_block(new: dict, old: dict | None) -> dict:
+    """An unchanged segment: the full projection's version (all book-wide fields exact). A changed one: the page
+    rebuild's version, keeping the book-wide fields and reasons of the full projection."""
+    if old is not None and _same(new, old):
+        return {**old, 'reading_order': new['reading_order']}
+    if old is None:
+        return {**new, 'preview_new': True}
+    out = dict(new)
+    for k in BOOK_WIDE_FIELDS:
+        if k in old:
+            out[k] = old[k]
+    for r in BOOK_WIDE_REASONS:
+        if r in old.get('reasons', []) and r not in out['reasons']:
+            flag(out, r, **((old.get('evidence') or {}).get(r) or {}))
+    rel_old, rel_new = old.get('relations') or {}, out.get('relations') or {}
+    if rel_old.get('caption_for') and not rel_new.get('caption_for') and page_of(rel_old['caption_for']) != out['page']:
+        out['relations'] = {**rel_new, 'caption_for': rel_old['caption_for']}    # a caption across pages
+    out['preview_changed'] = True
+    return out

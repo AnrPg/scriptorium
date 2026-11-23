@@ -1143,7 +1143,7 @@ def test_actions_are_banked_in_slow_books_until_rebuild(app):
     before = len(a.jobs.submitted)
     a.decide('run', blk['id'], 'replace_text', value='fixed text')
     a.add_region('run', 1, [10, 10, 200, 60], {'engine': 'marker', 'name': 'Text'})
-    assert len(a.jobs.submitted) == before                                    # nothing rebuilt yet
+    assert set(a.jobs.submitted[before:]) == {('pages', 'light')}             # only the touched pages, no full rebuild
     p = a.book('run')['pending']
     assert p['count'] >= 2 and p['ocr'] == 1 and p['estimate_s'] == 400
     rev = a.revision('run')
@@ -1200,3 +1200,36 @@ def test_approving_what_the_specialised_models_left_is_not_stale(tmp_path):
     c, _ = load(out)
     b2 = next(b for b in c['blocks'] if b['id'] == blk['id'])
     assert 'DECISION_STALE' not in b2['reasons'] and not c['human']['stale']
+
+
+def test_page_local_actions_rebuild_only_their_page_as_a_preview(app):
+    """In a slow book, a page-local action (approve, correct, image only…) is applied to ITS PAGE at once — a page
+    preview the page view and later decisions use — while canonical.json (exports, book-wide views) stays the full
+    build until a full rebuild, which supersedes the previews. Book-wide actions do not dirty any page."""
+    import json
+    from scientific_ocr.application import projection
+    from conftest import no_models
+    a, out = app
+    (out / 'cache').mkdir(exist_ok=True)
+    (out / 'cache' / 'build.json').write_text(json.dumps({'seconds': 400}))
+    canon_before = (out / 'canonical.json').read_bytes()
+    blk = next(b for b in a.page('run', 1)['blocks'] if 'SINGLE_ENGINE_DOCLING' in b['reasons'])
+    a.decide('run', blk['id'], 'replace_text', value='fixed text')
+    assert projection.dirty_pages(out) == [1]
+    assert projection.build_page(out, 1, log=lambda m: None, runner=no_models) == 0
+    assert projection.dirty_pages(out) == []
+    pg = a.page('run', 1)
+    seg = next(b for b in pg['blocks'] if b['id'] == blk['id'])
+    assert pg['preview'] and seg['chosen']['text'] == 'fixed text'                      # visible at once
+    assert (out / 'canonical.json').read_bytes() == canon_before                         # the book is untouched
+    assert set(pg['preview']['applied']) <= set(a.book('run')['pending']['page_applied'])
+    other = next(b for b in pg['blocks'] if b['id'] != blk['id'] and b['review'] in ('required', 'recommended'))
+    a.decide('run', other['id'], 'approve')                       # validated against the preview version
+    assert projection.dirty_pages(out) == [1]
+    a.assign_entity('run', [other['id']], 'example')              # book-wide: banked, no page made dirty by it
+    projection.build_page(out, 1, log=lambda m: None, runner=no_models)
+    assert projection.dirty_pages(out) == []
+    assert build(out) == 0                                                               # full rebuild
+    assert a.page('run', 1)['preview'] is None and not list((out / 'cache' / 'page_preview').glob('*.json'))
+    c, _ = load(out)
+    assert next(b for b in c['blocks'] if b['id'] == blk['id'])['chosen']['text'] == 'fixed text'

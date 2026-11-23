@@ -48,3 +48,53 @@ def event_errors(ev: dict) -> list[str]:
         elif need:
             errs += [f"decision {ev['action']}: missing {f}" for f in sorted(need - set(ev))]
     return errs
+
+
+# ---------------------------------------------------------------- scope: page or book
+# A PAGE-LOCAL action changes only what the page-local stages compute (composition, specialised models, decisions
+# on its segments, reading order, captions on the same page, regions, merges, notation): its page can be rebuilt
+# alone, at once. Anything else is BOOK-WIDE (hierarchy, groups, entities, furniture, rules, references, bulk
+# acceptance, page removal…) and waits for a full rebuild. Unknown kinds are book-wide (the safe default).
+PAGE_LOCAL_ACTIONS = {'approve', 'approve_candidate', 'replace_text', 'replace_latex', 'mark_image_only',
+                      'mark_unreadable', 'revert', 'report_wrong', 'set_output', 'move_after_block',
+                      'associate_caption', 'detach_caption', 'set_caption_role'}
+PAGE_LOCAL_EVENTS = {'region_add', 'region_remove', 'block_hide', 'block_show', 'merge_add', 'merge_remove'}
+
+
+def page_of(block_id: str | None) -> int | None:
+    """Page of a segment id (core.model.block_id: 'p<page>_<hash>')."""
+    if not block_id or not block_id.startswith('p') or '_' not in block_id:
+        return None
+    head = block_id[1:block_id.index('_')]
+    return int(head) if head.isdigit() else None
+
+
+def event_pages(ev: dict, by_seq: dict[int, dict], regions: dict[str, int], merges: dict[str, int]) -> set[int] | None:
+    """Pages a page-local event affects, or None when it is book-wide. `regions`/`merges`: id -> page (to place
+    the removal of a region or merge). Undo/redo take the scope of their targets."""
+    t = ev.get('type')
+    if t in ('undo', 'redo'):
+        out: set[int] = set()
+        for s in ev.get('targets') or []:
+            sub = event_pages(by_seq[s], by_seq, regions, merges) if s in by_seq else None
+            if sub is None:
+                return None
+            out |= sub
+        return out
+    if t == 'decision':
+        p = page_of(ev.get('block_id'))
+        return {p} if ev.get('action') in PAGE_LOCAL_ACTIONS and p else None
+    if t not in PAGE_LOCAL_EVENTS:
+        return None
+    if t == 'region_add':
+        return {int(ev['region']['page'])}
+    if t == 'region_remove':
+        p = regions.get(ev['region_id'])
+        return {p} if p else None
+    if t == 'merge_add':
+        return {int(ev['merge']['page'])}
+    if t == 'merge_remove':
+        p = merges.get(ev['merge_id'])
+        return {p} if p else None
+    p = page_of(ev.get('block_id'))                    # block_hide / block_show
+    return {p} if p else None

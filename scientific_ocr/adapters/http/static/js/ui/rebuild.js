@@ -57,7 +57,8 @@ export function pendingFor(blk) {
   const id = blk.id, keys = new Set((blk.entities || []).map(x => x.key));
   const touches = (e) => e.block_id === id || (e.members || []).includes(id) || (e.block_ids || []).includes(id) || keys.has(e.key)
     || (e.merge && (e.merge.members || []).includes(id)) || (e.group && (e.group.members || []).includes(id));
-  return pendingOf().events.filter(touches);
+  const shown = new Set(pendingOf().page_applied || []);     // already visible in the page preview
+  return pendingOf().events.filter(e => !shown.has(e.seq) && touches(e));
 }
 const typeName = (t) => (t || '').startsWith('family:') ? famName(t.slice(7)) : entName(t);
 const PENDING_EL = {

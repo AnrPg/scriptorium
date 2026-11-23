@@ -87,7 +87,9 @@ class LibraryService(ServiceBase):
         pend = b.pending()
         return {'rev': b.revision(), 'busy': bool(self.jobs.busy(b.id)), 'projection': b.revision().split('-')[0],
                 'rebuilding': bool(active(b.id, 'light')) if active else False,
-                'pending': pend['count'], 'pending_ocr': pend['ocr'], 'estimate_s': pend['estimate_s']}
+                'pending': pend['count'], 'pending_ocr': pend['ocr'], 'estimate_s': pend['estimate_s'],
+                # actions not visible anywhere yet (book-wide ones; page-local ones show in their page preview)
+                'pending_waiting': sum(1 for e in pend['events'] if e['seq'] not in set(pend['page_applied']))}
 
     # ---------------------------------------------------------------- books
     def create_from_upload(self, tmp: Path, filename: str, title: str | None) -> dict:

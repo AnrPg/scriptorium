@@ -32,12 +32,9 @@ export async function act(fn, okMsg, undoable = true) {
   try { r = await fn(); } catch (e) { toast(e.message, { error: true }); throw e; }
   S.recentEdit = Date.now(); kickPoll();
   const after = book && before !== null ? await reflected(book, before) : null;
-  const banked = after && !after.rebuilding && after.pending > 0;
-  if (okMsg) toast(banked ? `${okMsg} · σε αναμονή για την ενημέρωση του βιβλίου` : okMsg, { undo: undoable && S.book });
-  if (banked && after.pending_ocr > ((rev0 && rev0.pending_ocr) || 0)) {
-    const { rebuildDialog } = await import('./rebuild.js');
-    rebuildDialog('Η νέα ανάγνωση (OCR) αυτής της περιοχής γίνεται κατά την ενημέρωση του βιβλίου· μέχρι τότε βλέπεις το προηγούμενο αποτέλεσμα.');
-  }
+  // page-local actions are already visible (their page was rebuilt); book-wide ones wait for «Ενημέρωση βιβλίου»
+  const waiting = after && !after.rebuilding && (after.pending_waiting || 0) > ((rev0 && rev0.pending_waiting) || 0);
+  if (okMsg) toast(waiting ? `${okMsg} · στο βιβλίο με την επόμενη «Ενημέρωση βιβλίου»` : okMsg, { undo: undoable && S.book });
   kickPoll();
   return r;
 }

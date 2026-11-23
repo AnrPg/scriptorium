@@ -49,9 +49,9 @@ class JobQueue:
     def submit(self, book_id: str, kind: str, args: list[str], label: str, lane: str = 'heavy') -> dict:
         with self.lock:
             if lane == 'light':
-                running = self._active(book_id, 'light')
+                running = self._active(book_id, 'light', kind)
                 if running:                                   # coalesce: rerun once when the current one ends
-                    self.light_dirty.add(book_id)
+                    self.light_dirty.add((book_id, kind))
                     return running
             job = {'id': uuid.uuid4().hex[:10], 'book': book_id, 'kind': kind, 'label': label, 'lane': lane,
                    'args': args, 'state': 'queued', 'created': time.time(), 'started': None, 'finished': None,
@@ -125,9 +125,9 @@ class JobQueue:
         return self.root / job['book'] / 'logs' / f'job-{job["id"]}.log'
 
     # ---------------------------------------------------------------- workers
-    def _active(self, book_id, lane):
+    def _active(self, book_id, lane, kind=None):
         return next((j for j in self.jobs.values() if j['book'] == book_id and j['lane'] == lane
-                     and j['state'] in ('queued', 'running')), None)
+                     and (kind is None or j['kind'] == kind) and j['state'] in ('queued', 'running')), None)
 
     def _heavy_worker(self):
         while True:
@@ -141,9 +141,9 @@ class JobQueue:
         while True:
             self._execute(job)
             with self.lock:
-                if job['book'] not in self.light_dirty:
+                if (job['book'], job['kind']) not in self.light_dirty:
                     return
-                self.light_dirty.discard(job['book'])
+                self.light_dirty.discard((job['book'], job['kind']))
                 job = {k: v for k, v in job.items() if k not in ('cancel_requested', 'started', 'finished', 'code', 'error')}
                 job.update(id=uuid.uuid4().hex[:10], state='queued', created=time.time())
                 self.jobs[job['id']] = job

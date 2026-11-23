@@ -86,6 +86,9 @@ def slug(s: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', s).strip('-')[:40] or 'book'
 
 
+PREVIEW_DIR = Path('cache') / 'page_preview'     # page previews (application.projection.build_page)
+
+
 class Book:
     def __init__(self, root: Path):
         self.dir = root
@@ -138,12 +141,15 @@ class Book:
         """Changes whenever the projection or the event log is written: clients compare it to know their view is
         stale (every derived indicator — levels, continuations, groups, issues — comes from these two files)."""
         parts = []
+        pv = [f.stat().st_mtime_ns for f in (self.dir / PREVIEW_DIR).glob('p*.json')]
         for f in (self.canonical_path, self.events.path):
             try:
                 st = f.stat()
                 parts.append(f'{st.st_mtime_ns:x}.{st.st_size:x}')
             except FileNotFoundError:
                 parts.append('0')
+        if pv:                                         # a page preview written: the open page view is stale
+            parts.append(f'{max(pv):x}.{len(pv):x}')
         return '-'.join(parts)
 
     # model proposals: an append-only audit trail (what a local model suggested; never authoritative)
@@ -194,6 +200,21 @@ class Book:
             out.append({'page': p, 'dims': dims.get(str(p)), **s})
         return out
 
+    def page_preview(self, page: int) -> dict | None:
+        """The page's preview if it was made from the current full build (else None: superseded)."""
+        pv = read_json(self.dir / PREVIEW_DIR / f'p{int(page):04d}.json')
+        base = ((self.canonical() or {}).get('run') or {}).get('built_utc')
+        return pv if pv and base and pv.get('base') == base else None
+
+    def preview_applied(self) -> set[int]:
+        """Event seqs already visible in valid page previews (applied to their pages, not yet to the book)."""
+        out: set[int] = set()
+        for f in (self.dir / PREVIEW_DIR).glob('p*.json'):
+            pv = self.page_preview(int(f.stem[1:]))
+            if pv:
+                out |= set(pv.get('applied') or [])
+        return out
+
     def rebuild_estimate(self) -> float | None:
         """Seconds the next rebuild will probably take: the last measured one, else a rough guess from the number of
         processed pages (None for a book never built)."""
@@ -212,7 +233,7 @@ class Book:
         except Exception:                      # an invalid log is reported by the projection, not here
             evs = []
         return {'count': len(evs), 'ocr': sum(e['type'] in NEEDS_OCR for e in evs), 'events': evs[-200:],
-                'estimate_s': self.rebuild_estimate()}
+                'estimate_s': self.rebuild_estimate(), 'page_applied': sorted(self.preview_applied())}
 
     def removed_pages(self) -> list[int]:
         """Pages the reviewer left out of the book (events page_remove/page_restore; reversible, raw OCR kept)."""

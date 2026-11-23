@@ -71,13 +71,15 @@ export function renderJobsPill() {
   const label = (j) => (S.book && j.book === S.book.id && carefulPages(S.book).size) ? carefulLabel(carefulPages(S.book).size) : j.label;
   if (active.length) pill.append(h('span', { class: 'spin' }), active.length === 1 ? label(active[0]) : `${active.length} εργασίες`);
 }
+// a page update runs after every page-local click: listed only while it runs or if it failed
+export const listed = (j) => j.kind !== 'pages' || isActiveJob(j) || j.state === 'failed';
 export function renderJobsPop() {
   const p = clear($('#jobs-pop'));
   const finished = S.jobs.filter(j => !isActiveJob(j));
   p.append(h('div', { class: 'row', style: { padding: '4px 8px' } }, h('h2', { class: 'grow' }, 'Εργασίες'),
     finished.length ? h('button', { class: 'ghost small', title: 'Διαγραφή όλων των ολοκληρωμένων/αποτυχημένων εργασιών και των log τους', onclick: async () => {
       await api('/api/jobs/clear', { body: {} }); S.jobs = S.jobs.filter(isActiveJob); renderJobsPop(); } }, 'Καθαρισμός λίστας') : null));
-  for (const j of S.jobs.slice(0, 12)) {
+  for (const j of S.jobs.filter(listed).slice(0, 12)) {
     const live = isActiveJob(j);
     p.append(h('div', { class: 'list-item', style: { cursor: 'default' } },
       live ? h('span', { class: 'spin' }) : h('span', { class: 'dot ' + (j.warning ? 'recommended' : j.state === 'done' ? 'approved' : j.state === 'failed' ? 'required' : 'not_needed') }),

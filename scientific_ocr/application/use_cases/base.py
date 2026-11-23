@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timezone
 
 from ... import config
+from ...core.decisions import page_of
 from ...adapters import local_llm
 from ...adapters.storage import Book, Library
 from ..jobs import JobQueue
@@ -44,7 +45,12 @@ class ServiceBase:
             raise ServiceError(f'unknown book {book_id!r}')
 
     def _block(self, b: Book, block_id: str) -> dict:
-        blk = next((x for x in (b.canonical() or {}).get('blocks', []) if x['id'] == block_id), None)
+        """The segment as the reviewer sees it: from its page preview when there is one (decisions validate and
+        pin what is on screen), else from the full projection."""
+        page = page_of(block_id)
+        pv = b.page_preview(page) if page else None
+        blk = next((x for x in pv['blocks'] if x['id'] == block_id), None) if pv else None
+        blk = blk or next((x for x in (b.canonical() or {}).get('blocks', []) if x['id'] == block_id), None)
         if blk is None:
             raise ServiceError('unknown block (the page may have been rebuilt; reload)')
         return blk
@@ -57,7 +63,8 @@ class ServiceBase:
             return None
         est = b.rebuild_estimate()
         if not force and est is not None and est > config.AUTO_REBUILD_MAX_S:
-            return None
+            # banked for the book; the pages the action touched are rebuilt at once as page previews
+            return self.jobs.submit(b.id, 'pages', ['reproject-pages', '--book', str(b.dir)], 'Ενημέρωση σελίδας', lane='light')
         return self.jobs.submit(b.id, 'reproject', ['reproject', '--book', str(b.dir)], label, lane='light')
 
     def rebuild(self, book_id: str) -> dict:

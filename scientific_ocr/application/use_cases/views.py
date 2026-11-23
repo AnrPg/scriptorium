@@ -24,8 +24,12 @@ class ViewsService(ServiceBase):
         dims = (c.get('source') or {}).get('page_dims_pt', {}).get(str(page))
         if dims is None:
             dims = next((p['dims'] for p in b.pages() if p['page'] == page), None) or _dims(b, page)
-        blocks = [_block_view(x) for x in c.get('blocks', []) if x['page'] == page]
+        pv = b.page_preview(page)                      # the page rebuilt alone after your last actions
+        if pv:
+            info = pv['info']
+        blocks = [_block_view(x) for x in (pv['blocks'] if pv else [x for x in c.get('blocks', []) if x['page'] == page])]
         return {'page': page, 'page_count': b.page_count(), 'dims': dims, 'blocks': blocks,
+                'preview': {'applied': pv['applied'], 'built_utc': pv['built_utc']} if pv else None,
                 'info': {k: (info or {}).get(k) for k in ('state', 'suggestions', 'hidden', 'replaced_by_region',
                                                           'engines', 'required', 'recommended')},
                 'regions': [r for r in b.events.state()['regions'] if int(r['page']) == page],
@@ -83,8 +87,11 @@ class ViewsService(ServiceBase):
             raise ServiceError('page not processed yet')
         if style not in markdown.STYLES:
             raise ServiceError('unknown style')
+        pv = b.page_preview(page)                      # the page as rebuilt after your last actions
+        if pv:
+            c = {**c, 'blocks': [x for x in c['blocks'] if x['page'] != page] + pv['blocks']}
         url = lambda rel: f'/api/books/{b.id}/{rel}' if rel else ''
-        return {'page': page, 'html': html_preview.page_html(c, page, url),
+        return {'page': page, 'html': html_preview.page_html(c, page, url), 'preview': bool(pv),
                 'markdown': html_preview.page_markdown(c, page, style), 'release_status': c['release_status']}
 
     def raw_fragment(self, book_id: str, raw_file: str, pointer: str | None) -> dict:

@@ -28,6 +28,7 @@ from . import projection
 STEPS = {
     'process': ['prepare', 'extract', 'regions', 'compose', 'models', 'render'],
     'reproject': ['regions', 'compose', 'models', 'render'],
+    'pages': ['regions', 'compose'],
     'structure': ['structure'],
     'entities': ['entities'],
     'extents': ['extents'],
@@ -184,6 +185,27 @@ def auto_diligent_pages(out: Path, pages: list[int]) -> list[int]:
                                              for r in b['reasons']):
             counts[b['page']] = counts.get(b['page'], 0) + 1
     return sorted(p for p in pages if counts.get(p, 0) >= AUTO_DILIGENT_MIN_LAYOUT_FLAGS and p not in profiled)
+
+
+def reproject_pages(out: Path, log: Log | None = None) -> int:
+    """Fast path after PAGE-LOCAL actions in a book whose full rebuild is slow: OCR new reviewer regions, then
+    rebuild only the pages those actions touched, as page previews (projection.build_page). Book-wide actions stay
+    banked for the next full rebuild."""
+    import time as _t
+    log = log or file_logger(out)
+    progress = progress_for(out, 'pages')
+    t0 = _t.perf_counter()
+    pages = projection.dirty_pages(out)
+    if pages:
+        ocr_regions(out, log, progress)
+    code = 0
+    for i, p in enumerate(pages):
+        progress('compose', i, len(pages), page=p)
+        c = projection.build_page(out, p, log)
+        code = code or (c if c not in (0, 2) else 0)
+    log(joblog.fact('pages', pages=pages, seconds=round(_t.perf_counter() - t0, 1)))
+    progress('done', 1, 1, code=code)
+    return code
 
 
 def reproject(out: Path, log: Log | None = None, with_regions: bool = True) -> int:

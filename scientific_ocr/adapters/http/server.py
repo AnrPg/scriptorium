@@ -55,6 +55,8 @@ class Handler(BaseHTTPRequestHandler):
             if m == method and mt:
                 try:
                     return getattr(self, name)(*[unquote(g) for g in mt.groups()])
+                except (BrokenPipeError, ConnectionResetError):
+                    return None            # the browser went away (navigation, reload, a superseded poll): nothing to answer
                 except (ServiceError, RuleError, EventError) as exc:              # invalid input: the caller's fault
                     return self._json(400, {'error': str(exc)})
                 except NotFound as exc:                                            # an explicit lookup miss
@@ -66,6 +68,12 @@ class Handler(BaseHTTPRequestHandler):
                     traceback.print_exc()
                     return self._json(500, {'error': f'internal error: {type(exc).__name__}: {exc}'})
         return self._json(404, {'error': 'no route'})
+
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True   # the client closed the connection while we answered: not an error
 
     def do_GET(self):
         self._dispatch('GET')

@@ -29,7 +29,7 @@ def main(argv=None) -> int:
     p.add_argument('pdf', type=Path)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--pages', default=None)
-    for name in ('reproject', 'render'):
+    for name in ('reproject', 'render', 'reproject-pages'):
         p = sub.add_parser(name)
         p.add_argument('--book', '--output', dest='book', type=Path, required=True)
     for name in ('propose-structure', 'propose-entities', 'propose-extents'):   # second passes with the local model: proposals only
@@ -56,6 +56,9 @@ def main(argv=None) -> int:
         from .application import processing
         out = (a.book if a.cmd == 'process' else a.output).resolve()
         return processing.process(out, None if a.cmd == 'process' else a.pdf.expanduser().resolve(), a.pages)
+    if a.cmd == 'reproject-pages':
+        from .application import processing
+        return processing.reproject_pages(a.book.resolve())
     if a.cmd == 'reproject':
         from .application import processing
         return processing.reproject(a.book.resolve())
