@@ -74,6 +74,10 @@ export async function poll() {
       const r = await api(`${B(S.book.id)}/rev`);
       const typing = isTyping(document.activeElement) || dialogOpen();
       if (r.rev !== S.bookRev && !typing) await refresh(true);              // never under the reviewer's cursor: retried next poll
+      // a book rebuild applies the actions recorded when it STARTED; ones made while it ran wait for the next one
+      const rebuilt = finished.some(j => j.book === S.book.id && j.kind === 'reproject' && (jobs.find(x => x.id === j.id) || {}).state === 'done');
+      if (rebuilt && r.pending > 0)
+        toast(`Η ενημέρωση βιβλίου ολοκληρώθηκε. ${r.pending === 1 ? '1 αλλαγή που έκανες' : r.pending + ' αλλαγές που έκανες'} όσο έτρεχε περιμέν${r.pending === 1 ? 'ει' : 'ουν'} την επόμενη.`);
       else if (active.length && S.route.view === 'book' && S.tab === 'pages') {      // progress only: re-render when it changed
         const before = JSON.stringify(S.book);
         await loadBook(S.book.id);

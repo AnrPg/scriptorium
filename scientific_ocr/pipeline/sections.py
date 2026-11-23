@@ -206,19 +206,27 @@ def _running_anchors(headings, heads) -> dict[str, int]:
     """heading id -> level from running heads. Within one series (same place on the page) the quoted title either
     CHANGES (>= 2 different titles: the series follows the sections) or stays the same. Titles of a changing
     series are one level below titles quoted only by an unchanging series (e.g. the chapter). Needs both;
-    otherwise running heads give no level (style consistency still applies)."""
+    otherwise running heads give no level (style consistency still applies).
+    Depends only on the titles and the running heads, never on levels or decisions: the leave-one-out calibration
+    asks for it once per reviewer-set heading, so it is memoised on that content (a rebuild grew linearly with the
+    reviewer's heading decisions: 58 decisions -> 50 s of the 60 s rebuild of a 465-page book)."""
+    return dict(_running_anchors_of(tuple((b['id'], _title(b)) for b in headings),
+                                    tuple((h['text'], h['series'], h['page']) for h in heads)))
+
+
+@functools.lru_cache(maxsize=8)
+def _running_anchors_of(titles: tuple, heads: tuple) -> tuple:
     series = defaultdict(lambda: defaultdict(set))       # series -> heading id -> pages quoting it
-    for b in headings:
-        t = _title(b)
-        for h in heads:
-            if contains(h['text'], t):
-                series[h['series']][b['id']].add(h['page'])
+    for bid, t in titles:
+        for text, ser, page in heads:
+            if contains(text, t):
+                series[ser][bid].add(page)
     changing = [s for s in series.values() if len(s) > 1]
     inner = {h for s in changing for h in s}
     outer = {h for s in series.values() if len(s) == 1 for h in s} - inner
     if not changing or not outer:
-        return {}
-    return {**{h: 1 for h in outer}, **{h: 2 for h in inner}}
+        return ()
+    return tuple({**{h: 1 for h in outer}, **{h: 2 for h in inner}}.items())
 
 
 # ---------------------------------------------------------------- hints -> checked decision -> proposals

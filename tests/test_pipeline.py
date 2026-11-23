@@ -1439,3 +1439,29 @@ def test_reviewer_overrides_reading_flow_and_continuations():
     blocks2 = [b('q', 'paragraph', 'Τελειώνει εδώ.'), p3]
     flow.annotate(blocks2)
     assert p3['relations'].get('continues_from') == 'q'                                  # forced by the reviewer
+
+
+def test_merging_images_into_a_figure_needs_no_text_but_a_text_merge_does():
+    """Parts without text are what a Picture/Figure merge is made of (the merged entity is the crop of their union):
+    no MERGE_PART_WITHOUT_TEXT, no review because of it. A merge meant to be text still flags the missing text."""
+    from scientific_ocr.core.model import new_block
+    from scientific_ocr.pipeline import merge as mergemod
+
+    def parts():
+        out = []
+        for i, y in enumerate((100, 300)):
+            b = new_block(f'p1_img{i}', 1, 'figure', [50, y, 400, y + 150], source='docling')
+            b['chosen'] = {'type': 'image_only', 'provenance': 'source_crop'}
+            b['review'] = 'not_needed'
+            out.append(b)
+        return out
+    crop = lambda page, bid, bbox: {'path': f'{bid}.png', 'bbox': bbox}
+    codes = lambda b: [r if isinstance(r, str) else r.get('code') for r in b['reasons']]
+    for name, flagged in (('Picture', False), ('Text', True)):
+        blocks = parts()
+        mergemod.apply(blocks, [{'id': 'm1', 'page': 1, 'members': ['p1_img0', 'p1_img1'],
+                                 'label': {'engine': 'marker', 'name': name}, 'ordered': True}], 'sha', crop, [{'page': 1}])
+        (m,) = blocks
+        assert m['display_crop'] and ('MERGE_PART_WITHOUT_TEXT' in codes(m)) == flagged
+        if not flagged:
+            assert m['review'] not in ('required', 'recommended') and m['chosen']['type'] == 'image_only'

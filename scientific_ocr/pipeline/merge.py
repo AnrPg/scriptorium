@@ -65,14 +65,18 @@ def apply(blocks: list[dict], merges: list[dict], doc_sha: str, crop, pages: lis
         blk['merged_from'] = [{'id': b['id'], 'kind': b['kind'], 'text': t, 'content_source': b.get('content_source'),
                                'review': b['review'], 'source': b.get('source')} for b, t in zip(members, texts)]
         blk['source_crop'] = crop(int(m['page']), bid, bbox)
+        # A merge labelled as an image (Picture/Figure…) IS an image: parts without text are expected, the merged
+        # entity is the crop of their union. Only a merge meant to be text must have text from every part.
+        text_ok = all(texts) or spec['image_only']
         if all(texts):
             blk['chosen'] = {'type': 'text', 'text': join_texts(texts, kind), 'provenance': f'merge:{m["id"]}'}
         else:
             blk['display_crop'] = True
-            flag(blk, 'MERGE_PART_WITHOUT_TEXT', parts=[b['id'] for b, t in zip(members, texts) if not t])
+            if not spec['image_only']:
+                flag(blk, 'MERGE_PART_WITHOUT_TEXT', parts=[b['id'] for b, t in zip(members, texts) if not t])
         blk['machine_hash'] = blk['auto_hash'] = content_hash(blk['chosen'])
         flag(blk, 'MERGED_SEGMENT', members=[b['id'] for b in members])
-        if all(b['review'] in SETTLED for b in members) and all(texts):
+        if all(b['review'] in SETTLED for b in members) and text_ok:
             blk['review'] = 'approved'                      # every part was already reviewed
         else:
             for b in members:
