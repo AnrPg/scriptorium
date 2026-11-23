@@ -288,9 +288,11 @@ def outlines(blocks: list[dict], hidden_texts: list) -> list[list[str]]:
 def _outline_siblings(headings, page_lines) -> list[set]:
     """Sets of heading ids that one page's outline lines name together (>= OUTLINE_MIN): siblings."""
     out = []
+    heads = [(b['id'], t, len(skeleton(t))) for b in headings for t in (_title(b),)]   # titles computed once
     for lines in page_lines:
-        named = {b['id'] for b in headings for ln in lines           # cheap length test first, then the match
-                 if len(skeleton(ln)) <= len(skeleton(_title(b))) + 8 and contains(ln, _title(b))}
+        sized = [(ln, len(skeleton(ln))) for ln in lines]
+        named = {i for i, t, lt in heads for ln, ll in sized          # cheap length test first, then the match
+                 if ll <= lt + 8 and contains(ln, t)}
         if len(named) >= OUTLINE_MIN:
             out.append(named)
     return out

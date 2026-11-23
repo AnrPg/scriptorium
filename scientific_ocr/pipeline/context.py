@@ -34,6 +34,7 @@ class PageContext:
     median_density: float | None = None
     picture_boxes: list = field(default_factory=list)
     imaging: object = None                               # ports.PageImaging (injected by the application)
+    _crop_zoom: float | None = None                      # zoom crops of this page are rendered at (cached)
 
     @classmethod
     def load(cls, out: Path, pdf: Path, doc_sha: str, page: int, dims, ex_index: dict, versions: dict,
@@ -84,7 +85,8 @@ class PageContext:
         meta = dest.with_suffix('.json')
         try:
             hit = json.loads(meta.read_text())
-            if hit.get('key') == key and dest.exists():
+            # reused only if rendered at least at the zoom used now (crops keep the scan's own pixel density)
+            if hit.get('key') == key and dest.exists() and hit['rec'].get('zoom', 0) + 1e-6 >= self.crop_zoom():
                 return hit['rec']
         except (OSError, ValueError):
             pass
@@ -97,12 +99,38 @@ class PageContext:
         tmp.replace(meta)
         return rec
 
+    def crop_zoom(self) -> float:
+        if self._crop_zoom is None:
+            rz = getattr(self.imaging, 'render_zoom', None)
+            self._crop_zoom = rz(self.pdf, self.page, config.RENDER_ZOOM) if rz else config.RENDER_ZOOM
+        return self._crop_zoom
+
+    def metrics(self, sc: dict) -> dict | None:
+        """Typography measured on a crop (imaging.text_metrics), cached next to the crop by its content hash: the
+        measurement depends only on those pixels, so a rebuild never measures an unchanged crop again."""
+        if not sc.get('path') or not sc.get('zoom') or not hasattr(self.imaging, 'text_metrics'):
+            return None
+        png = self.out / sc['path']
+        meta = png.with_suffix('.json')
+        try:
+            rec = json.loads(meta.read_text())
+        except (OSError, ValueError):
+            rec = None
+        tag = [sc.get('sha256'), sc['zoom'], 'metrics-v1']
+        if rec is not None and rec.get('metrics_for') == tag:
+            m = rec.get('metrics')
+            return dict(m) if m else None
+        m = self.imaging.text_metrics(png, sc['zoom'])
+        if rec is not None and sc.get('sha256'):
+            rec.update(metrics_for=tag, metrics=m)
+            tmp = meta.with_name(meta.name + f'.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp')
+            tmp.write_text(json.dumps(rec))
+            tmp.replace(meta)
+        return dict(m) if m else None
+
     def typography(self, blk: dict) -> None:
         """blk['typography'] measured on its crop; text_h also in page units (comparable across pages and books)."""
-        sc = blk.get('source_crop') or {}
-        if not sc.get('path') or not sc.get('zoom') or not hasattr(self.imaging, 'text_metrics'):
-            return
-        m = self.imaging.text_metrics(self.out / sc['path'], sc['zoom'])
+        m = self.metrics(blk.get('source_crop') or {})
         if m:
             m['text_u'] = round(m['text_h'] / self.unit, 2)
             blk['typography'] = m
@@ -119,11 +147,9 @@ class PageContext:
                       key=lambda b: -len(b['chosen']['text']))[:self.BODY_SAMPLES]
         ms = []
         for b in body:
-            sc = b.get('source_crop') or {}
-            if sc.get('path') and sc.get('zoom') and hasattr(self.imaging, 'text_metrics'):
-                m = self.imaging.text_metrics(self.out / sc['path'], sc['zoom'])
-                if m and m.get('lines', 0) >= 2:
-                    ms.append(m)
+            m = self.metrics(b.get('source_crop') or {})
+            if m and m.get('lines', 0) >= 2:
+                ms.append(m)
         if not ms:
             return None
         med = lambda k: sorted(m[k] for m in ms)[len(ms) // 2]

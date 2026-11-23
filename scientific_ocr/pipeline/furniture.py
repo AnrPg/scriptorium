@@ -33,6 +33,7 @@ Every exclusion is a document_structure fix with a stable key (dismiss = restore
 """
 from __future__ import annotations
 
+import functools
 import re
 import statistics
 from collections import Counter, defaultdict
@@ -163,7 +164,8 @@ def _key(t: str) -> str:
     return fold(strip_marks(t).upper())
 
 
-def _repeat_text(t: str) -> str:
+@functools.lru_cache(maxsize=65536)
+def _repeat_text(t: str) -> str:                     # pure, and compared pairwise across all pages: cached
     return re.sub(r'\d+', '#', _key(t)).strip()
 
 

@@ -33,6 +33,7 @@ class PageImaging(Protocol):
     def gray_raster(self, pdf: Path, page: int, zoom: float): ...
     def ink_raster(self, pdf: Path, page: int, zoom: float): ...          # darkest channel: sees coloured print
     def text_metrics(self, png: Path, zoom: float) -> dict | None: ...    # typography measured on the image
+    def render_zoom(self, pdf: Path, page: int, zoom: float) -> float: ...  # zoom crops really use (scan density)
 
 
 # Renders formulas with the app's maths renderer: [{id, latex, display}] -> {id: error}, or None if unavailable.

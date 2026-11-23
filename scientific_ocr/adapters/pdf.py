@@ -99,6 +99,12 @@ def faithful_zoom(pg, zoom: float) -> float:
     return max(zoom, min(nd, config.OCR_MAX_DPI) / 72) if nd else zoom
 
 
+def render_zoom(pdf: Path, page: int, zoom: float = config.RENDER_ZOOM) -> float:
+    """The zoom `crop` will actually use on this page (faithful_zoom), so callers can validate cached crops."""
+    with pymupdf.open(pdf) as doc:
+        return faithful_zoom(doc[page - 1], zoom)
+
+
 def crop(pdf: Path, page: int, bbox, out: Path, pad: float = config.CROP_PAD_PT,
          zoom: float = config.RENDER_ZOOM) -> dict:
     """Crop the original page pixels inside bbox (+pad), clamped to page. Returns provenance record."""
