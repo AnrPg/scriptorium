@@ -456,3 +456,5 @@ button.view-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
 
 .review-loop button{display:inline-flex;gap:6px;align-items:center}.review-loop .primary kbd{background:rgba(255,255,255,.2);color:inherit;border-color:transparent}
 .review-loop .loop-level{display:inline-flex;align-items:center;gap:6px;padding:0 10px;white-space:nowrap;color:var(--mut);cursor:pointer}
+
+.row.end button.busy{cursor:progress;opacity:.75}.row.end button.busy::after{content:"…"}

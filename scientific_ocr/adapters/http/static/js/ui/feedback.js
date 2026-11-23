@@ -24,12 +24,27 @@ async function reflected(bookId, before) {
     if (!r.rebuilding && (r.projection !== before || r.pending > 0 || Date.now() - t0 > 2500)) return r;
   }
 }
+// Actions started from a dialog run in the BACKGROUND after they are recorded: the dialog closes as soon as the
+// server accepted the action; waiting for the rebuild and the confirmation toast continue without blocking it.
+let dialogActs = 0;
 export async function act(fn, okMsg, undoable = true) {
+  if (dialogActs > 0) {
+    const r = await actRecord(fn);                    // throws on rejection: the dialog stays open
+    actConfirm(r, okMsg, undoable);                   // not awaited
+    return r;
+  }
+  return actConfirm(await actRecord(fn), okMsg, undoable);
+}
+async function actRecord(fn) {
   const book = S.book && S.book.id;
-  let before = null, rev0 = null;
-  if (book) { try { rev0 = await api(`/api/books/${encodeURIComponent(book)}/rev`); before = rev0.projection; } catch { before = null; } }
+  let rev0 = null;
+  if (book) { try { rev0 = await api(`/api/books/${encodeURIComponent(book)}/rev`); } catch { rev0 = null; } }
   let r;
   try { r = await fn(); } catch (e) { toast(e.message, { error: true }); throw e; }
+  return { r, book, rev0 };
+}
+async function actConfirm({ r, book, rev0 }, okMsg, undoable) {
+  const before = rev0 ? rev0.projection : null;
   S.recentEdit = Date.now(); kickPoll();
   const after = book && before !== null ? await reflected(book, before) : null;
   // page-local actions are already visible (their page was rebuilt); book-wide ones wait for «Ενημέρωση βιβλίου»
@@ -64,8 +79,18 @@ export const dialogOpen = () => !!document.querySelector('dialog[open]');
 export const closeTopDialog = () => [...document.querySelectorAll('dialog[open]')].pop()?.close();
 export function modal(title, body, actions) {
   const d = openDialog();
-  d.append(h('h2', {}, title), body, h('div', { class: 'row end' }, actions.map(a =>
-    h('button', { class: a.cls || '', onclick: async () => { if (!a.run || (await a.run()) !== false) d.close(); } }, a.label))));
+  const buttons = actions.map(a => h('button', { class: a.cls || '', onclick: async (e) => {
+    if (!a.run) return d.close();
+    const btn = e.currentTarget;
+    if (btn.disabled) return;                        // no double submit
+    buttons.forEach(b => { b.disabled = true; }); btn.classList.add('busy');
+    dialogActs++;
+    let res;
+    try { res = await a.run(); } catch { res = false; }   // a rejected action keeps the dialog (and what was typed)
+    finally { dialogActs--; buttons.forEach(b => { b.disabled = false; }); btn.classList.remove('busy'); }
+    if (res !== false) d.close();
+  } }, a.label));
+  d.append(h('h2', {}, title), body, h('div', { class: 'row end' }, buttons));
   d.showModal();
   return d;
 }
