@@ -8,10 +8,16 @@ import { clearSelection, renderWorkspace, reorderSelection, setSelection } from 
 
 // ---------------------------------------------------------------- multi-selection: GROUP (annotate) or MERGE (replace)
 // Selection survives page changes (groups may span pages; merges need one page).
-export function toggleSelectMode() { S.selectMode = !S.selectMode; if (S.selectMode) toast('Λειτουργία επιλογής: κάθε κλικ προσθέτει/αφαιρεί τμήμα (S για έξοδο)'); renderWorkspace(); }
+export function toggleSelectMode() {
+  S.selectMode = !S.selectMode;
+  if (S.selectMode) { S.multi.clear(); S.sel = null; toast('Λειτουργία επιλογής: κάθε κλικ προσθέτει/αφαιρεί τμήμα (S για έξοδο)'); }   // start empty
+  renderWorkspace();
+}
 export function toggleMulti(blk) {
+  // ⌘/Ctrl-click outside selection mode extends the open segment (as in a file manager); in SELECTION MODE (S)
+  // only what is clicked after entering it counts — the segment that was open is not selected by itself
   const cur = S.page.blocks.find(b => b.id === S.sel);
-  if (cur && !S.multi.size && cur.id !== blk.id) S.multi.set(cur.id, { page: cur.page, text: segText(cur), label: cur.engine_label });
+  if (!S.selectMode && cur && !S.multi.size && cur.id !== blk.id) S.multi.set(cur.id, { page: cur.page, text: segText(cur), label: cur.engine_label });
   S.multi.has(blk.id) ? S.multi.delete(blk.id) : S.multi.set(blk.id, { page: blk.page, text: segText(blk), label: blk.engine_label });
   if (!S.multiOpen) S.inspTab = 'page';             // keep selecting in the page list
   renderWorkspace();

@@ -49,8 +49,10 @@ def pre_render(c: dict, out: Path) -> list[dict]:
     blocks, src = c['blocks'], c['source']
     F = from_reasons(blocks)
     have = {b['page'] for b in blocks}
+    # a page left without segments by the REVIEWER (every box hidden or replaced) is a decision, not a loss
+    emptied = {pg['page'] for pg in c['pages'] if pg.get('hidden') or pg.get('replaced_by_region')}
     for p in src['pages_processed']:
-        if p not in have:
+        if p not in have and p not in emptied:
             F.append(finding('INTEGRITY_PAGE_MISSING', 'critical', p, [], 'page produced no blocks', 'rerun page'))
     for pg in c['pages']:
         for eng, rec in pg['engines'].items():
