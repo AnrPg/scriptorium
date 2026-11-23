@@ -196,6 +196,11 @@ def reproject_pages(out: Path, log: Log | None = None) -> int:
     progress = progress_for(out, 'pages')
     t0 = _t.perf_counter()
     pages = projection.dirty_pages(out)
+    if len(pages) > config.PAGE_PREVIEW_MAX_PAGES:     # many pages at once (bulk actions): one full rebuild is cheaper
+        log(f'{len(pages)} pages changed: full rebuild instead of page previews')
+        code = reproject(out, log)
+        log(joblog.fact('pages', pages=pages, seconds=round(_t.perf_counter() - t0, 1), full=True))
+        return code
     if pages:
         ocr_regions(out, log, progress)
     code = 0

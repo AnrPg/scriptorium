@@ -217,10 +217,32 @@ export async function tabReview(body) {
   const card = h('div', { class: 'card' }); body.append(card);
   const q = await api(`${B(S.book.id)}/queue?level=${S.level}`);
   if (!q.length) { card.append(h('div', { class: 'empty', style: { border: 0 } }, 'Τίποτα εδώ. 🎉')); return; }
+  card.before(acceptAllBar(q));
   for (const it of q) {
     card.append(h('div', { class: 'list-item', onclick: () => go(`#/b/${S.book.id}/p/${it.page}/${it.id}`) },
       h('span', { class: 'dot ' + it.review }), h('span', { class: 'small mut', style: { width: '52px' } }, `σελ. ${it.page}`),
       it.critical ? h('span', { class: 'chip rv-required' }, 'κρίσιμο') : null, h('div', { class: 'grow' }, h('div', {}, KIND_EL[it.kind] || it.kind),
         h('div', { class: 'small mut' }, it.reasons.map(r => R(r).el).join(' · '))), '›'));
   }
+}
+
+/** «Αποδοχή όλων όπως είναι»: approve the CURRENT version of every listed segment (as shown now), in one undoable
+ *  step. Critical items (symbols, charges, numbers, equations…) are left in review unless explicitly included. */
+function acceptAllBar(q) {
+  const crit = q.filter(x => x.critical).length, level = S.level === 'required' ? 'απαιτούν έλεγχο' : 'συνιστάται να ελεγχθούν';
+  const run = () => {
+    const inc = h('input', { type: 'checkbox' });
+    modal(`Αποδοχή ${q.length} τμημάτων όπως είναι;`, h('div', {},
+      h('p', {}, `Όλα τα τμήματα που ${level} εγκρίνονται με την εκδοχή που δείχνει τώρα η εφαρμογή (κείμενο, LaTeX ή «μόνο εικόνα»). `,
+        'Είναι μία ενέργεια: μία Αναίρεση (⌘Z) τα επαναφέρει όλα.'),
+      h('p', { class: 'small mut' }, 'Παραλείπονται όσα έχουν ήδη δική σου απόφαση.'),
+      crit ? h('label', { class: 'row small note' }, inc, h('span', {}, h('b', {}, `Και τα ${crit} κρίσιμα`),
+        ' (σύμβολα, φορτία, αριθμοί, εξισώσεις). Χωρίς αυτή την επιλογή μένουν στον έλεγχο — συνιστάται να τα δεις ένα-ένα.')) : null),
+    [{ label: 'Άκυρο' }, { label: 'Αποδοχή όλων', cls: 'primary', run: async () => {
+      const r = await act(() => api(`${B(S.book.id)}/bulk`, { body: { blocks: q.map(x => x.id), action: 'approve', include_critical: inc.checked } }), null);
+      toast(`Εγκρίθηκαν ${r.applied}${r.kept_critical ? ` · ${r.kept_critical} κρίσιμα έμειναν για έλεγχο` : ''}${r.skipped - (r.kept_critical || 0) > 0 ? ` · ${r.skipped - (r.kept_critical || 0)} είχαν ήδη απόφαση` : ''}`, { undo: true });
+      refresh(); } }]);
+  };
+  return h('div', { class: 'row', style: { margin: '8px 0' } }, h('span', { class: 'grow small mut' }, `${q.length} στη λίστα${crit ? ` · ${crit} κρίσιμα` : ''}`),
+    h('button', { onclick: run, title: 'Εγκρίνει την τρέχουσα εκδοχή όλων των τμημάτων της λίστας, με μία ενέργεια (αναιρείται)' }, `Αποδοχή όλων όπως είναι (${q.length})`));
 }

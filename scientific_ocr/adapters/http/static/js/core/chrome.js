@@ -23,6 +23,27 @@ export function renderChrome() {
   if (S.book) { $('#btn-undo').disabled = !S.book.can_undo; $('#btn-redo').disabled = !S.book.can_redo; }
   renderJobsPill();
   renderPendingPill();
+  renderPausePill();
+}
+// Pause/resume of the per-page updates (only in books whose actions are banked). Paused: page-local actions are
+// recorded and wait, like the book-wide ones, for «Ενημέρωση βιβλίου» — quick edits now, one rebuild at the end.
+export function renderPausePill() {
+  const pill = $('#pause-pill'), b = S.book;
+  pill.hidden = !b || !S.route || S.route.view === 'library' || !b.banks_actions;
+  if (pill.hidden) return;
+  const paused = !!b.page_updates_paused;
+  pill.classList.toggle('paused', paused);
+  clear(pill).append(paused ? '▶ Ενημέρωση σελίδας σε παύση · Συνέχιση' : '⏸');
+  pill.title = paused
+    ? 'Οι αλλαγές σου καταγράφονται αλλά η σελίδα δεν ξαναϋπολογίζεται· φαίνονται με την «Ενημέρωση βιβλίου». Πάτα για συνέχιση (οι σελίδες που άλλαξαν ενημερώνονται αμέσως).'
+    : 'Παύση της ενημέρωσης σελίδας: γρήγορες αλλαγές χωρίς ξαναϋπολογισμό μετά από κάθε κλικ, και μία «Ενημέρωση βιβλίου» στο τέλος';
+  pill.setAttribute('aria-label', paused ? 'Συνέχιση ενημέρωσης σελίδας' : 'Παύση ενημέρωσης σελίδας');
+  pill.onclick = async () => {
+    try { await api(`${B(b.id)}/settings`, { body: { page_updates_paused: !paused } }); }
+    catch (e) { toast(e.message, { error: true }); return; }
+    b.page_updates_paused = !paused; renderPausePill(); kickPoll();
+    toast(paused ? 'Η ενημέρωση σελίδας συνεχίζει' : 'Ενημέρωση σελίδας σε παύση· οι αλλαγές φαίνονται με την «Ενημέρωση βιβλίου»');
+  };
 }
 /** «N αλλαγές σε αναμονή · Ενημέρωση (~X)»: banked actions of the open book; click = rebuild now. */
 export function renderPendingPill() {

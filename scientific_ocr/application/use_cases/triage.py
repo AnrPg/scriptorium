@@ -41,16 +41,22 @@ class TriageService(ServiceBase):
                  and not x.get('decisions')]
         return [_block_view(x) for x in items[:limit]]
 
-    def bulk_decide(self, book_id: str, block_ids: list[str], action: str, actor='reviewer') -> dict:
-        """One reviewer action on many segments (one undo). Segments with a reviewer value are skipped."""
+    def bulk_decide(self, book_id: str, block_ids: list[str], action: str, actor='reviewer',
+                    include_critical: bool = True) -> dict:
+        """One reviewer action on many segments (one undo). Segments with a reviewer value are skipped; with
+        include_critical=False so are segments with a CRITICAL flag (symbols, charges, numbers, equations…), which
+        then stay in review — the project rule: those are never accepted in bulk without an explicit choice."""
         if action not in ('approve', 'mark_image_only'):
             raise ServiceError('bulk action must be approve or mark_image_only')
         b = self._book(book_id)
-        by_id = {x['id']: x for x in (b.canonical() or {}).get('blocks', [])}
-        evs = []
+        by_id = self._blocks_seen(b)                    # what the reviewer sees (page previews included)
+        evs, kept_critical = [], 0
         for i in dict.fromkeys(block_ids):
             blk = by_id.get(i)
             if not blk or has_human_value(blk):
+                continue
+            if not include_critical and any(critical(r) for r in blk['reasons']):
+                kept_critical += 1
                 continue
             try:
                 evs.append({**decision_event(action, blk, {}, by_id.get), 'bulk': True})
@@ -59,7 +65,7 @@ class TriageService(ServiceBase):
         if evs:
             b.events.append(*evs, actor=actor)
             self._reproject(b, f'Μαζική απόφαση σε {len(evs)} τμήματα')
-        return {'applied': len(evs), 'skipped': len(block_ids) - len(evs)}
+        return {'applied': len(evs), 'skipped': len(block_ids) - len(evs), 'kept_critical': kept_critical}
 
     def sample(self, book_id: str, reason: str, max_error: float = MAX_ERROR) -> dict:
         """A random audit sample of a flag class, sized so that zero errors proves error <= max_error (95%)."""

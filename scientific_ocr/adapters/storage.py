@@ -107,10 +107,11 @@ class Book:
         s.setdefault('ocr_lang', config.DEFAULT_OCR_LANG)
         s.setdefault('calibrate_with', [])
         s.setdefault('auto_diligent', True)
+        s.setdefault('page_updates_paused', False)     # reviewer paused the per-page previews (book-wide rebuild only)
         return s
 
     def update_settings(self, **changes) -> dict:
-        allowed = {'title', 'ocr_lang', 'calibrate_with', 'auto_diligent'}
+        allowed = {'title', 'ocr_lang', 'calibrate_with', 'auto_diligent', 'page_updates_paused'}
         bad = set(changes) - allowed
         if bad:
             raise ValueError(f'unknown settings {sorted(bad)}')
@@ -119,8 +120,9 @@ class Book:
         if 'calibrate_with' in changes and not (isinstance(changes['calibrate_with'], list)
                                                 and all(isinstance(x, str) and ID_RE.match(x) for x in changes['calibrate_with'])):
             raise ValueError('calibrate_with: a list of book ids')
-        if 'auto_diligent' in changes and not isinstance(changes['auto_diligent'], bool):
-            raise ValueError('auto_diligent: true or false')
+        for k in ('auto_diligent', 'page_updates_paused'):
+            if k in changes and not isinstance(changes[k], bool):
+                raise ValueError(f'{k}: true or false')
         s = {**self.settings(), **{k: v for k, v in changes.items() if v is not None and v != ''}}
         atomic_write(self.dir / 'book.json', json.dumps(s, ensure_ascii=False, indent=2))
         return s
@@ -247,7 +249,9 @@ class Book:
         pages = self.pages()
         st = self.settings()
         return {'id': self.id, 'title': st['title'], 'ocr_lang': st['ocr_lang'], 'created': st.get('created'),
-                'auto_diligent': st.get('auto_diligent', True), 'calibrate_with': st.get('calibrate_with', []),
+                'auto_diligent': st.get('auto_diligent', True), 'page_updates_paused': st['page_updates_paused'],
+                'banks_actions': (est := self.rebuild_estimate()) is not None and est > config.AUTO_REBUILD_MAX_S,
+                'calibrate_with': st.get('calibrate_with', []),
                 'source': st.get('source'), 'page_count': sum(1 for p in pages if p['state'] != 'removed'),
                 'removed': sum(1 for p in pages if p['state'] == 'removed'),
                 'processed': sum(1 for p in pages if p['state'] not in ('not_processed', 'removed')),

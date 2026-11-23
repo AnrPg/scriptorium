@@ -10,10 +10,15 @@ import { selectBlock } from '../workspace/workspace.js';
 // decision is still banked for the next rebuild — are skipped. Used by J/K, the ↑/↓ of the segment panel and the
 // automatic advance after a decision.
 
+// What the loop walks: 'all' = errors (review required) and warnings (recommended); 'required' = errors only.
+// A per-reviewer preference (this browser).
+export function loopLevel() { try { return localStorage.getItem('ocr.loopLevel') === 'required' ? 'required' : 'all'; } catch { return 'all'; } }
+export function setLoopLevel(v) { try { localStorage.setItem('ocr.loopLevel', v); } catch { /* storage blocked */ } cache.key = null; }
+
 let cache = { key: null, items: [] };
 async function bookQueue() {
-  const key = `${S.book.id}|${S.book.rev}`;
-  if (cache.key !== key) cache = { key, items: await api(`${B(S.book.id)}/queue?level=all&order=book`) };
+  const key = `${S.book.id}|${S.book.rev}|${loopLevel()}`;
+  if (cache.key !== key) cache = { key, items: await api(`${B(S.book.id)}/queue?level=${loopLevel()}&order=book`) };
   return cache.items;
 }
 const decidedNow = () => new Set(pendingOf().events.filter(e => e.type === 'decision' || e.type === 'block_hide').map(e => e.block_id));

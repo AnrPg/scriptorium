@@ -44,6 +44,15 @@ class ServiceBase:
         except KeyError:
             raise ServiceError(f'unknown book {book_id!r}')
 
+    def _blocks_seen(self, b: Book) -> dict[str, dict]:
+        """Every segment as the reviewer sees it: the full projection, with pages rebuilt since (previews) on top."""
+        by_id = {x['id']: x for x in (b.canonical() or {}).get('blocks', [])}
+        for page in sorted({x['page'] for x in by_id.values()}):
+            pv = b.page_preview(page)
+            if pv:
+                by_id.update({x['id']: x for x in pv['blocks']})
+        return by_id
+
     def _block(self, b: Book, block_id: str) -> dict:
         """The segment as the reviewer sees it: from its page preview when there is one (decisions validate and
         pin what is on screen), else from the full projection."""
@@ -63,9 +72,20 @@ class ServiceBase:
             return None
         est = b.rebuild_estimate()
         if not force and est is not None and est > config.AUTO_REBUILD_MAX_S:
-            # banked for the book; the pages the action touched are rebuilt at once as page previews
-            return self.jobs.submit(b.id, 'pages', ['reproject-pages', '--book', str(b.dir)], 'Ενημέρωση σελίδας', lane='light')
+            return self._update_pages(b)            # banked for the book; touched pages get a preview at once
         return self.jobs.submit(b.id, 'reproject', ['reproject', '--book', str(b.dir)], label, lane='light')
+
+    def _update_pages(self, b: Book):
+        """Rebuild, as page previews, only the pages a PAGE-LOCAL action changed (projection.dirty_pages). Nothing
+        runs for a book-wide action (no page can show it before the full rebuild) or while the reviewer paused page
+        updates (book.json page_updates_paused: quick edits now, one book rebuild at the end)."""
+        if b.settings().get('page_updates_paused'):
+            return None
+        from ..projection import dirty_pages            # lazy: the projection pulls in the whole pipeline
+        pages = dirty_pages(b.dir, b.canonical())
+        if not pages:
+            return None
+        return self.jobs.submit(b.id, 'pages', ['reproject-pages', '--book', str(b.dir)], _pages_label(pages), lane='light')
 
     def rebuild(self, book_id: str) -> dict:
         """Apply every banked action now (one rebuild for all of them)."""
@@ -94,3 +114,13 @@ class ServiceBase:
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec='seconds')
 
+
+
+def _pages_label(pages: list[int]) -> str:
+    """Job label naming the pages being updated: «Σελίδα 169: ενημέρωση», «Σελίδες 12, 13: ενημέρωση»."""
+    if len(pages) > getattr(config, 'PAGE_PREVIEW_MAX_PAGES', len(pages)):    # reproject_pages rebuilds the book
+        return f'Ενημέρωση βιβλίου ({len(pages)} σελίδες άλλαξαν)'
+    if len(pages) == 1:
+        return f'Σελίδα {pages[0]}: ενημέρωση'
+    shown = ', '.join(map(str, pages[:3])) + (f' … ({len(pages)})' if len(pages) > 3 else '')
+    return f'Σελίδες {shown}: ενημέρωση'

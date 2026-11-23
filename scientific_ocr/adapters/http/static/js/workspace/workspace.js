@@ -1,6 +1,6 @@
 import { B, api } from '../core/api.js';
 import { refresh } from '../core/chrome.js';
-import { stepReview } from '../inspector/reviewloop.js';
+import { loopLevel, setLoopLevel, stepReview } from '../inspector/reviewloop.js';
 import { $, clear, h, keepScroll, pctStyle } from '../core/dom.js';
 import { NAV, navSave } from '../core/nav.js';
 import { R, S, go, kindLabel, parseRoute } from '../core/state.js';
@@ -180,8 +180,12 @@ export function buildWorkspace() {
       // the whole-book review loop, always reachable (also with no segment selected): errors and warnings, any page
       processed ? h('div', { class: 'seg-ctl review-loop' },
         h('button', { onclick: () => stepReview(-1), title: 'Προηγούμενο προς έλεγχο, σε όλο το βιβλίο (K)', 'aria-label': 'Προηγούμενο προς έλεγχο' }, '↑'),
-        h('button', { class: 'primary', onclick: () => stepReview(1), title: 'Επόμενο προς έλεγχο (σφάλματα και προειδοποιήσεις), σε όλο το βιβλίο· αλλάζει σελίδα μόνο του (J)' },
-          h('span', { class: 'wide-only' }, 'Επόμενο για έλεγχο '), '↓', h('kbd', {}, 'J'))) : null,
+        h('button', { class: 'primary', onclick: () => stepReview(1), title: `Επόμενο προς έλεγχο (${loopLevel() === 'all' ? 'σφάλματα και προειδοποιήσεις' : 'μόνο σφάλματα'}), σε όλο το βιβλίο· αλλάζει σελίδα μόνο του (J)` },
+          h('span', { class: 'wide-only' }, 'Επόμενο για έλεγχο '), '↓', h('kbd', {}, 'J')),
+        h('label', { class: 'loop-level small', title: 'Τι περιλαμβάνει το «Επόμενο για έλεγχο»: μόνο σφάλματα («απαιτείται έλεγχος») ή και προειδοποιήσεις («συνιστάται»)' },
+          (() => { const cb = h('input', { type: 'checkbox', role: 'switch' }); cb.checked = loopLevel() === 'all';
+            cb.onchange = () => { setLoopLevel(cb.checked ? 'all' : 'required'); renderWorkspace(); }; return cb; })(),
+          h('span', {}, 'και προειδοποιήσεις'))) : null,
       h('span', { class: 'spacer' }),
       processed ? h('div', { class: 'seg-ctl view-switch', role: 'tablist' }, VIEWS.map(([k, l, t], i) =>
         h('button', { class: S.leftView === k ? 'on' : '', role: 'tab', 'aria-selected': S.leftView === k ? 'true' : 'false', title: `${l} (${i + 1}) — ${t}`, 'aria-label': l,

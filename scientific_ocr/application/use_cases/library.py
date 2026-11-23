@@ -245,6 +245,8 @@ class LibraryService(ServiceBase):
         out = b.update_settings(**changes)
         if 'calibrate_with' in changes:              # calibration priors feed the projection: show their effect now
             self._reproject(b, 'Βαθμονόμηση από άλλα βιβλία')
+        if changes.get('page_updates_paused') is False:    # resumed: pages changed during the pause update now
+            self._update_pages(b)
         return out
 
     def trash(self, book_id: str) -> dict:

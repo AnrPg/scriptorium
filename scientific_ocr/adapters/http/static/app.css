@@ -22,6 +22,8 @@ label.field{display:block;margin:10px 0 4px;font-size:12px;color:var(--mut)}
 .crumbs a{color:var(--mut)} .crumbs span.sep{opacity:.5} .crumbs .cur{color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top-actions{margin-left:auto;display:flex;align-items:center;gap:6px} .undo-redo{display:flex}
 .pending-pill{border-radius:999px;background:var(--warn-weak);border-color:transparent;color:var(--warn);font-size:12px;display:flex;gap:6px;align-items:center}
+.pause-pill{border-radius:999px;font-size:12px;padding:2px 10px;color:var(--mut)}
+.pause-pill.paused{background:var(--warn-weak);border-color:transparent;color:var(--warn);font-weight:600}
 .jobs-pill{border-radius:999px;background:var(--acc-weak);border-color:transparent;color:var(--acc);font-size:12px;display:flex;gap:8px;align-items:center}
 .spin{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -453,3 +455,4 @@ button.view-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
 .jl-raw{max-height:40vh;overflow:auto;font-size:11px;white-space:pre-wrap}
 
 .review-loop button{display:inline-flex;gap:6px;align-items:center}.review-loop .primary kbd{background:rgba(255,255,255,.2);color:inherit;border-color:transparent}
+.review-loop .loop-level{display:inline-flex;align-items:center;gap:6px;padding:0 10px;white-space:nowrap;color:var(--mut);cursor:pointer}

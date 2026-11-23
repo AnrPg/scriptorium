@@ -278,7 +278,8 @@ class Handler(BaseHTTPRequestHandler):
     @route('POST', r'/api/books/([\w.-]+)/bulk')
     def bulk(self, bid):
         b = self._body()
-        self._json(200, self.app.bulk_decide(bid, b.get('blocks') or [], b.get('action', 'approve'), self._actor()))
+        self._json(200, self.app.bulk_decide(bid, b.get('blocks') or [], b.get('action', 'approve'), self._actor(),
+                                             include_critical=b.get('include_critical', True) is not False))
 
     @route('POST', r'/api/books/([\w.-]+)/classes/(\w+)/sample')
     def sample(self, bid, reason):

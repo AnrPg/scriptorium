@@ -454,9 +454,10 @@ def read_preview(out: Path, page: int, canonical: dict | None) -> dict | None:
     return pv if pv and base and pv.get('base') == base else None
 
 
-def dirty_pages(out: Path) -> list[int]:
-    """Pages with page-local actions recorded after the last full build that no valid preview includes yet."""
-    c = read_json(out / 'canonical.json') or {}
+def dirty_pages(out: Path, canonical: dict | None = None) -> list[int]:
+    """Pages with page-local actions recorded after the last full build that no valid preview includes yet.
+    `canonical`: the full projection when the caller already has it loaded (it is large)."""
+    c = canonical if canonical is not None else (read_json(out / 'canonical.json') or {})
     last = (c.get('human') or {}).get('last_seq', 0)
     evs = EventStore(out).load()
     by_seq = {e['seq']: e for e in evs}

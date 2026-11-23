@@ -1295,3 +1295,40 @@ def test_decisions_follow_merges_and_later_actions_supersede(app):
     assert by[cap['id']]['relations']['caption_for'] == merged['id'] and not by[cap['id']]['relations'].get('inferred')
     assert cap['id'] in by[merged['id']]['relations']['captions']
     assert c['human']['stale'] == [] and not any('DECISION_STALE' in b['reasons'] for b in c['blocks'])
+
+
+def test_page_updates_run_only_for_page_local_actions_and_can_be_paused(app):
+    """In a slow book a page update is submitted only when a page-local action changed a page (named in the job
+    label); a book-wide action submits nothing. Paused page updates submit nothing either; resuming updates the
+    pages changed meanwhile."""
+    import json
+    a, out = app
+    (out / 'cache').mkdir(exist_ok=True)
+    (out / 'cache' / 'build.json').write_text(json.dumps({'seconds': 400}))
+    assert a.book('run')['banks_actions'] and not a.book('run')['page_updates_paused']
+    jobs = a.jobs.submitted
+    blk = next(b for b in a.page('run', 1)['blocks'] if b['review'] in ('required', 'recommended'))
+    jobs.clear()
+    a.assign_entity('run', [blk['id']], 'example')                     # book-wide: no page update
+    assert jobs == []
+    a.decide('run', blk['id'], 'replace_text', value='fixed')           # page-local: page 1 updated
+    assert jobs == [('pages', 'light')]
+    a.update_settings('run', {'page_updates_paused': True})
+    jobs.clear()
+    a.decide('run', blk['id'], 'replace_text', value='fixed again')
+    assert jobs == [] and a.book('run')['page_updates_paused']
+    a.update_settings('run', {'page_updates_paused': False})            # resume: catches up
+    assert jobs == [('pages', 'light')]
+
+
+def test_accept_all_as_is_keeps_critical_items_unless_included(app):
+    """«Αποδοχή όλων όπως είναι»: one undoable step; critical items stay in review unless explicitly included."""
+    a, out = app
+    q = a.queue('run', 'required') + a.queue('run', 'recommended')
+    ids, crit = [x['id'] for x in q], [x['id'] for x in q if x['critical']]
+    r = a.bulk_decide('run', ids, 'approve', include_critical=False)
+    assert r['kept_critical'] == len(crit) and r['applied'] == len(ids) - len(crit)
+    evs = [e for e in a.lib.get('run').events.load() if e.get('bulk')]
+    assert len({e.get('group') for e in evs}) == 1 or len(evs) == 1                 # one undo step
+    a.undo('run')
+    assert not [e for e in a.lib.get('run').events.state()['decisions'] if e.get('bulk')]

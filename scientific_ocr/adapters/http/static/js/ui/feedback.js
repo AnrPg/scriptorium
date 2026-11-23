@@ -34,7 +34,7 @@ export async function act(fn, okMsg, undoable = true) {
   const after = book && before !== null ? await reflected(book, before) : null;
   // page-local actions are already visible (their page was rebuilt); book-wide ones wait for «Ενημέρωση βιβλίου»
   const waiting = after && !after.rebuilding && (after.pending_waiting || 0) > ((rev0 && rev0.pending_waiting) || 0);
-  if (okMsg) toast(waiting ? `${okMsg} · στο βιβλίο με την επόμενη «Ενημέρωση βιβλίου»` : okMsg, { undo: undoable && S.book });
+  if (okMsg) toast(waiting ? `${okMsg} · ${S.book && S.book.page_updates_paused ? 'ενημέρωση σελίδας σε παύση: ' : ''}φαίνεται με την επόμενη «Ενημέρωση βιβλίου»` : okMsg, { undo: undoable && S.book });
   kickPoll();
   return r;
 }
