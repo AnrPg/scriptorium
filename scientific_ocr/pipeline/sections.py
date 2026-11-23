@@ -44,6 +44,7 @@ Every block gets section_path (ids of enclosing headings); canonical 'sections' 
 """
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 from collections import Counter, defaultdict
@@ -78,23 +79,45 @@ def _caps(t: str) -> bool:
     return len(letters) >= 2 and all(c.isupper() for c in letters)
 
 
+@functools.lru_cache(maxsize=65536)
 def skeleton(t: str) -> str:
     """Case-, accent- and script-insensitive form for matching OCR readings of the same title (Greek capitals
-    that look Latin are mapped to Latin: 'ΚΑΙ' ~ 'KAI')."""
+    that look Latin are mapped to Latin: 'ΚΑΙ' ~ 'KAI'). Cached: the same titles and lines are compared many times."""
     t = unicodedata.normalize('NFD', t or '')
     t = ''.join(c for c in t if not unicodedata.combining(c)).upper().translate(_CONFUSABLE)
     return re.sub(r'[^0-9A-ZΑ-Ω]', '', t)
 
 
 def contains(head: str, title: str) -> bool:
-    """The running head quotes the title (fuzzy: OCR of small print is noisy)."""
+    """The running head quotes the title (fuzzy: OCR of small print is noisy): some window of the head, as long
+    as the title, has SequenceMatcher ratio >= RUNNING_MATCH with it.
+
+    Fast but EXACT: ratio = 2M/(|w|+|t|), and the matches M of any window are bounded by the multiset overlap of the
+    window (hence of the whole head) with the title. A head that cannot reach the threshold even on that bound is
+    rejected without running SequenceMatcher; per window, quick_ratio (the same bound) is checked first. The
+    matcher indexes the title once (set_seq2) and only swaps windows. Results are identical to the plain loop."""
     h, t = skeleton(head), skeleton(title)
     if len(t) < 6 or len(t) > len(h) + 2:
         return False
     if t in h:
         return True
     n = len(t)
-    return max(SequenceMatcher(None, h[i:i + n], t).ratio() for i in range(0, max(1, len(h) - n + 1))) >= RUNNING_MATCH
+    windows = [h[i:i + n] for i in range(0, max(1, len(h) - n + 1))]
+    best_len = len(windows[0]) + n                        # all windows have the same length
+    if 2 * _overlap(h, t) < RUNNING_MATCH * best_len:     # upper bound over every window
+        return False
+    sm = SequenceMatcher(None, '', t)                     # same settings as SequenceMatcher(None, w, t)
+    for w in windows:
+        sm.set_seq1(w)
+        if sm.quick_ratio() >= RUNNING_MATCH and sm.ratio() >= RUNNING_MATCH:
+            return True
+    return False
+
+
+@functools.lru_cache(maxsize=262144)
+def _overlap(a: str, b: str) -> int:
+    """Characters the two strings share, as multisets (an upper bound of SequenceMatcher's matches)."""
+    return sum((Counter(a) & Counter(b)).values())
 
 
 MIN_BAND_PX = 8             # fewer pixels per text line than this: the measurement is not reliable (low resolution)
@@ -266,8 +289,8 @@ def _outline_siblings(headings, page_lines) -> list[set]:
     """Sets of heading ids that one page's outline lines name together (>= OUTLINE_MIN): siblings."""
     out = []
     for lines in page_lines:
-        named = {b['id'] for b in headings for ln in lines
-                 if contains(ln, _title(b)) and len(skeleton(ln)) <= len(skeleton(_title(b))) + 8}
+        named = {b['id'] for b in headings for ln in lines           # cheap length test first, then the match
+                 if len(skeleton(ln)) <= len(skeleton(_title(b))) + 8 and contains(ln, _title(b))}
         if len(named) >= OUTLINE_MIN:
             out.append(named)
     return out
