@@ -93,6 +93,7 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
     lap('compose pages')
     progress('models', 0, 1)
     spec = enrich.enrich(out, blocks, runner, allow_inference, log)
+    _seal_machine_result(blocks)
     lap('specialised models (cache)')
     progress('render', 0, 1)
     result, merges = _apply_decisions(blocks, pages, contexts, inp)
@@ -259,11 +260,17 @@ def _compose_pages(out: Path, inp: _Inputs, progress):
         captions.associate(seq, ctx.docling, ctx.unit)
         blocks += seq
         pages.append(info)
-    for b in blocks:                                  # the automatic result a reviewer approves
+    return blocks, pages, contexts, versions
+
+
+def _seal_machine_result(blocks) -> None:
+    """Record the AUTOMATIC result — after every machine stage (engines, rules, specialised models), before any
+    human decision. It is what the reviewer sees and approves: `approve` pins auto_hash, so it must be taken after
+    the specialised models too (they may withdraw a conflicting formula and keep the page excerpt)."""
+    for b in blocks:
         b['auto_hash'] = content_hash(b['chosen'])
         b['machine_reasons'] = list(b['reasons'])     # flags before any human input (triage statistics)
         b['machine_image_only'] = b['chosen']['type'] == 'image_only'
-    return blocks, pages, contexts, versions
 
 
 def _apply_decisions(blocks, pages, contexts, inp: _Inputs):

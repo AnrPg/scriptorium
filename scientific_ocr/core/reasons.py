@@ -159,7 +159,7 @@ REASONS: dict[str, Reason] = {
     'ACCEPTED_BY_SAMPLING': R(None, False, 'accepted statistically: its class passed a sampling audit',
                               'Έγινε δεκτό στατιστικά: η κατηγορία του πέρασε δειγματοληπτικό έλεγχο', stage='human'),
     'DECISION_STALE': R('required', True, 'a review decision no longer matches this block; review again',
-                        'Μια απόφαση ελέγχου δεν ταιριάζει πια με το block· ξαναέλεγξέ το',
+                        'Η απόφασή σου δεν εφαρμόστηκε: άλλαξε το αποτέλεσμα που είχες κρίνει· αποφάσισε ξανά',
                         ('DECISION_STALE', 'warning'), stage='human'),
 }
 

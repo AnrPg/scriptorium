@@ -1181,3 +1181,22 @@ def test_review_loop_queue_is_book_ordered_and_includes_warnings(app):
     assert [(x['page'], x['reading_order']) for x in q] == sorted((x['page'], x['reading_order']) for x in q)
     with pytest.raises(ServiceError):
         a.queue('run', 'everything')
+
+
+def test_approving_what_the_specialised_models_left_is_not_stale(tmp_path):
+    """auto_hash is the result the reviewer SEES: taken after the specialised models. A block they changed (e.g. a
+    formula withdrawn to its page excerpt) can be approved, and the approval applies on every rebuild."""
+    from conftest import make_run, build, load
+    from scientific_ocr.adapters.event_store import EventStore
+    from scientific_ocr.pipeline.overlay import decision_event
+    out = make_run(tmp_path)
+    assert build(out) == 0
+    c, _ = load(out)
+    blk = next(b for b in c['blocks'] if b['chosen']['type'] in ('text', 'latex'))
+    from scientific_ocr.core.model import content_hash
+    assert blk['auto_hash'] == content_hash(blk['chosen'])      # sealed after every machine stage
+    EventStore(out).append(decision_event('approve', blk, {}, lambda _id: None))
+    assert build(out) == 0
+    c, _ = load(out)
+    b2 = next(b for b in c['blocks'] if b['id'] == blk['id'])
+    assert 'DECISION_STALE' not in b2['reasons'] and not c['human']['stale']

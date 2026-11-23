@@ -39,6 +39,12 @@ export function contentView(blk, value, latex, { codeOpen = null } = {}) {   // 
 }
 const NEEDS_REVIEW = ['required', 'recommended', 'unresolved'];
 const DECIDING = new Set();                     // block ids whose decision request is in flight
+// Why a decision was not applied (pipeline/overlay.py Stale messages), in plain words.
+const STALE_WHY = {
+  'approved content changed': 'Αυτό που είχες εγκρίνει δεν είναι πια το ίδιο με ό,τι δείχνει τώρα η εφαρμογή.',
+  'machine output changed since the decision': 'Το αποτέλεσμα της μηχανής άλλαξε μετά την απόφασή σου (νέο OCR, νέα έκδοση μοντέλου ή άλλη διάταξη).',
+  'block no longer exists (layout or OCR changed)': 'Το τμήμα δεν υπάρχει πια στην ίδια μορφή (άλλαξε η διάταξη ή το OCR).',
+};
 export function segmentPanel(body, blk) {
   const nb = queueNeighbours(blk), book = S.book, { seg, decided } = segState(blk);
   const latex = isLatexBlock(blk);
@@ -108,6 +114,8 @@ export function segmentPanel(body, blk) {
         c.before !== undefined ? h('div', { class: 'conflict-ctx' }, '…' + c.before + ' ', h('mark', { class: 'conflict' + (c.critical ? ' crit' : '') }, c.primary), ' ' + c.after + '…')
           : h('div', { class: 'mut' }, `…${c.context}…`)))));
       if (ev && ev.note) body.append(h('div', { class: 'note' }, '«' + ev.note + '»'));
+      if (r === 'DECISION_STALE' && ev) body.append(h('div', { class: 'note small' }, STALE_WHY[ev.why] || ev.why || '',
+        ' Η απόφαση μένει στο ιστορικό· μια νέα απόφαση εδώ την αντικαθιστά.'));
     }
   }
   const notes = [...(needs ? [] : reasons), ...info];
