@@ -222,6 +222,10 @@ class Handler(BaseHTTPRequestHandler):
     def pages_restore(self, bid):
         self._json(200, self.app.remove_pages(bid, self._body().get('pages'), self._actor(), restore=True))
 
+    @route('POST', r'/api/books/([\w.-]+)/rebuild')
+    def rebuild(self, bid):
+        self._json(200, self.app.rebuild(bid) or {})
+
     @route('POST', r'/api/books/([\w.-]+)/process')
     def process(self, bid):
         self._json(200, self.app.process(bid, self._body().get('pages')))

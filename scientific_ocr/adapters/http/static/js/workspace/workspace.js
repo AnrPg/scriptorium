@@ -1,4 +1,5 @@
 import { B, api } from '../core/api.js';
+import { ensureFresh, pendingOf } from '../ui/rebuild.js';
 import { refresh } from '../core/chrome.js';
 import { $, clear, h, keepScroll, pctStyle } from '../core/dom.js';
 import { NAV, navSave } from '../core/nav.js';
@@ -39,7 +40,10 @@ export function setSelection(ids, { open = false, pageOf = null } = {}) {
 }
 export function reorderSelection(ids) { const m = new Map(ids.map(k => [k, S.multi.get(k)])); S.multi.clear(); m.forEach((v, k) => S.multi.set(k, v)); }
 export function leaveScanModes() { S.drawing = false; S.draft = null; S.selectMode = false; S.linking = null; }   // scan-only modes
-export function setView(k) { if (k !== 'scan') leaveScanModes(); S.leftView = k; localStorage.setItem('ocr.leftView', k); renderWorkspace(); }
+export async function setView(k) {
+  if (k !== 'scan' && !(await ensureFresh(k === 'markdown' ? 'Το «Markdown» της σελίδας' : 'Το «Αποτέλεσμα» της σελίδας'))) return;   // shows the rebuilt output
+  if (k !== 'scan') leaveScanModes(); S.leftView = k; localStorage.setItem('ocr.leftView', k); renderWorkspace();
+}
 // "Out of the output": real content the reviewer leaves out of the READER exports; it stays in the book model
 // (review, hierarchy, entities, JSON). Not the same as removing a wrong box (inspector › layout).
 export const omitTargets = () => S.multi.size ? [...S.multi.keys()] : (S.sel ? [S.sel] : []);
@@ -76,6 +80,7 @@ export const TOOLS = {
 // Re-rendering rebuilds the workspace DOM; scroll positions of its panes are kept when the screen is the same
 // (same book, page and view), so clicks that only change state (multi-select, tools) never move the page.
 export function renderWorkspace() {
+  if (S.leftView !== 'scan' && pendingOf().count) S.leftView = 'scan';   // output views show the rebuilt book only
   const key = `${S.book?.id}|${S.page?.page}|${S.leftView}`;
   const same = S.wsScrollKey === key;
   if (!same) { S.scrolledTo = null; S.outputScrolledTo = null; }   // new screen: bring the selected segment into view once

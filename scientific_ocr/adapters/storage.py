@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..core.decisions import NEEDS_OCR
 from .. import config
 from ..core.model import page_summary
 from . import pdf as pdfio
@@ -192,6 +193,26 @@ class Book:
                 s = {'state': 'not_processed', 'blocks': 0, 'required': 0, 'recommended': 0, 'decided': 0}
             out.append({'page': p, 'dims': dims.get(str(p)), **s})
         return out
+
+    def rebuild_estimate(self) -> float | None:
+        """Seconds the next rebuild will probably take: the last measured one, else a rough guess from the number of
+        processed pages (None for a book never built)."""
+        m = read_json(self.dir / 'cache' / 'build.json')
+        if m and m.get('seconds') is not None:
+            return float(m['seconds'])
+        c = self.canonical()
+        return len(c['source']['pages_processed']) * config.BUILD_SECONDS_PER_PAGE_GUESS if c else None
+
+    def pending(self) -> dict:
+        """Reviewer actions recorded after the last rebuild (banked: in the event log, not yet in the outputs).
+        `ocr`: how many of them need new OCR, done by the rebuild."""
+        last = ((self.canonical() or {}).get('human') or {}).get('last_seq', 0)
+        try:
+            evs = [e for e in self.events.load() if e['seq'] > last]
+        except Exception:                      # an invalid log is reported by the projection, not here
+            evs = []
+        return {'count': len(evs), 'ocr': sum(e['type'] in NEEDS_OCR for e in evs), 'events': evs[-200:],
+                'estimate_s': self.rebuild_estimate()}
 
     def removed_pages(self) -> list[int]:
         """Pages the reviewer left out of the book (events page_remove/page_restore; reversible, raw OCR kept)."""

@@ -56,6 +56,7 @@ class LibraryService(ServiceBase):
         st = b.events.state()
         c = b.canonical() or {}
         return {**b.summary(), 'rev': b.revision(), 'pages': b.pages(), 'rules': st['rules'], 'job': self.jobs.busy(b.id),
+                'pending': b.pending(),
                 'progress': b.progress(), 'jobs': self.jobs.list(b.id)[:20],
                 'can_undo': bool(st['undo_targets']), 'can_redo': bool(st['redo_targets']),
                 'stale': (c.get('human') or {}).get('stale', []), 'sections': c.get('sections', []),
@@ -73,8 +74,10 @@ class LibraryService(ServiceBase):
         """rev: changes with the events or the projection; projection: changes only when outputs were rebuilt;
         rebuilding: a re-projection is queued/running (the UI confirms an action only once it is reflected)."""
         active = getattr(self.jobs, 'active', None)
+        pend = b.pending()
         return {'rev': b.revision(), 'busy': bool(self.jobs.busy(b.id)), 'projection': b.revision().split('-')[0],
-                'rebuilding': bool(active(b.id, 'light')) if active else False}
+                'rebuilding': bool(active(b.id, 'light')) if active else False,
+                'pending': pend['count'], 'pending_ocr': pend['ocr'], 'estimate_s': pend['estimate_s']}
 
     # ---------------------------------------------------------------- books
     def create_from_upload(self, tmp: Path, filename: str, title: str | None) -> dict:

@@ -45,6 +45,11 @@ RENDER_ZOOM = 2.0
 # at Marker's default 192 dpi would lose a third of its detail), and never above OCR_MAX_DPI. Defaults of the
 # engines, used when the scan is coarser: Marker OCR images 192 dpi, Docling/Tesseract scale 3 = 216 dpi.
 OCR_MAX_DPI = 600
+# Rebuilding a book (re-projection) after a reviewer action: done at once only when the book's last rebuild took
+# at most this long; otherwise actions are BANKED (recorded, not yet applied to the outputs) until the reviewer
+# rebuilds — explicitly, or when a view that needs book-wide results asks for it.
+AUTO_REBUILD_MAX_S = 15
+BUILD_SECONDS_PER_PAGE_GUESS = 1.0      # until a book's first measured rebuild (cache/build.json)
 MARKER_DEFAULT_OCR_DPI = 192
 DOCLING_DEFAULT_OCR_DPI = 216
 CROP_PAD_PT = 8.0

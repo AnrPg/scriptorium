@@ -12,7 +12,8 @@ export function toast(msg, opts = {}) {
 }
 // An action is confirmed only when it is REFLECTED: the request is recorded (an event) and the book's outputs
 // were rebuilt from it (a re-projection job). The confirmation waits for the rebuild; if none follows (an action
-// that changes no output) it appears shortly after.
+// that changes no output) it appears shortly after. In a large book the action is BANKED instead (recorded, no
+// rebuild yet: rev.pending > 0 and nothing rebuilding): then it is confirmed at once, as waiting for the rebuild.
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function reflected(bookId, before) {
   const t0 = Date.now();
@@ -20,18 +21,23 @@ async function reflected(bookId, before) {
     await sleep(500);
     let r;
     try { r = await api(`/api/books/${encodeURIComponent(bookId)}/rev`); } catch { return; }
-    if (!r.rebuilding && (r.projection !== before || Date.now() - t0 > 2500)) return r;
+    if (!r.rebuilding && (r.projection !== before || r.pending > 0 || Date.now() - t0 > 2500)) return r;
   }
 }
 export async function act(fn, okMsg, undoable = true) {
   const book = S.book && S.book.id;
-  let before = null;
-  if (book) { try { before = (await api(`/api/books/${encodeURIComponent(book)}/rev`)).projection; } catch { before = null; } }
+  let before = null, rev0 = null;
+  if (book) { try { rev0 = await api(`/api/books/${encodeURIComponent(book)}/rev`); before = rev0.projection; } catch { before = null; } }
   let r;
   try { r = await fn(); } catch (e) { toast(e.message, { error: true }); throw e; }
   S.recentEdit = Date.now(); kickPoll();
-  if (book && before !== null) await reflected(book, before);
-  if (okMsg) toast(okMsg, { undo: undoable && S.book });
+  const after = book && before !== null ? await reflected(book, before) : null;
+  const banked = after && !after.rebuilding && after.pending > 0;
+  if (okMsg) toast(banked ? `${okMsg} · σε αναμονή για την ενημέρωση του βιβλίου` : okMsg, { undo: undoable && S.book });
+  if (banked && after.pending_ocr > ((rev0 && rev0.pending_ocr) || 0)) {
+    const { rebuildDialog } = await import('./rebuild.js');
+    rebuildDialog('Η νέα ανάγνωση (OCR) αυτής της περιοχής γίνεται κατά την ενημέρωση του βιβλίου· μέχρι τότε βλέπεις το προηγούμενο αποτέλεσμα.');
+  }
   kickPoll();
   return r;
 }

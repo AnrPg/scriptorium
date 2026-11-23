@@ -1,4 +1,5 @@
 import { entName, segmentEntities } from '../book/entities.js';
+import { describePending, pendingFor, startRebuild } from '../ui/rebuild.js';
 import { conflictRanges, conflictsOf, highlightTextarea, markedText } from '../ui/highlight.js';
 import { B, api } from '../core/api.js';
 import { $, clear, h } from '../core/dom.js';
@@ -83,6 +84,10 @@ export function segmentPanel(body, blk) {
     blk.merged_from.map((m, i) => h('div', { class: 'small' }, `${i + 1}. ${(m.text || '[εικόνα]').slice(0, 70)}`)),
     h('button', { class: 'small', style: { marginTop: '6px' }, onclick: () => act(() => api(`${B(book.id)}/merges/${blk.merge_id}/remove`, { body: {} }), 'Το τμήμα διασπάστηκε στα κομμάτια του') }, 'Διάσπαση')));
   // 3. the source: what is printed
+  const waiting = pendingFor(blk);
+  if (waiting.length) body.append(h('div', { class: 'note', title: 'Η αλλαγή καταγράφηκε· περνά στο βιβλίο με την επόμενη ενημέρωση' },
+    h('b', {}, 'Σε αναμονή: '), waiting.map(describePending).join(' · '),
+    ' ', h('button', { class: 'small', onclick: () => startRebuild() }, 'Ενημέρωση βιβλίου')));
   if (blk.crop) body.append(h('img', { class: 'crop', src: `${B(book.id)}/${blk.crop}`, alt: 'Απόσπασμα από τη σελίδα' }));
   // 4. why (only when something is asked of the reviewer); machine notes collapsed
   if (reasons.length && needs) {

@@ -11,6 +11,10 @@ CONTENT_ACTIONS = VALUE_ACTIONS | {'approve'}
 
 VALUE_DECISIONS = VALUE_ACTIONS - {'revert'}          # decisions whose value IS the content while in force
 
+# Events whose effect needs new OCR, done in the rebuild (reviewer regions are OCR'd there): when rebuilds are
+# banked, the reviewer is told the new reading appears only after the book is rebuilt.
+NEEDS_OCR = {'region_add'}
+
 # Required fields per event type (validated when an event is appended; extra fields are allowed).
 EVENT_FIELDS = {
     'decision': {'block_id', 'action'}, 'rule_add': {'rule'}, 'rule_remove': {'rule_id'},

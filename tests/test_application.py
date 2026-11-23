@@ -1104,3 +1104,50 @@ def test_progress_names_the_careful_phase_and_its_pages(tmp_path):
     assert p['phase'] == 'diligent' and p['phase_pages'] == [3, 7] and p['page'] == 7 and p['step'] == 'extract'
     progress_for(tmp_path, 'process')('done', 1, 1, code=0)
     assert 'phase' not in read_json(tmp_path / 'progress.json')
+
+
+def test_integrity_audit_reads_html_escaped_export_text():
+    """A caption with 'ΔG > 0' is exported inside <figcaption> as '&gt;': that is present content, not a loss."""
+    from scientific_ocr.pipeline import audit
+    t = 'Η ενεργειακά μη ευνοϊκή ($\\Delta G > 0$) αντίδραση $X \\rightarrow Y$ δε μπορεί'
+    md = '<figure><figcaption>' + t.replace('>', '&gt;') + '</figcaption></figure>'
+    assert audit._snippet(t) in audit._norm(md)
+
+
+def test_integrity_exit_is_a_finished_job_with_a_warning(tmp_path, monkeypatch):
+    """Exit 5 (outputs written, integrity finding) is 'done' + warning, never shown as a failed job."""
+    import subprocess as sp
+    from scientific_ocr.application import jobs as jq
+
+    class P:
+        pid = 0
+        def wait(self):
+            return 5
+    monkeypatch.setattr(jq.subprocess, 'Popen', lambda *a, **k: P())
+    q = jq.JobQueue(tmp_path)
+    job = {'id': 'j', 'book': 'b', 'kind': 'reproject', 'label': 'x', 'lane': 'light', 'args': [], 'state': 'queued',
+           'created': 1, 'started': None, 'finished': None, 'code': None}
+    q.jobs['j'] = job
+    q._execute(job)
+    assert job['state'] == 'done' and job['warning'] == 'integrity' and job['code'] == 5
+
+
+def test_actions_are_banked_in_slow_books_until_rebuild(app):
+    """A book whose rebuild is slow does not rebuild after every action: the action is recorded and BANKED
+    (pending, with OCR-needing ones counted); `rebuild` applies all of them in one job."""
+    import json
+    a, out = app
+    (out / 'cache').mkdir(exist_ok=True)
+    (out / 'cache' / 'build.json').write_text(json.dumps({'seconds': 400}))      # like a 465-page book
+    blk = next(b for b in a.page('run', 1)['blocks'] if 'SINGLE_ENGINE_DOCLING' in b['reasons'])
+    before = len(a.jobs.submitted)
+    a.decide('run', blk['id'], 'replace_text', value='fixed text')
+    a.add_region('run', 1, [10, 10, 200, 60], {'engine': 'marker', 'name': 'Text'})
+    assert len(a.jobs.submitted) == before                                    # nothing rebuilt yet
+    p = a.book('run')['pending']
+    assert p['count'] >= 2 and p['ocr'] == 1 and p['estimate_s'] == 400
+    rev = a.revision('run')
+    assert rev['pending'] == p['count'] and rev['pending_ocr'] == 1
+    a.rebuild('run')
+    assert a.jobs.submitted[-1] == ('reproject', 'light')
+    assert build(out) == 0 and a.book('run')['pending']['count'] == 0         # applied: nothing pending

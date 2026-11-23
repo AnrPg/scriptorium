@@ -127,6 +127,8 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
     for line in change_report(prev, canonical, inp.human['history']):
         log(line)
     log('timings (s): ' + ', '.join(f'{k} {v}' for k, v in clock.items()))
+    atomic_write(out / 'cache' / 'build.json', json.dumps({'seconds': round(sum(clock.values()), 1), 'timings': clock,
+                                                         'built_utc': canonical['run']['built_utc']}))
     return code
 
 

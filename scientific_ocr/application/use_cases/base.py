@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from ... import config
 from ...adapters import local_llm
 from ...adapters.storage import Book, Library
 from ..jobs import JobQueue
@@ -48,10 +49,22 @@ class ServiceBase:
             raise ServiceError('unknown block (the page may have been rebuilt; reload)')
         return blk
 
-    def _reproject(self, b: Book, label='Ενημέρωση αποτελέσματος'):
+    def _reproject(self, b: Book, label='Ενημέρωση αποτελέσματος', force: bool = False):
+        """Apply recorded actions to the book's outputs. A rebuild runs at once only for books that rebuild quickly
+        (config.AUTO_REBUILD_MAX_S); otherwise the actions stay BANKED (Book.pending) until the reviewer rebuilds
+        (`rebuild`), so no click ever waits minutes for a whole-book rebuild."""
         if getattr(_uow, 'events', None) is not None:          # inside a batch: one rebuild at the end
             return None
+        est = b.rebuild_estimate()
+        if not force and est is not None and est > config.AUTO_REBUILD_MAX_S:
+            return None
         return self.jobs.submit(b.id, 'reproject', ['reproject', '--book', str(b.dir)], label, lane='light')
+
+    def rebuild(self, book_id: str) -> dict:
+        """Apply every banked action now (one rebuild for all of them)."""
+        b = self._book(book_id)
+        n = b.pending()['count']
+        return self._reproject(b, f'Ενημέρωση βιβλίου ({n} αλλαγ{"ή" if n == 1 else "ές"})' if n else 'Ενημέρωση βιβλίου', force=True)
 
     def _append(self, b: Book, *events: dict, actor='reviewer') -> list[dict]:
         """Append reviewer events, or collect them when a batch is open (several use cases → ONE undoable step)."""

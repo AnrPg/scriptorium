@@ -6,13 +6,15 @@ import { $, clear, h } from '../core/dom.js';
 import { R, S, go } from '../core/state.js';
 import { EXPORT_EL, KIND_EL, STATE_EL, infoTip } from '../core/strings.js';
 import { act, modal, openDialog, toast } from '../ui/feedback.js';
+import { ensureFresh } from '../ui/rebuild.js';
 
 // ---------------------------------------------------------------- export wizard
 // Steps: 1 format · 2 content (exclusions) · 3 move to the end of each unit · 4 separators, preview, download.
 // Steps 2–3 apply to reader-facing formats (Markdown, PDF) only. Choices are remembered per book.
 export const READER_FORMATS = new Set(['markdown_images', 'markdown_text', 'pdf']);
 export const WIZ_STEPS = [['format', 'Μορφή'], ['content', 'Περιεχόμενο'], ['move', 'Μετακίνηση στο τέλος'], ['finish', 'Έλεγχος & λήψη']];
-export function exportDialog() {
+export async function exportDialog() {
+  if (!(await ensureFresh('Η «Εξαγωγή»'))) return;
   const book = S.book, KEY = 'ocr.export.' + book.id;
   const saved = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } })();
   const st = { fmt: saved.fmt || 'markdown_images', exclude: new Set(saved.exclude || []), move: new Set(saved.move || []),

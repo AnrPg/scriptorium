@@ -5,6 +5,7 @@ import { $, clear, h, keepScroll } from '../core/dom.js';
 import { render } from '../core/nav.js';
 import { S } from '../core/state.js';
 import { BOOK_TABS, RELEASE_EL, STEP_EL } from '../core/strings.js';
+import { ensureFresh, pendingOf } from '../ui/rebuild.js';
 import { exportDialog, openNextRequired, processDialog, tabPages, tabReview } from '../export/wizard.js';
 import { act } from '../ui/feedback.js';
 
@@ -33,6 +34,11 @@ function drawBook() {
   const tabs = BOOK_TABS;
   page.append(h('nav', { class: 'tabs' }, tabs.map(([k, l]) => h('a', { href: `#/b/${b.id}/${k}`, class: S.tab === k ? 'on' : '' }, l))));
   const body = h('div'); page.append(body);
+  if (GATED_TABS[S.tab] && pendingOf(b).count) {           // book-wide results: ask to rebuild first
+    body.append(h('div', { class: 'empty' }, h('p', {}, `${GATED_TABS[S.tab]}: διαθέσιμο μετά την ενημέρωση του βιβλίου.`)));
+    ensureFresh(GATED_TABS[S.tab]).then(() => { if (pendingOf(S.book).count) history.back(); });
+    return;
+  }
   ({ pages: tabPages, review: tabReview, quality: tabQuality, structure: tabStructure, rules: tabRules, history: tabHistory, settings: tabSettings })[S.tab]?.(body);
 }
 /** Pages being re-examined by the automatic careful pass of the running job (empty when there is none). */
@@ -41,6 +47,8 @@ export function carefulPages(b) {
   return b && b.job && p.phase === 'diligent' && p.step !== 'done' ? new Set(p.phase_pages || []) : new Set();
 }
 export const carefulLabel = (n) => `Προσεκτική επανεξέταση ${n} σελίδων με προβλήματα διάταξης`;
+// Tabs that show book-wide inference (hierarchy, groups, entities, classes): they need the banked actions applied.
+const GATED_TABS = { structure: 'Η «Δομή»', quality: 'Ο «Μαζικός έλεγχος»' };
 export function progressCard(b) {
   const p = b.progress || {}, j = b.job, steps = p.steps || ['prepare', 'extract', 'regions', 'compose', 'models', 'render'];
   const cur = steps.indexOf(p.step);

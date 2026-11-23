@@ -25,6 +25,9 @@ from ..adapters import extraction
 from ..adapters.storage import NotFound, atomic_write, read_json
 
 HISTORY = 200
+# Exit codes that mean "outputs were written, but something needs attention" (not a failed job).
+# 5 = the projection's integrity audit raised a critical finding (application.projection._publish).
+WARNING_EXITS = {5: 'integrity'}
 
 
 class JobQueue:
@@ -166,8 +169,10 @@ class JobQueue:
             code = p.wait()
         with self.lock:
             self.procs.pop(job['id'], None)
-            state = 'cancelled' if job.get('cancel_requested') else ('done' if code == 0 else 'failed')
+            state = 'cancelled' if job.get('cancel_requested') else ('done' if code == 0 or code in WARNING_EXITS else 'failed')
             job.update(state=state, code=code, finished=time.time())
+            if state == 'done' and code in WARNING_EXITS:
+                job['warning'] = WARNING_EXITS[code]
             self._persist()
             idle = not self.procs
         if idle and state != 'done':

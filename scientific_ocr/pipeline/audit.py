@@ -7,6 +7,7 @@ integrity, export integrity, and the canonical JSON schema.
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 from pathlib import Path
 
@@ -124,7 +125,9 @@ _LEAK = re.compile(r'\bp\d+_[0-9a-f]{8}\b|BLOCK_START|BLOCK_END|EXCERPT_START|pr
 
 
 def _norm(t: str) -> str:
-    return strip_markup(t)
+    """Comparable text: HTML entities decoded first (inside <figure>/<aside> the export escapes '<', '>', '&'),
+    then markup stripped. Applied to both sides, so a block's text and the export compare as readers see them."""
+    return strip_markup(html.unescape(t or ''))
 
 
 def _snippet(t: str) -> str | None:
