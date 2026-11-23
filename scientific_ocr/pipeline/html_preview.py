@@ -81,9 +81,14 @@ def body_html(c: dict, asset_url, reviewer: bool = False, pages: set | None = No
         elif t == 'image':
             out.append(f'<div{attrs}>{_img(n["image"], asset_url, lab["figure"])}{chip}</div>')
         elif t == 'box_start':
-            out.append('<aside class="pv-box">')
+            out.append('<figure class="pv-figure pv-figure-group">' if n.get('figure') else '<aside class="pv-box">')
+        elif t == 'group_caption':
+            body = ''.join(_img(p, asset_url, lab['figure']) for p in n.get('caption_images') or [])
+            caps = ''.join(f'<figcaption class="pv-cap pv-cap-{escape(cp["role"])}">{inline_html(cp["text"])}</figcaption>'
+                           for cp in n['captions'])
+            out.append(f'<div{attrs}>{body}{caps}{chip}</div>')
         elif t == 'box_end':
-            out.append('</aside>')
+            out.append('</figure>' if n.get('figure') else '</aside>')
     return '\n'.join(out)
 
 

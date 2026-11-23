@@ -68,10 +68,18 @@ def markdown(canonical: dict, images: bool = True, style: str = 'tags', pages: s
             out.append(_figure(n, images, style, lab, url))
         elif t == 'image':
             out.append(f'![{lab["figure"]}]({url(n["image"])})' if images else f'[{lab["figure"]}]')
-        elif t == 'box_start':
-            out.append('<aside>' if style == 'tags' else f'<!-- {BOX_NAMES[lang]} -->')
+        elif t == 'box_start':                        # a group of figures is one figure (with its own caption)
+            out.append(('<figure>' if n.get('figure') else '<aside>') if style == 'tags'
+                       else f'<!-- {"figure" if n.get("figure") else BOX_NAMES[lang]} -->')
+        elif t == 'group_caption':
+            cap = _caption_text(n)
+            for path in n.get('caption_images') or []:
+                out.append(f'![{lab["figure"]}]({url(path)})' if images else f'[{lab["figure"]}]')
+            if cap:
+                out.append(f'<figcaption>{inline_html(cap)}</figcaption>' if style == 'tags' else '*' + re.sub(r'\*\*', '', cap) + '*')
         elif t == 'box_end':
-            out.append('</aside>' if style == 'tags' else f'<!-- /{BOX_NAMES[lang]} -->')
+            out.append(('</figure>' if n.get('figure') else '</aside>') if style == 'tags'
+                       else f'<!-- /{"figure" if n.get("figure") else BOX_NAMES[lang]} -->')
         src = reading.excerpt(n)
         if src:                                       # unsettled machine text never travels without its source
             out.append(f'![{lab["source"]}]({url(src)})' if images else f'[{lab["source"]}: σελ. {n["blocks"][0]["page"]}]')

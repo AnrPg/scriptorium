@@ -1465,3 +1465,25 @@ def test_merging_images_into_a_figure_needs_no_text_but_a_text_merge_does():
         assert m['display_crop'] and ('MERGE_PART_WITHOUT_TEXT' in codes(m)) == flagged
         if not flagged:
             assert m['review'] not in ('required', 'recommended') and m['chosen']['type'] == 'image_only'
+
+
+def test_a_group_of_figures_has_its_own_caption_besides_each_figure_caption():
+    """Several figures grouped: each keeps its own caption, the group has one caption for all; the export renders
+    one outer figure (inner figures with their captions, then the group caption) and the reading order puts the
+    group caption right after the group's last member."""
+    from scientific_ocr.pipeline import groups, markdown, overlay
+    def blk(i, kind, text='', **rel):
+        return {'id': i, 'page': 1, 'kind': kind, 'chosen': {'type': 'text', 'text': text} if text else {'type': 'image_only'},
+                'relations': {'captions': [], **rel}, 'reasons': [], 'review': 'not_needed', 'reading_order': 0,
+                'source_crop': {'path': f'assets/{i}.png'}, 'excluded': {}, 'flow': 'insert' if kind != 'caption' else 'main'}
+    gcap = blk('gc', 'paragraph', 'ΕΙΚΟΝΑ 2-9 Τρεις μορφές του ίδιου μορίου')
+    f1, c1 = blk('f1', 'figure', captions=['c1']), blk('c1', 'caption', '(Α) Σκελετικό μοντέλο', caption_for='f1')
+    f2, c2 = blk('f2', 'figure', captions=['c2']), blk('c2', 'caption', '(Β) Μοντέλο κορδέλας', caption_for='f2')
+    blocks = [gcap, f1, c1, f2, c2]
+    overlay.COMMANDS['associate_group_caption'](gcap, {'group_id': 'G1'}, {'blocks': blocks, 'by_id': {b['id']: b for b in blocks}})
+    out = groups.annotate(blocks, [{'id': 'G1', 'type': 'figure_group', 'name': '', 'members': ['f1', 'f2']}], {})
+    assert out[0]['captions'] == ['gc'] and [b['id'] for b in blocks] == ['f1', 'c1', 'f2', 'c2', 'gc']
+    md = markdown.markdown({'blocks': blocks, 'groups': out, 'entities': [], 'source': {}, 'pages': []})
+    inner1, inner2, group = md.index('(Α) Σκελετικό'), md.index('(Β) Μοντέλο'), md.index('ΕΙΚΟΝΑ 2-9')
+    assert inner1 < inner2 < group and md.count('<figure>') == md.count('</figure>') == 3
+    assert md.count('ΕΙΚΟΝΑ 2-9') == 1 and md.rstrip().endswith('</figure>')

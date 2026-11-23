@@ -1,3 +1,4 @@
+import { dropdown } from '../inspector/multi.js';
 import { B, api } from '../core/api.js';
 import { $, h } from '../core/dom.js';
 import { S, kindLabel } from '../core/state.js';
@@ -13,17 +14,28 @@ export function captionPanel(blk) {
   const FIG = ['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table', 'math', 'chemical_reaction'];
   if (blk.kind === 'caption' || !FIG.includes(blk.kind)) {        // any text segment may be linked as a caption
     const owner = byId[blk.relations?.caption_for];
+    // the caption of a whole GROUP (several figures, each with its own caption, and one caption for all)
+    // groups of the book + groups made since the last book rebuild (pending group_add events): what you made is choosable
+    const pendingGroups = ((S.book.pending || {}).events || []).filter(e => e.type === 'group_add' && e.group)
+      .map(e => ({ ...e.group, pending: true })).filter(g => !(S.book.groups || []).some(x => x.id === g.id));
+    const pageGroups = [...(S.book.groups || []), ...pendingGroups].filter(g => g.members.some(m => byId[m]) && !g.members.includes(blk.id));
+    const ownGroup = [...(S.book.groups || []), ...pendingGroups].find(g => g.id === blk.relations?.caption_group);
+    const groupBtn = pageGroups.length ? h('button', { onclick: (e) => dropdown(e.currentTarget,
+      [{ title: 'Ομάδες της σελίδας', items: pageGroups.map(g => ({ label: (g.name || S.meta.group_types[g.type] || g.type) + (g.pending ? ' (σε αναμονή)' : ''), hint: `${g.members.length} τμήματα`, value: g.id })) }],
+      (it) => decide('associate_group_caption', { group_id: it.value }, 'Έγινε λεζάντα της ομάδας')) }, 'Λεζάντα όλης της ομάδας…') : null;
     if (blk.kind !== 'caption' && !owner) return h('details', {}, h('summary', {}, 'Λεζάντα'), h('div', {},
       h('p', { class: 'small mut' }, 'Αν αυτό το τμήμα είναι λεζάντα (π.χ. «Σχήμα 4.9»), σύνδεσέ το με το σχήμα του.'),
-      h('button', { onclick: () => startLink('caption->figure') }, 'Σύνδεση με σχήμα…')));
+      h('button', { onclick: () => startLink('caption->figure') }, 'Σύνδεση με σχήμα…'), groupBtn));
     return h('details', { open: blk.kind === 'caption' }, h('summary', {}, 'Λεζάντα'), h('div', {},
-      h('div', { class: 'row small' }, 'Ανήκει σε:', owner ? h('a', { href: '#', onclick: (e) => { e.preventDefault(); selectBlock(owner.id); } }, kindLabel(owner)) : h('span', { class: 'badge-bad' }, 'κανένα σχήμα'),
+      h('div', { class: 'row small' }, 'Ανήκει σε:', owner ? h('a', { href: '#', onclick: (e) => { e.preventDefault(); selectBlock(owner.id); } }, kindLabel(owner))
+        : ownGroup ? h('span', { class: 'chip grp' }, `▣ ομάδα «${ownGroup.name || S.meta.group_types[ownGroup.type] || ownGroup.type}» (${ownGroup.members.length})`)
+        : h('span', { class: 'badge-bad' }, 'κανένα σχήμα'),
         blk.relations?.inferred ? h('span', { class: 'mut' }, '(συμπεράνθηκε)') : null),
       h('div', { class: 'row small', style: { margin: '6px 0' } }, 'Ρόλος:',
         ['title', 'text'].map(r => h('button', { class: 'small' + (blk.caption_role === r ? ' primary' : ''), onclick: () => decide('set_caption_role', { role: r }, 'Ο ρόλος ενημερώθηκε') }, CAPROLE_EL[r])),
         blk.caption_label ? h('span', { class: 'mut' }, `ετικέτα: ${blk.caption_label}`) : null),
-      h('div', { class: 'actions' }, h('button', { onclick: () => startLink('caption->figure') }, owner ? 'Σύνδεση με άλλο σχήμα…' : 'Σύνδεση με σχήμα…'),
-        owner ? h('button', { class: 'ghost', onclick: () => decide('detach_caption', {}, 'Η λεζάντα αποσυνδέθηκε') }, 'Αποσύνδεση') : null)));
+      h('div', { class: 'actions' }, h('button', { onclick: () => startLink('caption->figure') }, owner ? 'Σύνδεση με άλλο σχήμα…' : 'Σύνδεση με σχήμα…'), groupBtn,
+        owner || ownGroup ? h('button', { class: 'ghost', onclick: () => decide('detach_caption', {}, 'Η λεζάντα αποσυνδέθηκε') }, 'Αποσύνδεση') : null)));
   }
   const caps = (blk.relations?.captions || []).map(id => byId[id]).filter(Boolean);
   if (!['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table', 'math', 'chemical_reaction'].includes(blk.kind) && !caps.length) return h('span');

@@ -76,14 +76,17 @@ def nodes(c: dict, pages: set | None = None, options: dict | None = None) -> lis
         starts.setdefault(g['first'], []).append(g)
         ends.setdefault(g['last'], []).append(g)
     out, done = [], set()
+    group_caps = {cid for g in boxes for cid in g['captions'] if cid in by_id}   # rendered at the end of their group
 
     def emit(b):
         if b['id'] in done:
             return
         for g in starts.get(b['id'], []):
-            out.append({'t': 'box_start', 'type': g['type'], 'name': g['name'], 'blocks': []})
+            out.append({'t': 'box_start', 'type': g['type'], 'name': g['name'], 'figure': g['figure'], 'blocks': []})
         done.add(b['id'])
-        if b['kind'] == 'caption' and b['relations'].get('caption_for') in by_id:
+        if b['id'] in group_caps:
+            pass                                          # the caption of a whole group: rendered at its end
+        elif b['kind'] == 'caption' and b['relations'].get('caption_for') in by_id:
             pass                                          # rendered inside its figure
         elif b['relations'].get('continues_in') and not b['relations'].get('continues_from'):
             chain = [b]
@@ -106,7 +109,14 @@ def nodes(c: dict, pages: set | None = None, options: dict | None = None) -> lis
 
     def _close(b):
         for g in ends.get(b['id'], []):
-            out.append({'t': 'box_end', 'type': g['type'], 'blocks': []})
+            caps = [by_id[c] for c in g['captions'] if c in by_id]
+            if caps:
+                out.append({'t': 'group_caption', 'figure': g['figure'], 'blocks': caps,
+                            'captions': [{'text': chosen_text(x), 'role': x.get('caption_role') or 'text',
+                                          'label': x.get('caption_label')} for x in caps if chosen_text(x)],
+                            'caption_images': [_image(x) for x in caps if not chosen_text(x) and _image(x)]})
+                done.update(x['id'] for x in caps)
+            out.append({'t': 'box_end', 'type': g['type'], 'figure': g['figure'], 'blocks': []})
 
     for b in blocks:
         emit(b)
@@ -254,6 +264,9 @@ def _boxes(c, pos, flow_blocks) -> list[dict]:
     for a, z, g in sorted(cands, key=lambda x: (x[0], -x[1])):
         if a <= end or gaps(g['members'], flow_blocks):
             continue
-        out.append({'first': ids[a], 'last': ids[z], 'type': g['type'], 'name': g.get('name') or ''})
+        kinds = {b['id']: b['kind'] for b in flow_blocks}
+        figure = g['type'] == 'figure_group' or all(kinds.get(m) in CAPTIONABLE_KINDS for m in g['members'] if m in kinds)
+        out.append({'first': ids[a], 'last': ids[z], 'type': g['type'], 'name': g.get('name') or '', 'id': g.get('id'),
+                    'figure': figure, 'captions': list(g.get('captions') or [])})
         end = z
     return out

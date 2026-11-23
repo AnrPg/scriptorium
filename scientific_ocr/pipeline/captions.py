@@ -102,7 +102,7 @@ def finalize(blocks: list[dict]):
         cap['caption_label'] = label
         if cap.get('caption_role_source') != 'human':
             cap['caption_role'] = 'title' if label and len(rest) < 3 else 'text'
-        if not cap['relations'].get('caption_for'):
+        if not cap['relations'].get('caption_for') and not cap['relations'].get('caption_group'):
             flag(cap, 'CAPTION_WITHOUT_FIGURE')
 
 

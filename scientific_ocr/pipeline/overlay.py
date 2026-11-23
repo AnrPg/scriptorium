@@ -86,6 +86,7 @@ def _associate_caption(b, d, ctx):
     if f is None or b['kind'] in CAPTIONABLE_KINDS | EQUATION_KINDS or f is b or f['page'] != b['page']:
         raise Stale('caption/figure missing')
     b['kind'] = 'caption'
+    b['relations'].pop('caption_group', None)           # a figure's caption, not a group's
     old = ctx['by_id'].get(b['relations'].get('caption_for'))
     if old:
         old['relations']['captions'] = [x for x in old['relations'].get('captions', []) if x != b['id']]
@@ -109,6 +110,25 @@ def _detach_caption(b, d, ctx):
     if f:
         f['relations']['captions'] = [x for x in f['relations'].get('captions', []) if x != b['id']]
     b['relations'].update(caption_for=None, inferred=False)
+    b['relations'].pop('caption_group', None)
+
+
+def _associate_group_caption(b, d, ctx):
+    """The caption of a whole GROUP (e.g. several figures, each with its own caption, and one caption for all).
+    The group is resolved by the groups stage (pipeline.groups); a group that no longer exists drops the link."""
+    if b['kind'] in CAPTIONABLE_KINDS | EQUATION_KINDS:
+        raise Stale('a figure/table/formula cannot be a caption')
+    old = ctx['by_id'].get(b['relations'].get('caption_for'))
+    if old:
+        old['relations']['captions'] = [x for x in old['relations'].get('captions', []) if x != b['id']]
+    b['kind'] = 'caption'
+    b['relations'].update(caption_for=None, inferred=False, caption_group=d['group_id'])
+
+
+def _v_group_caption(blk, p, find):
+    if not isinstance(p.get('group_id'), str) or not p['group_id']:
+        raise CommandError('group_id required')
+    return {'group_id': p['group_id']}
 
 
 def _set_caption_role(b, d, ctx):
@@ -278,6 +298,7 @@ COMMANDS: dict[str, Command] = {
     'set_caption_role': Command(_set_caption_role, _v_role), 'link_reference': Command(_link_reference, _v_link),
     'set_output': Command(_set_output, _v_output),
     'set_flow': Command(_set_flow, _v_flow), 'set_continuation': Command(_set_continuation, _v_continuation),
+    'associate_group_caption': Command(_associate_group_caption, _v_group_caption),
 }
 
 

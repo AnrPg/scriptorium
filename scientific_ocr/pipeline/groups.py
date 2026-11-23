@@ -7,6 +7,8 @@ missing (the group survives with the rest).
 """
 from __future__ import annotations
 
+from ..core.reasons import flag
+
 
 def gaps(members: list[str], blocks: list[dict]) -> list[str]:
     """Segments of the reading flow that sit BETWEEN the first and last member but are not part of the group
@@ -52,4 +54,44 @@ def annotate(blocks: list[dict], groups: list[dict], merged_into: dict[str, str]
                     'source': g['source'], 'key': g.get('key'), 'rule': g.get('rule'),
                     'stop': g.get('stop'), 'ambiguous': bool(g.get('ambiguous')),
                     'ordered': bool(g.get('ordered'))})
+    _group_captions(blocks, out, by_id)
     return out
+
+
+def _group_captions(blocks: list[dict], groups: list[dict], by_id: dict) -> None:
+    """Captions of whole groups (decision associate_group_caption): listed on the group (g['captions']) and placed
+    right after the group's last member when on the same page (the export renders them at the end of the group).
+    A link to a group that no longer exists is dropped: the caption shows where it is and is flagged."""
+    gid = {g['id']: g for g in groups}
+    for g in groups:
+        g['captions'] = []
+    for b in blocks:
+        k = b['relations'].get('caption_group')
+        if not k:
+            continue
+        g = gid.get(k)
+        if g is None or b['id'] in g['members']:
+            b['relations'].pop('caption_group', None)
+            flag(b, 'CAPTION_WITHOUT_FIGURE')
+            continue
+        g['captions'].append(b['id'])
+    moved = False
+    for g in groups:
+        pos = {b['id']: i for i, b in enumerate(blocks)}
+        last = max((by_id[m] for m in g['members']), key=lambda x: pos[x['id']], default=None)
+        for cid in g['captions']:
+            cap = by_id[cid]
+            if last is None or cap['page'] != last['page']:
+                continue
+            blocks.remove(cap)
+            at = blocks.index(last)                   # after the last member AND its own captions
+            mem = set(g['members'])
+            while at + 1 < len(blocks) and blocks[at + 1]['relations'].get('caption_for') in mem:
+                at += 1
+            blocks.insert(at + 1, cap)
+            last, moved = cap, True
+    if moved:
+        order: dict[int, int] = {}
+        for b in blocks:
+            order[b['page']] = order.get(b['page'], 0) + 1
+            b['reading_order'] = order[b['page']]

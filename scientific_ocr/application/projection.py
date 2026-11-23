@@ -313,7 +313,7 @@ def _apply_decisions(blocks, pages, contexts, inp: _Inputs):
 
 
 RELATIONAL = {'associate_caption', 'detach_caption', 'set_caption_role', 'move_after_block', 'set_output', 'set_flow',
-              'set_continuation'}
+              'set_continuation', 'associate_group_caption'}
 
 
 def removed_by_reviewer(human: dict, sha: str) -> set[str]:
