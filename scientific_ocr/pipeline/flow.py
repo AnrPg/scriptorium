@@ -22,6 +22,8 @@ _SENTENCE_END = re.compile(r'[.;!?·:»"\')\]]\s*$|[.;!?·]\**\s*$')
 def role(b: dict) -> str:
     if b.get('excluded'):                              # furniture CONFIRMED by pipeline.furniture (or the reviewer);
         return 'furniture'                             # an engine label alone does not take print out of the text
+    if b.get('flow_override') in ('main', 'insert'):   # the reviewer's decision (set_flow)
+        return b['flow_override']
     if b['kind'] == 'caption' and b['relations'].get('caption_for'):
         return 'insert'                                # travels with its figure
     if b['kind'] in INSERT_KINDS and b['chosen']['type'] != 'text':
@@ -58,7 +60,8 @@ def annotate(blocks: list[dict]):
         if b['kind'] == 'heading':
             last_main, between = None, []
             continue
-        if last_main is not None and continues(_text(last_main), _text(b)):
+        forced = b.get('continues_override')          # the reviewer's decision (set_continuation) beats the test
+        if last_main is not None and (forced if forced is not None else continues(_text(last_main), _text(b))):
             last_main['relations']['continues_in'] = b['id']
             b['relations']['continues_from'] = last_main['id']
             breaks = [x['id'] for x in between if x['flow'] == 'insert']

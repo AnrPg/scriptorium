@@ -126,6 +126,30 @@ def _set_output(b, d, ctx):
         b['omitted'] = {'seq': d.get('seq'), 'actor': d.get('actor'), 'note': d.get('note', '')}
 
 
+def _set_flow(b, d, ctx):
+    """The reviewer's reading-flow role (pipeline.flow): 'main' body text, 'insert' (placed into the text, like a
+    figure), or 'auto' (back to the automatic role)."""
+    b['flow_override'] = None if d['flow'] == 'auto' else d['flow']
+
+
+def _v_flow(blk, p, find):
+    if p.get('flow') not in ('main', 'insert', 'auto'):
+        raise CommandError('flow must be main, insert or auto')
+    return {'flow': p['flow']}
+
+
+def _set_continuation(b, d, ctx):
+    """Whether this paragraph CONTINUES the previous body paragraph (interrupted by an insert or a page break):
+    True links them (one paragraph in linear outputs), False never links them, 'auto' = the automatic test."""
+    b['continues_override'] = None if d['continues'] == 'auto' else bool(d['continues'])
+
+
+def _v_continuation(blk, p, find):
+    if p.get('continues') not in (True, False, 'auto'):
+        raise CommandError('continues must be true, false or "auto"')
+    return {'continues': p['continues']}
+
+
 def _v_output(blk, p, find):
     if not isinstance(p.get('include'), bool):
         raise CommandError('include must be true or false')
@@ -253,6 +277,7 @@ COMMANDS: dict[str, Command] = {
     'revert': Command(_revert, _v_revert), 'detach_caption': Command(_detach_caption),
     'set_caption_role': Command(_set_caption_role, _v_role), 'link_reference': Command(_link_reference, _v_link),
     'set_output': Command(_set_output, _v_output),
+    'set_flow': Command(_set_flow, _v_flow), 'set_continuation': Command(_set_continuation, _v_continuation),
 }
 
 

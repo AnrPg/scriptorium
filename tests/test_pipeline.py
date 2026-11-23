@@ -1417,3 +1417,25 @@ def test_captions_follow_their_figure_in_reading_order():
     captions.reconcile(blocks)
     assert [x['id'] for x in blocks] == ['p', 'f', 'c1', 'c2', 'q', 'x']
     assert [x['reading_order'] for x in blocks if x['page'] == 1] == [1, 2, 3, 4, 5]
+
+
+def test_reviewer_overrides_reading_flow_and_continuations():
+    """«παρεμβολή» and «↳ συνέχεια» are automatic; the reviewer's set_flow / set_continuation decisions win."""
+    from scientific_ocr.pipeline import flow, overlay
+    def b(i, kind, text, ctype='text'):
+        return {'id': i, 'page': 1, 'kind': kind, 'chosen': {'type': ctype, 'text': text}, 'relations': {},
+                'reasons': [], 'review': 'not_needed'}
+    p1, fig, p2 = b('p1', 'paragraph', 'Η πρόταση συνεχίζει'), b('f', 'figure', '', 'image_only'), b('p2', 'paragraph', 'μετά το σχήμα.')
+    blocks = [p1, fig, p2]
+    flow.annotate(blocks)
+    assert fig['flow'] == 'insert' and p2['relations'].get('continues_from') == 'p1'      # automatic
+    ctx = {'blocks': blocks, 'by_id': {x['id']: x for x in blocks}}
+    overlay.COMMANDS['set_continuation'](p2, {'continues': False}, ctx)
+    overlay.COMMANDS['set_flow'](fig, {'flow': 'main'}, ctx)
+    flow.annotate(blocks)
+    assert fig['flow'] == 'main' and not p2['relations'].get('continues_from')
+    p3 = b('p3', 'paragraph', 'Νέα πρόταση.')
+    overlay.COMMANDS['set_continuation'](p3, {'continues': True}, ctx)
+    blocks2 = [b('q', 'paragraph', 'Τελειώνει εδώ.'), p3]
+    flow.annotate(blocks2)
+    assert p3['relations'].get('continues_from') == 'q'                                  # forced by the reviewer

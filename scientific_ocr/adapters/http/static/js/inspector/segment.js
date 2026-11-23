@@ -210,6 +210,21 @@ export function segmentPanel(body, blk) {
 // action; a row's editor opens UNDER the row (one at a time). Output is a quiet switch at the end.
 function propertiesCard(blk, book, decide, seg, rerender) {
   const toggle = (k) => { seg.prop = seg.prop === k ? null : k; rerender(); };
+  // reading flow (pipeline/flow.py): body text or an insert placed into the text; a paragraph may CONTINUE the
+  // previous one across an insert or a page break (joined in linear outputs). Automatic, overridable here.
+  const flowRow = () => {
+    if (blk.flow === 'furniture') return null;
+    const cont = blk.relations?.continues_from, forced = blk.continues_override;
+    const val = [blk.flow === 'insert' ? 'παρεμβολή' : 'κείμενο', cont ? ' · ↳ συνεχίζει την προηγούμενη παράγραφο' : '',
+      blk.flow_override || forced != null ? ' (δική σου επιλογή)' : ''].join('');
+    const send = (action, extra, msg) => act(() => api(`${B(book.id)}/decide`, { body: { block_id: blk.id, action, ...extra } }), msg);
+    return row('flow', 'Ροή', h('span', { class: 'prop-line' }, val), act1('flow', 'Αλλαγή ▾'), () => h('div', { class: 'col' },
+      h('div', { class: 'small mut' }, 'Παρεμβολή = σχήμα/πίνακας/εξίσωση μέσα στο κείμενο. Συνέχεια = η παράγραφος συνεχίζει την προηγούμενη, που διακόπηκε από παρεμβολή ή αλλαγή σελίδας· στην εξαγωγή ενώνονται σε μία.'),
+      h('div', { class: 'row small' }, 'Ρόλος:', [['main', 'Κείμενο'], ['insert', 'Παρεμβολή'], ['auto', 'Αυτόματα']].map(([k, l]) =>
+        h('button', { class: 'small' + ((blk.flow_override || 'auto') === k ? ' primary' : ''), onclick: () => send('set_flow', { flow: k }, `Ροή: ${l}`) }, l))),
+      blk.flow !== 'insert' ? h('div', { class: 'row small' }, 'Συνέχεια της προηγούμενης παραγράφου:', [[true, 'Ναι'], [false, 'Όχι'], ['auto', 'Αυτόματα']].map(([k, l]) =>
+        h('button', { class: 'small' + ((forced == null ? 'auto' : forced) === k ? ' primary' : ''), onclick: () => send('set_continuation', { continues: k }, `Συνέχεια: ${l}`) }, l))) : null));
+  };
   const act1 = (k, label) => h('button', { class: 'small ghost prop-btn' + (seg.prop === k ? ' on' : ''), 'aria-expanded': String(seg.prop === k), onclick: () => toggle(k) }, seg.prop === k ? 'Κλείσιμο' : label);
   const row = (k, label, value, action, editor) => [h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, label), h('span', { class: 'prop-v' }, value), h('span', { class: 'prop-a' }, action || '')),
     seg.prop === k && editor ? h('div', { class: 'prop-edit' }, editor()) : null];
@@ -238,6 +253,7 @@ function propertiesCard(blk, book, decide, seg, rerender) {
     captionish ? row('cap', 'Λεζάντα', h('span', { class: 'prop-line' + (mayBeCaption ? ' mut' : '') }, blk.kind === 'caption' ? (owner ? `ανήκει σε ${kindLabel(owner)}` : 'χωρίς σχήμα')
         : mayBeCaption ? 'όχι — μήπως είναι;' : `${(blk.relations?.captions || []).length} λεζάντα(ες)`),
       act1('cap', mayBeCaption ? 'Σύνδεση ▾' : 'Αλλαγή ▾'), () => unwrap(captionPanel(blk))) : null,
+    flowRow(),
     row('label', 'Ετικέτα μηχανής', h('span', { class: 'prop-line' }, (blk.engine_label || '—').replace(':', ' · ')), act1('label', 'Αλλαγή ▾'), () => labelStructure(blk)),
     h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, 'Στην έξοδο'),
       h('span', { class: 'prop-v mut', title: (blk.omitted ? 'Δεν μπαίνει στο Markdown/PDF· μένει στο βιβλίο και στα JSON.' : 'Μπαίνει στο Markdown/PDF.') + (grp ? ' Ισχύει για όλη την ομάδα.' : '') },

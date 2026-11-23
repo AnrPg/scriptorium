@@ -31,6 +31,7 @@ DECISION_FIELDS = {
     'replace_text': {'value'}, 'replace_latex': {'value'}, 'approve_candidate': {'engine'},
     'move_after_block': ({'after'}, {'before'}), 'associate_caption': {'figure_id'}, 'link_reference': {'n'},
     'set_caption_role': {'role'}, 'set_heading_level': {'level'}, 'set_output': {'include'},
+    'set_flow': {'flow'}, 'set_continuation': {'continues'},
 }
 
 

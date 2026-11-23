@@ -141,7 +141,7 @@ def _block_view(x: dict) -> dict:
             'lineage', 'content_source', 'caption_role', 'caption_label', 'caption_role_source', 'references',
             'merge_id', 'merged_from', 'groups', 'entities', 'excluded', 'omitted', 'text_norm', 'notation',
             'chosen', 'display_crop', 'rule_corrections', 'evidence', 'decisions', 'figure_text_candidates', 'relations',
-            'match')
+            'match', 'flow_override', 'continues_override')
     v = {k: x.get(k) for k in keep if x.get(k) not in (None, [], {})}
     v['reasons'] = x['reasons']                        # always present in the view model, even when empty
     v['lineage_dag'] = lineage.dag(x)
