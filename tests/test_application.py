@@ -1151,3 +1151,22 @@ def test_actions_are_banked_in_slow_books_until_rebuild(app):
     a.rebuild('run')
     assert a.jobs.submitted[-1] == ('reproject', 'light')
     assert build(out) == 0 and a.book('run')['pending']['count'] == 0         # applied: nothing pending
+
+
+def test_job_log_carries_facts_for_a_plain_language_summary(app):
+    """A rebuild writes FACT lines (why it ran, what changed, the result) that the job summary parses; free-text
+    lines and timestamps around them are ignored."""
+    from scientific_ocr.core import joblog
+    a, out = app
+    lines = []
+    blk = next(b for b in a.page('run', 1)['blocks'] if 'SINGLE_ENGINE_DOCLING' in b['reasons'])
+    a.decide('run', blk['id'], 'replace_text', value='fixed text')
+    from scientific_ocr.application import projection
+    from conftest import no_models
+    assert projection.build(out, log=lines.append, runner=no_models) == 0
+    facts = joblog.parse('\n'.join('2026-11-23T10:00:00 ' + ln for ln in lines) + '\n@@fact {broken')
+    kinds = [f['kind'] for f in facts]
+    assert kinds == ['trigger', 'changes', 'built']
+    trig, built = facts[0], facts[2]
+    assert trig['count'] == 1 and trig['events'][0]['action'] == 'replace_text' and trig['events'][0]['block_id'] == blk['id']
+    assert built['blocks'] > 0 and 'seconds' in built and built['release_status']

@@ -79,7 +79,7 @@ export async function tabHistory(body) {
   body.append(h('h2', { style: { marginTop: '24px' } }, 'Εργασίες'));
   const jc = h('div', { class: 'card' }); body.append(jc);
   for (const j of S.book.jobs) jc.append(h('div', { class: 'list-item', style: { cursor: 'default' } }, h('span', { class: 'grow' }, j.label),
-    h('span', { class: 'small mut' }, new Date(j.created * 1000).toLocaleString('el-GR')), h('span', { class: 'chip' }, j.state), h('button', { class: 'ghost', onclick: () => showLog(j) }, 'Log'),
+    h('span', { class: 'small mut' }, new Date(j.created * 1000).toLocaleString('el-GR')), h('span', { class: 'chip' }, j.state), h('button', { class: 'ghost', onclick: () => showLog(j) }, 'Σύνοψη'),
     isActiveJob(j) ? null : removeJobButton(j, () => renderBook())));
   if (S.book.jobs.some(j => !isActiveJob(j))) jc.append(h('div', { class: 'row end', style: { padding: '8px' } }, h('button', { class: 'ghost small', onclick: async () => {
     await api('/api/jobs/clear', { body: { book: S.book.id } }); S.book.jobs = S.book.jobs.filter(isActiveJob); renderBook(); } }, 'Καθαρισμός ολοκληρωμένων')));

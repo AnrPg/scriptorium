@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ...adapters import os_picker
 from ...adapters import pdf as pdfio
+from ...core import joblog
 from ...core.decisions import VALUE_DECISIONS
 from ...core.reasons import as_table
 from ...core.vocabulary import GROUP_TYPES
@@ -37,6 +38,15 @@ class LibraryService(ServiceBase):
             raise NotFound(job_id)
         p = self.jobs.log_path(job)
         return p.read_bytes()[-tail:] if p.exists() else b''
+
+    def job_summary(self, job_id: str) -> dict:
+        """A job and the FACTS its log carries (core.joblog), for the plain-language summary in the UI."""
+        job = next((j for j in self.jobs.list() if j['id'] == job_id), None)
+        if not job:
+            raise NotFound(job_id)
+        p = self.jobs.log_path(job)
+        text = p.read_text(encoding='utf-8', errors='replace') if p.exists() else ''
+        return {'job': job, 'facts': joblog.parse(text)}
 
     FS_ROOT = Path.home()                # the local file picker never leaves the user's home folder
 

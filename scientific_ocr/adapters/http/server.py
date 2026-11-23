@@ -533,6 +533,10 @@ class Handler(BaseHTTPRequestHandler):
     def jobs_clear(self):
         self._json(200, self.app.clear_jobs(self._body().get('book')))
 
+    @route('GET', r'/api/jobs/(\w+)/summary')
+    def job_summary(self, jid):
+        self._json(200, self.app.job_summary(jid))
+
     @route('GET', r'/api/jobs/(\w+)/log')
     def job_log(self, jid):
         self._bytes(200, self.app.job_log(jid), 'text/plain; charset=utf-8')

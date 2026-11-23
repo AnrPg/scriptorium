@@ -83,7 +83,7 @@ export function renderJobsPop() {
       live ? h('span', { class: 'spin' }) : h('span', { class: 'dot ' + (j.warning ? 'recommended' : j.state === 'done' ? 'approved' : j.state === 'failed' ? 'required' : 'not_needed') }),
       h('div', { class: 'grow' }, h('div', {}, j.label), h('div', { class: 'small mut' }, `${j.book} · ${j.warning === 'integrity' ? 'ολοκληρώθηκε · κρίσιμο εύρημα ακεραιότητας' : ({ queued: 'σε αναμονή', running: 'εκτελείται', done: 'ολοκληρώθηκε', failed: 'απέτυχε', cancelled: 'διακόπηκε', interrupted: 'διεκόπη' })[j.state] || j.state}`)),
       live ? h('button', { onclick: () => act(() => api(`/api/jobs/${j.id}/cancel`, { body: {} }), 'Η εργασία διακόπηκε· συνεχίζει από εκεί που έμεινε την επόμενη φορά', false) }, 'Διακοπή')
-           : [h('button', { class: 'ghost small', onclick: () => showLog(j) }, 'Log'), removeJobButton(j, renderJobsPop)]));
+           : [h('button', { class: 'ghost small', onclick: () => showLog(j) }, 'Σύνοψη'), removeJobButton(j, renderJobsPop)]));
   }
 }
 /** ✕: delete a finished job (and its log) from the task list. */
@@ -93,9 +93,9 @@ export function removeJobButton(j, after) {
     try { await api(`/api/jobs/${j.id}/remove`, { body: {} }); } catch (err) { toast(err.message, { error: true }); return; }
     S.jobs = S.jobs.filter(x => x.id !== j.id); if (S.book && S.book.jobs) S.book.jobs = S.book.jobs.filter(x => x.id !== j.id); after && after(); } }, '✕');
 }
-export async function showLog(j) {
-  const txt = await api(`/api/jobs/${j.id}/log`);
-  modal(j.label, h('pre', { style: { maxHeight: '50vh', overflow: 'auto', fontSize: '11px', whiteSpace: 'pre-wrap' } }, txt || '(κενό)'), [{ label: 'Κλείσιμο' }]);
+export async function showLog(j) {             // the plain-language job report (raw log folded inside)
+  const { jobSummaryDialog } = await import('../ui/joblog.js');
+  jobSummaryDialog(j);
 }
 export async function refresh(keepSel) {
   if (!S.book) { if (S.route.view === 'library') await renderLibrary(); return; }

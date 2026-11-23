@@ -19,6 +19,7 @@ from ..adapters import pdf as pdfio
 from ..adapters.event_store import EventStore
 from ..adapters.storage import atomic_write, book_lock, read_json
 from ..core.reasons import REASONS
+from ..core import joblog
 from ..pipeline import engine_json
 from ..ports import Log
 from . import projection
@@ -106,6 +107,7 @@ def extract_pages(out: Path, pages: list[int], log: Log, progress=None) -> dict:
     atomic_write(out / 'raw' / 'extraction_index.json', json.dumps(idx, indent=2, default=str))
     failed = [(e, p) for e, d in res.items() for p, r in d.items() if r['status'] != 'OK']
     log(f'extraction done; failed={failed}')
+    log(joblog.fact('extraction', pages=len(pages), failed=failed))
     return res
 
 
@@ -154,6 +156,7 @@ def process(out: Path, pdf: Path | None = None, pages_spec: str | None = None, l
     retry = auto_diligent_pages(out, meta['requested'])
     if retry:                                        # spend compute before human time
         log(f'auto-diligent re-extraction of pages {retry} (many layout problems)')
+        log(joblog.fact('diligent', pages=retry))
         es = EventStore(out)
         es.append(*[{'type': 'page_profile', 'page': p, 'profile': 'diligent', 'auto': True} for p in retry],
                   actor='system:auto-diligent')

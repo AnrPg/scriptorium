@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from .. import config
+from ..core import joblog
 
 MODEL_IDS = {e: config.CKPT[e].name for e in ('unimernet', 'molscribe', 'rxnscribe')}   # checkpoint = version
 COMMANDS = {
@@ -51,6 +52,7 @@ def run(engine: str, jobs: list[dict], out: Path, allow_inference: bool, log=pri
     inp.write_text(json.dumps(todo))
     cmd = [str(c) for c in COMMANDS[engine](ocr)] + ['--input', str(inp), '--output', str(res)]
     log(f'[{engine}] {len(todo)} crops: {" ".join(cmd)}')
+    log(joblog.fact('models', engine=engine, crops=len(todo)))
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, env=config.subprocess_env(), timeout=3600)
         (cache / '_last_run.log').write_text(f'$ {" ".join(cmd)}\nexit {p.returncode}\n{p.stderr[-20000:]}')

@@ -26,7 +26,7 @@ from ..adapters.storage import (
     read_json,
     read_json_strict,
 )
-from ..core import lineage
+from ..core import joblog, lineage
 from ..core.model import content_hash, page_summary, release_status
 from ..pipeline import (
     audit,
@@ -124,12 +124,48 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
     }
     code = _publish(out, canonical, inp, spec, len(result['stale']), log)
     lap('audit + render + write')
-    for line in change_report(prev, canonical, inp.human['history']):
+    for line in change_report(prev, canonical, inp.human['history']) + change_facts(prev, canonical, inp.human['history']):
         log(line)
     log('timings (s): ' + ', '.join(f'{k} {v}' for k, v in clock.items()))
+    b = canonical['blocks']
+    log(joblog.fact('built', blocks=len(b), required=sum(x['review'] == 'required' for x in b),
+                    recommended=sum(x['review'] == 'recommended' for x in b),
+                    critical=sum(f['severity'] == 'critical' for f in canonical['findings']),
+                    release_status=canonical['release_status'], seconds=round(sum(clock.values()), 1), timings=clock))
     atomic_write(out / 'cache' / 'build.json', json.dumps({'seconds': round(sum(clock.values()), 1), 'timings': clock,
                                                          'built_utc': canonical['run']['built_utc']}))
     return code
+
+
+def change_facts(prev: dict, c: dict, history: list[dict]) -> list[str]:
+    """The same information as change_report, as FACT lines (core.joblog) for the plain-language job summary."""
+    since = (prev.get('human') or {}).get('last_seq')
+    new = [e for e in history if since is not None and e['seq'] > since]
+    keep = ('type', 'action', 'block_id', 'entity_type', 'pages', 'include', 'level')
+    out = [joblog.fact('trigger', count=len(new), first=since is None,
+                       events=[{k: e[k] for k in keep if k in e} for e in new[-50:]])]
+    if not prev:
+        return out
+    count = lambda x, pred: sum(1 for b in x.get('blocks', []) if pred(b))
+    review = {name: [count(prev, pred), count(c, pred)] for name, pred in (
+        ('required', lambda b: b['review'] == 'required'), ('recommended', lambda b: b['review'] == 'recommended'),
+        ('omitted', lambda b: b.get('omitted')), ('furniture', lambda b: b.get('excluded')))}
+    old_toc = {s['id']: s['level'] for s in prev.get('sections', [])}
+    levels = [{'title': s['title'][:60], 'before': old_toc.get(s['id']), 'after': s['level']}
+              for s in c.get('sections', []) if old_toc.get(s['id']) != s['level']]
+    pf, cf = Counter(f['type'] for f in prev.get('findings', [])), Counter(f['type'] for f in c.get('findings', []))
+    ps = {p['page']: p.get('state') for p in prev.get('pages', [])}
+    ent = lambda x: [len(x.get('entities') or []), sum(e['verified'] for e in x.get('entities') or [])]
+    out.append(joblog.fact(
+        'changes', review={k: v for k, v in review.items() if v[0] != v[1]},
+        entities={'total': [ent(prev)[0], ent(c)[0]], 'verified': [ent(prev)[1], ent(c)[1]]},
+        levels=levels[:20], levels_total=len(levels),
+        findings={k: [pf.get(k, 0), cf.get(k, 0)] for k in sorted(set(pf) | set(cf)) if pf.get(k, 0) != cf.get(k, 0)},
+        pages=[{'page': p['page'], 'before': ps.get(p['page']), 'after': p.get('state')}
+               for p in c.get('pages', []) if ps.get(p['page']) != p.get('state')][:50],
+        release=[prev.get('release_status'), c.get('release_status')],
+        heading_proposals=len((c.get('heading_review') or {}).get('proposals') or [])))
+    return out
 
 
 def change_report(prev: dict, c: dict, history: list[dict]) -> list[str]:
