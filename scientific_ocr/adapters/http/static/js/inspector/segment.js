@@ -202,7 +202,10 @@ function propertiesCard(blk, book, decide, seg, rerender) {
     seg.prop === k && editor ? h('div', { class: 'prop-edit' }, editor()) : null];
   const grp = (S.book.groups || []).filter(g => (blk.groups || []).includes(g.id)).sort((a, b) => b.members.length - a.members.length)[0];
   const ents = (blk.entities || []).filter(e => !(e.family === 'insert' && e.source === 'detected' && !e.verified));
-  const captionish = blk.kind === 'caption' || (blk.relations?.captions || []).length || ['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table'].includes(blk.kind);
+  const FIGURISH = ['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table'];
+  // text read as a paragraph/heading may really be a caption: offer the link when the page has something to caption
+  const mayBeCaption = ['paragraph', 'heading'].includes(blk.kind) && (S.page?.blocks || []).some(b => FIGURISH.includes(b.kind) || ['math', 'chemical_reaction'].includes(b.kind));
+  const captionish = blk.kind === 'caption' || (blk.relations?.captions || []).length || FIGURISH.includes(blk.kind) || mayBeCaption;
   const owner = blk.relations?.caption_for && S.page.blocks.find(x => x.id === blk.relations.caption_for);
   const levelSel = ['heading', 'paragraph'].includes(blk.kind) ? (() => {
     const sel = h('select', { class: 'prop-select', 'aria-label': 'Επίπεδο στη δομή', onchange: () => decide('set_heading_level', { level: +sel.value }, 'Η δομή ενημερώθηκε') },
@@ -218,8 +221,9 @@ function propertiesCard(blk, book, decide, seg, rerender) {
       act1('grp', 'Επιλογές ▾'), () => h('div', {}, h('div', { class: 'small mut' }, `${grp.source === 'auto' ? 'Αυτόματη' : 'Δική σου'} ομάδα· μετακίνηση, σειρά και έξοδος εφαρμόζονται σε όλη.`),
         unwrap(groupsPanel(blk)))) : null,
     levelSel ? row('lvl', 'Δομή', h('span', { class: 'mut prop-line' }, blk.kind === 'heading' && blk.heading_level_source ? (SRC_EL[blk.heading_level_source] || blk.heading_level_source) : ''), levelSel) : null,
-    captionish ? row('cap', 'Λεζάντα', h('span', { class: 'prop-line' }, blk.kind === 'caption' ? (owner ? `ανήκει σε ${kindLabel(owner)}` : 'χωρίς σχήμα') : `${(blk.relations?.captions || []).length} λεζάντα(ες)`),
-      act1('cap', 'Αλλαγή ▾'), () => unwrap(captionPanel(blk))) : null,
+    captionish ? row('cap', 'Λεζάντα', h('span', { class: 'prop-line' + (mayBeCaption ? ' mut' : '') }, blk.kind === 'caption' ? (owner ? `ανήκει σε ${kindLabel(owner)}` : 'χωρίς σχήμα')
+        : mayBeCaption ? 'όχι — μήπως είναι;' : `${(blk.relations?.captions || []).length} λεζάντα(ες)`),
+      act1('cap', mayBeCaption ? 'Σύνδεση ▾' : 'Αλλαγή ▾'), () => unwrap(captionPanel(blk))) : null,
     row('label', 'Ετικέτα μηχανής', h('span', { class: 'prop-line' }, (blk.engine_label || '—').replace(':', ' · ')), act1('label', 'Αλλαγή ▾'), () => labelStructure(blk)),
     h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, 'Στην έξοδο'),
       h('span', { class: 'prop-v mut', title: (blk.omitted ? 'Δεν μπαίνει στο Markdown/PDF· μένει στο βιβλίο και στα JSON.' : 'Μπαίνει στο Markdown/PDF.') + (grp ? ' Ισχύει για όλη την ομάδα.' : '') },
