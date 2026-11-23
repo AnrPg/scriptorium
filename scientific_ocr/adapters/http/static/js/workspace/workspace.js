@@ -1,5 +1,6 @@
 import { B, api } from '../core/api.js';
 import { refresh } from '../core/chrome.js';
+import { stepReview } from '../inspector/reviewloop.js';
 import { $, clear, h, keepScroll, pctStyle } from '../core/dom.js';
 import { NAV, navSave } from '../core/nav.js';
 import { R, S, go, kindLabel, parseRoute } from '../core/state.js';
@@ -176,6 +177,11 @@ export function buildWorkspace() {
       (() => { const txt = processed ? (info.state === 'needs_review' ? `${info.required} για έλεγχο` : STATE_EL[info.state]) : STATE_EL.not_processed;
         const short = processed && info.state === 'needs_review' ? [String(info.required), h('span', { class: 'wide-only' }, ' για έλεγχο')] : [txt];
         return h('span', { class: 'chip page-state st-' + (processed ? info.state : 'not_processed'), title: txt, 'aria-label': txt }, ...short); })(),
+      // the whole-book review loop, always reachable (also with no segment selected): errors and warnings, any page
+      processed ? h('div', { class: 'seg-ctl review-loop' },
+        h('button', { onclick: () => stepReview(-1), title: 'Προηγούμενο προς έλεγχο, σε όλο το βιβλίο (K)', 'aria-label': 'Προηγούμενο προς έλεγχο' }, '↑'),
+        h('button', { class: 'primary', onclick: () => stepReview(1), title: 'Επόμενο προς έλεγχο (σφάλματα και προειδοποιήσεις), σε όλο το βιβλίο· αλλάζει σελίδα μόνο του (J)' },
+          h('span', { class: 'wide-only' }, 'Επόμενο για έλεγχο '), '↓', h('kbd', {}, 'J'))) : null,
       h('span', { class: 'spacer' }),
       processed ? h('div', { class: 'seg-ctl view-switch', role: 'tablist' }, VIEWS.map(([k, l, t], i) =>
         h('button', { class: S.leftView === k ? 'on' : '', role: 'tab', 'aria-selected': S.leftView === k ? 'true' : 'false', title: `${l} (${i + 1}) — ${t}`, 'aria-label': l,
