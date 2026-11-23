@@ -1332,3 +1332,27 @@ def test_accept_all_as_is_keeps_critical_items_unless_included(app):
     assert len({e.get('group') for e in evs}) == 1 or len(evs) == 1                 # one undo step
     a.undo('run')
     assert not [e for e in a.lib.get('run').events.state()['decisions'] if e.get('bulk')]
+
+
+def test_actions_can_target_segments_that_exist_only_in_the_page_preview(app):
+    """A merge made a minute ago exists in the page preview, not yet in canonical.json: linking a caption to the
+    merged figure (or any action naming it) must work — actions resolve segments as the reviewer sees them."""
+    import json
+    from scientific_ocr.application import projection
+    from conftest import no_models
+    a, out = app
+    (out / 'cache').mkdir(exist_ok=True)
+    (out / 'cache' / 'build.json').write_text(json.dumps({'seconds': 400}))      # slow book: page previews
+    c, _ = load(out)
+    fig = next(b for b in c['blocks'] if b['kind'] == 'figure')
+    cap = next(b for b in c['blocks'] if b['kind'] == 'caption')
+    other = next(b for b in c['blocks'] if b['kind'] == 'paragraph')
+    a.merge('run', [fig['id'], other['id']], {'engine': 'marker', 'name': 'Picture'}, mode='join')
+    assert projection.build_page(out, 1, log=lambda m: None, runner=no_models) == 0
+    merged = next(b for b in a.page('run', 1)['blocks'] if b.get('merged_from'))
+    assert merged['id'] not in {b['id'] for b in load(out)[0]['blocks']}         # not in the full projection yet
+    a.decide('run', cap['id'], 'associate_caption', figure_id=merged['id'])     # used to fail: «no such figure»
+    a.set_output('run', [merged['id']], True)
+    assert projection.build_page(out, 1, log=lambda m: None, runner=no_models) == 0
+    seg = {b['id']: b for b in a.page('run', 1)['blocks']}
+    assert seg[cap['id']]['relations']['caption_for'] == merged['id'] and cap['id'] in seg[merged['id']]['relations']['captions']

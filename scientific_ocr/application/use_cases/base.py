@@ -44,14 +44,26 @@ class ServiceBase:
         except KeyError:
             raise ServiceError(f'unknown book {book_id!r}')
 
-    def _blocks_seen(self, b: Book) -> dict[str, dict]:
-        """Every segment as the reviewer sees it: the full projection, with pages rebuilt since (previews) on top."""
-        by_id = {x['id']: x for x in (b.canonical() or {}).get('blocks', [])}
-        for page in sorted({x['page'] for x in by_id.values()}):
-            pv = b.page_preview(page)
+    def _seen_list(self, b: Book) -> list[dict]:
+        """Every segment as the reviewer SEES it, in reading order: the full projection with each page rebuilt
+        since (page preview) in its place. Reviewer ACTIONS resolve their segments and targets here — a merge,
+        region or caption made a minute ago exists in the page preview before the next full rebuild."""
+        blocks = (b.canonical() or {}).get('blocks', [])
+        out, done = [], set()
+        for x in blocks:
+            p = x['page']
+            if p in done:
+                continue
+            pv = b.page_preview(p)
             if pv:
-                by_id.update({x['id']: x for x in pv['blocks']})
-        return by_id
+                out += pv['blocks']
+                done.add(p)
+            else:
+                out.append(x)
+        return out
+
+    def _blocks_seen(self, b: Book) -> dict[str, dict]:
+        return {x['id']: x for x in self._seen_list(b)}
 
     def _block(self, b: Book, block_id: str) -> dict:
         """The segment as the reviewer sees it: from its page preview when there is one (decisions validate and

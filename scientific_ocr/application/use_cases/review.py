@@ -25,7 +25,7 @@ class ReviewService(ServiceBase):
         b = self._book(book_id)
         blk = self._block(b, block_id)
         c = b.canonical() or {}
-        by_id = {x['id']: x for x in c.get('blocks', [])}
+        by_id = self._blocks_seen(b)                    # targets (figure, move anchor) as the reviewer sees them
         try:
             if action == 'move_after_block' and (group := self._group_of(c, block_id)):
                 evs = self._move_group(group, blk, params, by_id)
@@ -50,7 +50,7 @@ class ReviewService(ServiceBase):
             raise ServiceError('give exactly one of after / before')
         b = self._book(book_id)
         c = b.canonical() or {}
-        blocks = c.get('blocks', [])
+        blocks = self._seen_list(b)
         by_id, pos = {x['id']: x for x in blocks}, {x['id']: i for i, x in enumerate(blocks)}
         target = after or before
         ids = [i for i in dict.fromkeys(block_ids or []) if i in by_id]
@@ -94,7 +94,7 @@ class ReviewService(ServiceBase):
         (its members). They stay in the book model — review, hierarchy, entities, JSON exports. ONE undo."""
         b = self._book(book_id)
         c = b.canonical() or {}
-        by_id = {x['id']: x for x in c.get('blocks', [])}
+        by_id = self._blocks_seen(b)
         ids = list(block_ids or [])
         for i in list(ids):                              # a segment of a group goes out (or back) with its group
             ids += self._group_of(c, i) or []

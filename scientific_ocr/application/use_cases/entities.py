@@ -70,7 +70,7 @@ class EntityService(ServiceBase):
         b = self._book(book_id)
         if not valid_entity_type(etype):
             raise ServiceError('unknown entity type')
-        ids = {x['id'] for x in (b.canonical() or {}).get('blocks', [])}
+        ids = set(self._blocks_seen(b))
         members = list(dict.fromkeys(members or []))
         if not members or any(m not in ids for m in members):
             raise ServiceError('unknown segment')

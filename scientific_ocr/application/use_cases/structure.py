@@ -167,7 +167,7 @@ class StructureService(ServiceBase):
         box is hidden, a reviewer region is removed, a merged segment is dissolved and its parts hidden. Content that
         is right but unwanted in the text belongs to set_output ("out of the output"), not here."""
         b = self._book(book_id)
-        by_id = {x['id']: x for x in (b.canonical() or {}).get('blocks', [])}
+        by_id = self._blocks_seen(b)
         ids = list(dict.fromkeys(block_ids or []))
         missing = [i for i in ids if i not in by_id]
         _require(ids and not missing, f'unknown segment(s): {", ".join(missing)}' if missing else 'no segments')
