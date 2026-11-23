@@ -1383,3 +1383,24 @@ def test_moving_a_heading_moves_its_whole_subtree_by_the_same_amount():
     hs3 = [hd('p', 2, 'human'), hd('c', 3)]
     sections.shift_subtrees(hs3, base={'p': 4, 'c': 5})
     assert hs3[1]['heading_level'] == 3 and hs3[1]['heading_level_source'] == 'typography'
+
+
+def test_contents_page_headings_are_not_sections_and_render_as_text():
+    """On a contents page (many '…… 26' entries) headings — also split ones like 'ΚΕΦΑΛΑΙΟ 7' without a page
+    number — are entries, not sections of the book; they render as text, and a contents entity is detected."""
+    from scientific_ocr.pipeline import entities, reading, sections
+
+    def blk(i, page, kind, text):
+        return {'id': f'p{page}_{i}', 'page': page, 'kind': kind, 'chosen': {'type': 'text', 'text': text},
+                'reasons': [], 'review': 'not_needed', 'relations': {}, 'reading_order': i, 'excluded': {},
+                'geometry': {'bbox': [50, 50 + 40 * i, 500, 80 + 40 * i]}}
+    toc_lines = '\n'.join(f'Ενότητα {k} ........ {20 + k}' for k in range(6))
+    blocks = [blk(1, 13, 'heading', 'ΚΕΦΑΛΑΙΟ 7'), blk(2, 13, 'heading', 'Από το DNA στις Πρωτεΐνες / 285'),
+              blk(3, 13, 'paragraph', toc_lines),
+              blk(1, 40, 'heading', 'ΚΕΦΑΛΑΙΟ 7'), blk(2, 40, 'paragraph', 'Το DNA περιέχει την πληροφορία.')]
+    toc = sections.annotate(blocks)
+    assert [s['id'] for s in toc] == ['p40_1']                                   # only the real chapter
+    assert all(b.get('toc_entry') for b in blocks[:2]) and not blocks[3].get('toc_entry')
+    assert reading._node(blocks[0], {b['id']: b for b in blocks})['t'] == 'para'
+    res = entities.detect(blocks, toc, [], {13: [600, 800], 40: [600, 800]}, {}, set())
+    assert any(e['type'] == 'toc' and 'p13_3' in e['members'] for e in res['entities'])

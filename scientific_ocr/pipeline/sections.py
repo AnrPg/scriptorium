@@ -53,6 +53,7 @@ from difflib import SequenceMatcher
 from ..core.labels import LABELLED, NUMBERED_HEADING
 from ..core.model import MAX_HEADING_LEVEL, chosen_text
 from ..core.text import strip_markup
+from ..core.vocabulary import toc_entries
 from .structure import key as skey
 
 STYLE_MIN_VOTES = 2
@@ -120,6 +121,8 @@ def _overlap(a: str, b: str) -> int:
     return sum((Counter(a) & Counter(b)).values())
 
 
+CONTENTS_PAGE_MIN_ENTRIES = 5   # a page with this many '…… 26' / '… / 25' entries is a contents page: its headings
+                                # (often split: 'ΚΕΦΑΛΑΙΟ 7' + title / page) are entries, not sections of the book
 MIN_BAND_PX = 8             # fewer pixels per text line than this: the measurement is not reliable (low resolution)
 
 
@@ -551,11 +554,23 @@ def strip_marks_lower(t: str) -> str:
 
 
 def annotate(blocks: list[dict], dismissed=frozenset(), prior=None, report: dict | None = None,
-             hidden_texts: list | None = None, model: dict | None = None, page_refs: dict | None = None) -> list[dict]:
+             hidden_texts: list | None = None, model: dict | None = None, page_refs: dict | None = None,
+             toc_ids: frozenset = frozenset()) -> list[dict]:
     """Mutates blocks; returns the table of contents. `report` receives the hint proposals and statistics;
-    `prior`: hint outcomes of calibration books."""
+    `prior`: hint outcomes of calibration books. Entries of the book's own CONTENTS pages are not sections: a
+    heading that reads as a contents entry ('… / 25', '…… 26') or that the reviewer put in a table-of-contents
+    group/entity (`toc_ids`) is marked toc_entry and rendered as text."""
+    per_page = defaultdict(int)                      # contents entries per page: a CONTENTS PAGE has many
+    for b in blocks:
+        per_page[b['page']] += toc_entries(chosen_text(b)) if b['chosen'].get('type') == 'text' else 0
+    contents_pages = {p for p, n in per_page.items() if n >= CONTENTS_PAGE_MIN_ENTRIES}
+    for b in blocks:
+        b.pop('toc_entry', None)
+        if b['kind'] == 'heading' and (b['id'] in toc_ids or toc_entries(_title(b)) or b['page'] in contents_pages):
+            b['toc_entry'] = True
+            b['heading_level'], b['heading_level_source'] = None, 'toc_entry'
     headings = [b for b in blocks if b['kind'] == 'heading' and b.get('role') not in ('page_header', 'page_footer')
-                and b['chosen']['type'] == 'text' and _title(b)]       # withheld/empty headings are not sections
+                and b['chosen']['type'] == 'text' and _title(b) and not b.get('toc_entry')]   # withheld/empty: no section
     relative_typography(headings, page_refs or {})
     heads, lines = running_heads(blocks), outlines(blocks, hidden_texts or [])
     # BASE: the levels without the reviewer's own level decisions (what they changed FROM)

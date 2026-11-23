@@ -45,6 +45,7 @@ from ..core.vocabulary import (  # noqa: F401
     PLACEMENTS,
     TYPES,
     family_of,
+    toc_entries,
     valid_entity_type,
 )
 from .furniture import body_frames
@@ -101,6 +102,7 @@ LEXICON = [(t, _rx(p)) for t, p in [
     ('glossary', r'^γλωσσαρι|^glossary'),
     ('references', r'^βιβλιογραφ|^για περαιτερω|^further reading|^references\b|^αναφορες\b|^πηγες\b|^suggested reading'),
     ('note', r'^σημειωσ|^note\b|^notes\b|^παρατηρησ|^remarks?\b|^σχολιο|^comment\b|^nb\b'),
+    ('toc', r'^περιεχομενα\b|^πινακας περιεχομενων|^(table of )?contents\b'),
 ]]
 COLLECTIVE = _rx(r'^(ασκησεις|προβληματα|ερωτησεις|exercises|problems|questions|review|γενικες ασκησεις'
                         r'|επαναληπτικ|additional problems|end[- ]of[- ]chapter|ερωτησεις και ασκησεις'
@@ -168,6 +170,7 @@ def detect(blocks: list[dict], toc: list[dict], groups: list[dict], dims: dict, 
     d.boxes(groups)
     d.sections(toc)
     d.labelled_paragraphs()
+    d.contents_pages()
     d.margin_notes()
     d.engine_kinds()
     d.placements({s['id']: s for s in toc})
@@ -316,6 +319,25 @@ class _Detector:
             if lead and (et := classify(lead.group(1))) and number_of(lead.group(1)) \
                     and TYPES[et][0] in ('worked', 'practice', 'theory'):
                 self.add(b['id'], 'para', et, [b['id']], lead.group(1), 'low', 'numbered label opening a paragraph')
+
+    TOC_MIN_ENTRIES = 3
+
+    def contents_pages(self):
+        """Table-of-contents blocks: >= TOC_MIN_ENTRIES lines ending in a page number after dot leaders (or a
+        slash), with the entry title right before them on the page (e.g. 'ΚΕΦΑΛΑΙΟ 1 Κύτταρα … / 25')."""
+        prev = None
+        for b in self.flow:
+            if b['id'] in self.claimed or b.get('excluded') or b['chosen'].get('type') not in ('text', 'latex'):
+                prev = b
+                continue
+            if toc_entries(chosen_text(b)) >= self.TOC_MIN_ENTRIES:
+                members = [b['id']]
+                if prev is not None and prev['page'] == b['page'] and prev['id'] not in self.claimed \
+                        and toc_entries(chosen_text(prev)) >= 1 and prev['kind'] in ('heading', 'paragraph'):
+                    members.insert(0, prev['id'])
+                self.add(members[0], 'block', 'toc', members, 'Πίνακας περιεχομένων', 'medium',
+                         'contents entries: titles with page numbers after dot leaders')
+            prev = b
 
     def margin_notes(self):
         """Unlabelled text outside the text frame (after everything labelled has claimed its blocks)."""

@@ -310,3 +310,12 @@ def test_commands_validate_requests_before_anything_is_recorded():
             decision_event(action, a, params, find)
     ev = decision_event('replace_latex', a, {'value': '$$x^2$$'}, find)
     assert ev['value'] == 'x^2' and ev['prev_hash'] is None and ev['action'] == 'replace_latex'
+
+
+def test_contents_entries_are_recognised_in_text_and_tables():
+    from scientific_ocr.core.vocabulary import toc_entries
+    assert toc_entries('ΚΕΦΑΛΑΙΟ 1 Κύτταρα: Οι Θεμελιώδεις Μονάδες της Ζωής / 25') == 1
+    assert toc_entries('Τα κύτταρα ποικίλουν ............ 26\nΌλα τα ζωντανά κύτταρα ....... 27\nΤο DNA … … 28') == 3
+    assert toc_entries('<table><tr><td>ΟΜΟΙΟΤΗΤΑ .......</td><td>26</td></tr><tr><td>Η εφεύρεση ......</td><td>31</td></tr></table>') == 2
+    assert toc_entries('Το pH είναι 7. Η θερμοκρασία είναι 37 βαθμοί.') == 0
+    assert toc_entries('Σχήμα 2-4 Η δομή του νερού') == 0

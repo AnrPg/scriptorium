@@ -301,6 +301,8 @@ def _apply_decisions(blocks, pages, contexts, inp: _Inputs):
 def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None) -> dict:
     """Book-wide structure: needs every page and every decision (see pipeline.document for the safety contract)."""
     dismissed = set(human['dismissed'])
+    toc_ids = frozenset(m for g in human['groups'] if g.get('type') == 'toc' for m in g.get('members', [])) | \
+        frozenset(m for e in human['assigned'].values() if e.get('entity_type') == 'toc' for m in e.get('members', []))
     fixes = furniture.classify(blocks, dims, dismissed)
     fixes += document.captions_across_pages(blocks, dismissed)
     fixes += captions.continuations(blocks, {p['page']: p.get('typography_ref') for p in pages},
@@ -314,7 +316,7 @@ def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None
         heading_review: dict = {}
         toc = sections.annotate(blocks, dismissed, heading_prior, heading_review,
                                 [(p['page'], x.get('text') or '') for p in pages for x in p.get('hidden', [])], model,
-                                {p['page']: p.get('typography_ref') for p in pages})
+                                {p['page']: p.get('typography_ref') for p in pages}, toc_ids)
         flow.annotate(blocks)
         auto_groups = structure.suggest(blocks, toc, pages, dismissed)
         auto_groups, box_fixes = document.boxes_across_pages(auto_groups, blocks, dismissed)

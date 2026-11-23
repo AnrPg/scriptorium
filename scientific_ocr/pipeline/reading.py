@@ -215,6 +215,8 @@ def _move_to_unit_end(nodes_: list[dict], move: set, images: str, level: int, c:
 def _node(b, by_id) -> dict | None:
     ch = b['chosen']
     caps = [by_id[cid] for cid in b['relations'].get('captions', []) if cid in by_id]
+    if b['kind'] == 'heading' and ch['type'] == 'text' and b.get('toc_entry'):    # a contents entry: text, not a section
+        return {'t': 'para', 'text': chosen_text(b), 'blocks': [b]}
     if b['kind'] == 'heading' and ch['type'] == 'text':
         return {'t': 'heading', 'level': b.get('heading_level') or 1, 'text': re.sub(r'^#+\s*', '', chosen_text(b)), 'blocks': [b]}
     if b['kind'] in FIGURE_KINDS or b['kind'] in CAPTIONABLE_KINDS or caps or b['kind'] == 'caption':

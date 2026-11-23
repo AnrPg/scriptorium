@@ -3,14 +3,16 @@ groups a reviewer (or the structure stage) can declare, and how groups map onto 
 
 An entity type value is either a TYPE key ('example') or a whole FAMILY ('family:practice') — the reviewer may
 know only the coarse category ("some practice item") without committing to the fine one."""
+import re
+
 
 GROUP_TYPES = {'labelled_box': 'Αριθμημένο πλαίσιο', 'example': 'Παράδειγμα', 'exercise': 'Άσκηση', 'solution': 'Λύση', 'definition': 'Ορισμός',
                'theorem': 'Θεώρημα / νόμος', 'sidebar': 'Ένθετο / πλαίσιο', 'figure_group': 'Σχήμα με λεζάντες',
                'table_group': 'Πίνακας με σημειώσεις', 'equation_group': 'Εξίσωση με επεξήγηση', 'question': 'Ερώτηση', 'summary': 'Περίληψη',
-               'note': 'Σημείωση', 'other': 'Άλλο'}
+               'note': 'Σημείωση', 'toc': 'Πίνακας περιεχομένων', 'other': 'Άλλο'}
 # group type -> entity type, for groups that ARE an entity of the taxonomy
 GROUP_ENTITY = {'example': 'example', 'exercise': 'exercise', 'definition': 'definition', 'question': 'question',
-                'problem': 'problem', 'solution': 'solution'}
+                'problem': 'problem', 'solution': 'solution', 'toc': 'toc'}
 
 
 FAMILIES = {   # family -> (Greek, English); order = display order
@@ -58,6 +60,7 @@ TYPES = {
     'chemical_equation': ('insert', 'Χημική εξίσωση', 'Chemical equation'),
     'footnote': ('insert', 'Υποσημείωση', 'Footnote'),
     'sidenote': ('aside', 'Σημείωση περιθωρίου (χωρίς ετικέτα)', 'Margin note (unlabelled)'),
+    'toc': ('frame', 'Πίνακας περιεχομένων', 'Table of contents'),
 }
 PLACEMENTS = {'inline': ('μέσα στο κείμενο', 'in the text'), 'margin': ('στο περιθώριο', 'in the margin'),
               'end_of_chapter': ('στο τέλος κεφαλαίου', 'at the end of the chapter')}
@@ -82,3 +85,18 @@ def entity_label(etype: str, lang: str = 'el') -> str:
         return TYPES[etype][1 + i]
     f = family_of(etype)
     return FAMILIES[f][i] if f else etype
+
+
+# A table-of-contents ENTRY: a title followed by a page number after dot leaders or a slash ("…… 26",
+# "Κύτταρα: Οι Θεμελιώδεις Μονάδες / 25"). Used to detect contents pages (entities) and to keep their titles out
+# of the book's hierarchy (sections). Pure text test.
+TOC_ENTRY = re.compile(r'(?:\.{3,}|(?:…\s*){2,}|\s/)\s*\d{1,4}\s*$')
+TOC_LEADERS = re.compile(r'(?:\.{3,}|(?:…\s*){2,})\s*\d{1,4}\b')
+
+
+def toc_entries(text: str) -> int:
+    """How many contents entries a text holds (lines ending in a page number after dot leaders or ' / ')."""
+    lines = [ln for ln in re.split(r'\n|<tr>|</tr>|<br\s*/?>', text or '') if ln.strip()]
+    plain = [re.sub(r'<[^>]+>', ' ', ln).strip() for ln in lines]
+    by_line = sum(1 for ln in plain if TOC_ENTRY.search(ln))
+    return max(by_line, len(TOC_LEADERS.findall(re.sub(r'<[^>]+>', ' ', text or ''))))
