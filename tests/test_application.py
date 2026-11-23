@@ -1261,10 +1261,10 @@ def test_caption_links_have_one_source_of_truth():
     pointing to another (shown twice), no link to a vanished segment (shown as 'no figure')."""
     from scientific_ocr.pipeline import captions
     rel = lambda **k: {'captions': [], **k}
-    blocks = [{'id': 'f1', 'kind': 'figure', 'relations': rel(captions=['c1', 'c2'])},
-              {'id': 'f2', 'kind': 'figure', 'relations': rel()},
-              {'id': 'c1', 'kind': 'caption', 'relations': rel(caption_for='f2')},      # moved to f2
-              {'id': 'c2', 'kind': 'caption', 'relations': rel(caption_for='gone')}]    # owner merged away
+    blocks = [{'id': 'f1', 'page': 1, 'kind': 'figure', 'relations': rel(captions=['c1', 'c2'])},
+              {'id': 'f2', 'page': 1, 'kind': 'figure', 'relations': rel()},
+              {'id': 'c1', 'page': 1, 'kind': 'caption', 'relations': rel(caption_for='f2')},      # moved to f2
+              {'id': 'c2', 'page': 1, 'kind': 'caption', 'relations': rel(caption_for='gone')}]    # owner merged away
     captions.reconcile(blocks)
     by = {b['id']: b for b in blocks}
     assert by['f1']['relations']['captions'] == [] and by['f2']['relations']['captions'] == ['c1']

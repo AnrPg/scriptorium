@@ -125,6 +125,31 @@ def reconcile(blocks: list[dict]) -> None:
         mine = [c for c in old if owner.get(c) == f['id']] + [c for c, o in owner.items() if o == f['id'] and c not in old]
         if mine or 'captions' in f['relations']:
             f['relations']['captions'] = list(dict.fromkeys(mine))
+    _captions_follow_owner(blocks, owner, by_id)
+
+
+def _captions_follow_owner(blocks: list[dict], owner: dict, by_id: dict) -> None:
+    """Reading order: every caption comes right after its figure (in the figure's caption order), on the same
+    page — wherever the caption was printed and wherever the reviewer moved the figure. The page outline, the page
+    preview and the export (which renders captions inside their figure) then agree. Captions continuing on
+    another page keep their place."""
+    follows = {c: f for c, f in owner.items() if by_id[c].get('page') == by_id[f].get('page')}
+    if not follows:
+        return
+    pos = {b['id']: i for i, b in enumerate(blocks)}
+    out = []
+    for b in blocks:
+        if b['id'] in follows:
+            continue
+        out.append(b)                                 # its captions, in their reading order (reviewer moves kept)
+        out += sorted((by_id[c] for c, f in follows.items() if f == b['id']), key=lambda x: pos[x['id']])
+    if len(out) != len(blocks):                       # defensive: never lose a segment
+        return
+    blocks[:] = out
+    order: dict[int, int] = {}
+    for b in blocks:
+        order[b.get('page')] = order.get(b.get('page'), 0) + 1
+        b['reading_order'] = order[b.get('page')]
 
 
 def _attach(cap, fig, inferred: bool, source: str = 'geometry'):

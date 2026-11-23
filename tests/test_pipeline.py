@@ -1404,3 +1404,16 @@ def test_contents_page_headings_are_not_sections_and_render_as_text():
     assert reading._node(blocks[0], {b['id']: b for b in blocks})['t'] == 'para'
     res = entities.detect(blocks, toc, [], {13: [600, 800], 40: [600, 800]}, {}, set())
     assert any(e['type'] == 'toc' and 'p13_3' in e['members'] for e in res['entities'])
+
+
+def test_captions_follow_their_figure_in_reading_order():
+    """Wherever a caption was printed (above the figure, after other text) and wherever the figure was moved,
+    the caption comes right after its figure; captions continuing on another page keep their place."""
+    from scientific_ocr.pipeline import captions
+    def b(i, page, kind, **rel):
+        return {'id': i, 'page': page, 'kind': kind, 'relations': {'captions': [], **rel}, 'reading_order': 0}
+    blocks = [b('c1', 1, 'caption', caption_for='f'), b('p', 1, 'paragraph'), b('f', 1, 'figure', captions=['c1', 'c2']),
+              b('q', 1, 'paragraph'), b('c2', 1, 'caption', caption_for='f'), b('x', 2, 'caption', caption_for='f')]
+    captions.reconcile(blocks)
+    assert [x['id'] for x in blocks] == ['p', 'f', 'c1', 'c2', 'q', 'x']
+    assert [x['reading_order'] for x in blocks if x['page'] == 1] == [1, 2, 3, 4, 5]
