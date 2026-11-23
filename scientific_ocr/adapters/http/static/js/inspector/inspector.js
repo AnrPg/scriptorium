@@ -1,4 +1,4 @@
-import { $, clear, h, keepScroll } from '../core/dom.js';
+import { $, clear, h, keepScroll, rememberDetails } from '../core/dom.js';
 import { S } from '../core/state.js';
 import { multiPanel } from '../inspector/multi.js';
 import { pagePanel } from '../inspector/page.js';
@@ -7,7 +7,7 @@ import { clearSelection, omitState, removeSegments, renderWorkspace, toggleOmit 
 
 // ---------------------------------------------------------------- inspector
 export function renderInspector(right) {
-  keepScroll(right, () => drawInspector(right));
+  keepScroll(right, () => { drawInspector(right); rememberDetails(right); });
 }
 function drawInspector(right) {
   clear(right);

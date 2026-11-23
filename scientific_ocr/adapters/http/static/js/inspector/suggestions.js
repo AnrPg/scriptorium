@@ -195,7 +195,7 @@ export function pageGroupsPanel(pg) {
   const ids = new Set(pg.blocks.map(b => b.id));
   const gs = (S.book.groups || []).filter(g => g.members.some(m => ids.has(m)));
   if (!gs.length) return h('span');
-  return h('details', { open: true }, h('summary', {}, `Ομάδες σελίδας (${gs.length})`), h('div', {}, gs.map(g => {
+  return h('details', {}, h('summary', {}, `Ομάδες σελίδας (${gs.length})`), h('div', {}, gs.map(g => {
     const op = { kind: 'group', type: g.type, name: g.name, members: g.members.filter(m => ids.has(m)), source: g.source === 'auto' ? 'auto' : 'human',
                  reason: g.source === 'auto' ? `κανόνας: ${g.rule || ''}` : null };
     const actions = g.source === 'auto' ? [

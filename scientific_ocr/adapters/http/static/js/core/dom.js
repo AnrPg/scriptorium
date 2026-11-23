@@ -85,3 +85,21 @@ export function installOverflowTitles() {
     }
   }, { passive: true });
 }
+
+// Collapsible sections (<details>) keep the state the reviewer gave them across re-renders (a rebuild, another
+// page): keyed by their title without counts ("Ομάδες σελίδας (3)" -> "Ομάδες σελίδας"), remembered per browser.
+const DETAILS_KEY = 'ocr.details';
+let detailsState = null;
+const loadDetails = () => { if (!detailsState) { try { detailsState = JSON.parse(localStorage.getItem(DETAILS_KEY)) || {}; } catch { detailsState = {}; } } return detailsState; };
+export function rememberDetails(root) {
+  if (!root) return;
+  const st = loadDetails();
+  for (const d of root.querySelectorAll('details')) {
+    const sum = d.querySelector(':scope > summary');
+    const key = sum && sum.textContent.replace(/\(\s*[\d.,]+\s*\)|\d+/g, '').replace(/\s+/g, ' ').trim();
+    if (!key || d.dataset.remembered) continue;
+    d.dataset.remembered = '1';
+    if (key in st) d.open = st[key];
+    d.addEventListener('toggle', () => { st[key] = d.open; try { localStorage.setItem(DETAILS_KEY, JSON.stringify(st)); } catch { /* storage blocked */ } });
+  }
+}

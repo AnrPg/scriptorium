@@ -1,7 +1,7 @@
 import { tabQuality } from '../book/quality.js';
 import { tabHistory, tabRules, tabSettings, tabStructure } from '../book/structure.js';
 import { api } from '../core/api.js';
-import { $, clear, h, keepScroll } from '../core/dom.js';
+import { $, clear, h, keepScroll, rememberDetails } from '../core/dom.js';
 import { render } from '../core/nav.js';
 import { S } from '../core/state.js';
 import { BOOK_TABS, RELEASE_EL, STEP_EL } from '../core/strings.js';
@@ -39,7 +39,8 @@ function drawBook() {
     ensureFresh(GATED_TABS[S.tab]).then(() => { if (pendingOf(S.book).count) history.back(); });
     return;
   }
-  ({ pages: tabPages, review: tabReview, quality: tabQuality, structure: tabStructure, rules: tabRules, history: tabHistory, settings: tabSettings })[S.tab]?.(body);
+  Promise.resolve(({ pages: tabPages, review: tabReview, quality: tabQuality, structure: tabStructure, rules: tabRules, history: tabHistory, settings: tabSettings })[S.tab]?.(body))
+    .then(() => rememberDetails(body));
 }
 /** Pages being re-examined by the automatic careful pass of the running job (empty when there is none). */
 export function carefulPages(b) {
