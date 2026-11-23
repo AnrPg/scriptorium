@@ -51,15 +51,22 @@ class ViewsService(ServiceBase):
             raise ServiceError('text must be a string (<= 50000 chars)')
         return {'html': inline_html(text)}
 
-    def queue(self, book_id: str, level: str = 'required') -> list[dict]:
-        """Review queue by importance: critical findings first, then content where errors matter most
-        (equations, tables, captions, headings), then prose, then image-only material; page order within."""
+    def queue(self, book_id: str, level: str = 'required', order: str = 'priority') -> list[dict]:
+        """Review queue. level: 'required', 'recommended' or 'all' (both). order 'priority': critical findings
+        first, then content where errors matter most (equations, tables, captions, headings), then prose, then
+        image-only material, page order within; order 'book': page then reading order (the review loop)."""
+        if level not in ('required', 'recommended', 'all') or order not in ('priority', 'book'):
+            raise ServiceError("level: required|recommended|all; order: priority|book")
+        levels = ('required', 'recommended') if level == 'all' else (level,)
         c = self._book(book_id).canonical() or {}
-        items = [x for x in c.get('blocks', []) if x['review'] == level and not x.get('omitted') and not x.get('excluded')]
-        items.sort(key=lambda x: (not any(critical(r) for r in x['reasons']),
-                                  REVIEW_PRIORITY.get(x.get('original_kind') or x['kind'], 4), x['page'], x['reading_order']))
+        items = [x for x in c.get('blocks', []) if x['review'] in levels and not x.get('omitted') and not x.get('excluded')]
+        if order == 'book':
+            items.sort(key=lambda x: (x['page'], x['reading_order']))
+        else:
+            items.sort(key=lambda x: (not any(critical(r) for r in x['reasons']),
+                                      REVIEW_PRIORITY.get(x.get('original_kind') or x['kind'], 4), x['page'], x['reading_order']))
         return [{'id': x['id'], 'page': x['page'], 'kind': x['kind'], 'review': x['review'], 'reasons': x['reasons'][:4],
-                 'critical': any(critical(r) for r in x['reasons'])} for x in items]
+                 'reading_order': x['reading_order'], 'critical': any(critical(r) for r in x['reasons'])} for x in items]
 
     def preview(self, book_id: str, style: str, images: bool, chars: int = 6000, options: dict | None = None) -> str:
         """First part of the linear output in a given style (for the export dialog)."""

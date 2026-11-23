@@ -236,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @route('GET', r'/api/books/([\w.-]+)/queue')
     def queue(self, bid):
-        self._json(200, self.app.queue(bid, self.query.get('level', 'required')))
+        self._json(200, self.app.queue(bid, self.query.get('level', 'required'), self.query.get('order', 'priority')))
 
     @route('GET', r'/api/books/([\w.-]+)/pages/(\d+)')
     def page(self, bid, n):

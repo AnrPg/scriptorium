@@ -8,6 +8,7 @@ import { render } from '../core/nav.js';
 import { R, S, kindLabel } from '../core/state.js';
 import { ACTION_EL, REVIEW_EL, SRC_EL, infoTip } from '../core/strings.js';
 import { captionPanel } from '../inspector/captions.js';
+import { loopPosition, stepReview } from '../inspector/reviewloop.js';
 import { historyPanel } from '../inspector/history.js';
 import { queueNeighbours, renderInspector } from '../inspector/inspector.js';
 import { engChip, lineageDialog, nextPageWithWork, reportWrong, sourceLabel } from '../inspector/lineage.js';
@@ -54,7 +55,7 @@ export function segmentPanel(body, blk) {
     return act(() => api(`${B(book.id)}/decide`, { body: { block_id: id, action, ...extra } }), msg || ACTION_EL[action])
       .then(() => {
         if (!here()) return;
-        S.seg = null; if (['approve', 'replace_text', 'replace_latex', 'approve_candidate', 'mark_image_only', 'mark_unreadable'].includes(action) && nb.next) selectBlock(nb.next.id);
+        S.seg = null; if (['approve', 'replace_text', 'replace_latex', 'approve_candidate', 'mark_image_only', 'mark_unreadable'].includes(action)) stepReview(1);   // next anywhere in the book
       }, () => { /* act() already reported the error */ })
       .finally(() => { DECIDING.delete(id); if (here()) renderWorkspace(); });   // re-enable the actions
   };
@@ -65,9 +66,13 @@ export function segmentPanel(body, blk) {
   body.append(h('div', { class: 'row seg-head' },
     h('div', { class: 'grow' }, h('div', { style: { fontWeight: 600 } }, kindLabel(blk), blk.source === 'region' ? h('span', { class: 'mut small' }, ' · δική σου περιοχή') : null),
       h('span', { class: 'chip rv-' + blk.review }, REVIEW_EL[blk.review])),
-    h('button', { class: 'icon', disabled: !nb.prev, onclick: () => selectBlock(nb.prev.id), title: 'Προηγούμενο προς έλεγχο (K)' }, '↑'),
-    h('span', { class: 'small mut' }, nb.pos ? `${nb.pos}/${nb.total}` : ''),
-    h('button', { class: 'icon', disabled: !nb.next, onclick: () => nb.next ? selectBlock(nb.next.id) : nextPageWithWork(), title: 'Επόμενο προς έλεγχο (J)' }, '↓')));
+    h('button', { class: 'icon', onclick: () => stepReview(-1), title: 'Προηγούμενο προς έλεγχο, σε όλο το βιβλίο (K)' }, '↑'),
+    (() => {      // place in the whole-book loop (filled when known); the page count stays as a hint
+      const sp = h('span', { class: 'small mut', title: nb.pos ? `Σε αυτή τη σελίδα: ${nb.pos} από ${nb.total}` : '' }, nb.pos ? `${nb.pos}/${nb.total}` : '');
+      loopPosition(blk.id).then(p => { if (p.i) { sp.textContent = `${p.i.toLocaleString('el-GR')}/${p.total.toLocaleString('el-GR')}`; sp.title = `Θέση στον έλεγχο όλου του βιβλίου${nb.pos ? ` · σε αυτή τη σελίδα ${nb.pos} από ${nb.total}` : ''}`; } }, () => {});
+      return sp;
+    })(),
+    h('button', { class: 'icon', onclick: () => stepReview(1), title: 'Επόμενο προς έλεγχο, σε όλο το βιβλίο (J)' }, '↓')));
   // 2. ONE status sentence: what is needed and which version is in force
   const reasons = blk.reasons.filter(r => R(r).review || R(r).crop || R(r).finding || ['TRIAGE_DOWNGRADED', 'ACCEPTED_BY_SAMPLING'].includes(r));
   const info = blk.reasons.filter(r => !reasons.includes(r));

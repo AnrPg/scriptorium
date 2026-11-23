@@ -1170,3 +1170,14 @@ def test_job_log_carries_facts_for_a_plain_language_summary(app):
     trig, built = facts[0], facts[2]
     assert trig['count'] == 1 and trig['events'][0]['action'] == 'replace_text' and trig['events'][0]['block_id'] == blk['id']
     assert built['blocks'] > 0 and 'seconds' in built and built['release_status']
+
+
+def test_review_loop_queue_is_book_ordered_and_includes_warnings(app):
+    """The review loop walks errors AND warnings in book order (page, reading order); the priority queue is kept."""
+    a, out = app
+    q = a.queue('run', 'all', 'book')
+    assert {x['review'] for x in q} <= {'required', 'recommended'}
+    assert len(q) == len(a.queue('run', 'required')) + len(a.queue('run', 'recommended'))
+    assert [(x['page'], x['reading_order']) for x in q] == sorted((x['page'], x['reading_order']) for x in q)
+    with pytest.raises(ServiceError):
+        a.queue('run', 'everything')

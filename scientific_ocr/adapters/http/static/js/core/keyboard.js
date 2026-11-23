@@ -1,4 +1,5 @@
 import { B } from '../core/api.js';
+import { stepReview } from '../inspector/reviewloop.js';
 import { doRedo, doUndo } from '../core/chrome.js';
 import { $, h, isTyping } from '../core/dom.js';
 import { navStep } from '../core/nav.js';
@@ -43,7 +44,7 @@ export const SHORTCUTS = [
   { keys: 'W', label: 'Είναι λάθος — νέο OCR', group: 'segment', match: K('w'), when: c => free(c) && c.A.wrong, run: (e, c) => c.A.wrong() },
   { keys: 'N', label: 'Σημείωση (μοντέλο)', group: 'segment', match: K('n'), when: c => free(c) && c.A.note, run: (e, c) => c.A.note() },
   { keys: 'L', label: 'Ετικέτα & δομή', group: 'segment', match: K('l'), when: c => free(c) && c.A.label, run: (e, c) => c.A.label() },
-  { keys: 'J / K', label: 'Επόμενο / προηγούμενο προς έλεγχο', group: 'page', match: K(['j', 'k']), when: free, run: (e) => queueStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
+  { keys: 'J / K', label: 'Επόμενο / προηγούμενο προς έλεγχο (σε όλο το βιβλίο, χωρίς αλλαγή σελίδας με το χέρι)', group: 'page', match: K(['j', 'k']), when: free, run: (e) => queueStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
   { keys: '← / →', label: 'Προηγούμενη / επόμενη σελίδα', group: 'page', match: K(['ArrowLeft', 'ArrowRight']), when: free, run: (e) => pageStep(e.key === 'ArrowLeft' ? -1 : 1) },
   { keys: 'R', label: 'Σχεδίαση περιοχής (Σάρωση)', group: 'page', match: K('r'), when: c => free(c) && toolOn('region'), run: () => toggleDraw() },
   { keys: 'B', label: 'Εμφάνιση πλαισίων (Σάρωση)', group: 'page', match: K('b'), when: c => free(c) && toolOn('boxes'), run: () => { S.showBoxes = !S.showBoxes; renderWorkspace(); } },
@@ -69,13 +70,7 @@ export function multiAction(kind) {
   if (S.multi.size >= 2 && !S.multiOpen) openMultiPanel();
   (S.segActions || {})[kind]?.();
 }
-export function queueStep(dir) {
-  const blk = S.page && S.page.blocks.find(b => b.id === S.sel), nb = blk && queueNeighbours(blk);
-  if (dir < 0) { if (nb && nb.prev) selectBlock(nb.prev.id); return; }
-  if (nb && nb.next) selectBlock(nb.next.id);
-  else if (!blk) { const f = S.page.blocks.find(b => b.review === 'required' || b.review === 'recommended'); f ? selectBlock(f.id) : nextPageWithWork(); }
-  else nextPageWithWork();
-}
+export function queueStep(dir) { return stepReview(dir); }     // the whole-book review loop (inspector/reviewloop.js)
 export function pageStep(dir) {
   const n = S.page.page + dir;
   if (n >= 1 && n <= S.page.page_count) go(`#/b/${S.book.id}/p/${n}`);
