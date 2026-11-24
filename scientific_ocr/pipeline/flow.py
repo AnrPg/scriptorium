@@ -49,8 +49,9 @@ def continues(prev: str, nxt: str) -> bool:
     prev, nxt = prev.rstrip(), nxt.lstrip(' *_"«(')
     if not prev or not nxt:
         return False
-    if prev.endswith(('-', '‐')) and nxt[0].isalpha():
-        return True                                    # hyphenated word split across the break
+    if prev.endswith(('-', '‐')) and nxt[0].isalpha() and nxt[0].islower():
+        return True                                    # hyphenated word split across the break (its rest is
+                                                       # lowercase: «νημα-» + «Αυτό» is a dash, not a split word)
     return not _SENTENCE_END.search(prev) and nxt[0].isalpha() and nxt[0].islower()
 
 

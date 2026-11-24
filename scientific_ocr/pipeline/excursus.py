@@ -23,7 +23,7 @@ from ..core.decisions import page_of
 from ..core.model import chosen_text
 
 PLACEMENTS = ('inplace', 'chapter_end', 'book_end', 'remove')
-SUGGEST_MAX_GAP_PAGES = 8          # an excursus longer than this is not looked for (resumption too far to be sure)
+SUGGEST_MAX_GAP_PAGES = 6          # an excursus longer than this is not looked for (resumption too far to be sure)
 TEXT_KINDS = {'paragraph', 'list_item'}
 
 
@@ -107,4 +107,8 @@ def suggest(blocks: list[dict], dismissed: set, continues) -> list[dict]:
                                     'explanation_el': f'Η παράγραφος της σ. {p} σταματά στη μέση και συνεχίζει στη '
                                                       f'σ. {q}: ό,τι υπάρχει ανάμεσα μοιάζει με παρέκβαση.'})
             break
-    return out
+    best: dict[str, dict] = {}                     # one resumption continues ONE paragraph: the nearest claim wins
+    for x in out:
+        if x['resumes'] not in best or x['segments'] < best[x['resumes']]['segments']:
+            best[x['resumes']] = x
+    return [x for x in out if best[x['resumes']] is x]
