@@ -1516,6 +1516,24 @@ def test_text_inside_a_group_of_figures_does_not_change_its_nature_or_its_group_
     assert not is_figure_group({'type': 'other', 'members': ['t1', 'gc']}, kinds)          # no figure at all
 
 
+def test_captions_are_inserts_by_default_and_follow_their_figure_unless_the_reviewer_says_otherwise():
+    from scientific_ocr.pipeline import flow
+    def blk(i, kind, text='x', **kw):
+        return {'id': i, 'page': 1, 'kind': kind, 'chosen': {'type': 'text', 'text': text}, 'relations': kw.pop('rel', {}),
+                'excluded': {}, **kw}
+    fig = blk('f', 'figure', rel={'captions': ['c']})
+    fig['chosen'] = {'type': 'image_only'}
+    cap = blk('c', 'caption', 'Σχήμα 1', rel={'caption_for': 'f'})
+    orphan, grp = blk('o', 'caption', 'Σχήμα 2'), blk('g', 'caption', 'ΕΙΚΟΝΑ 3', rel={'caption_group': 'G1'})
+    mine = blk('m', 'caption', 'Σχήμα 4', flow_override='main')
+    blocks = [blk('p', 'paragraph', 'Κείμενο.'), fig, cap, orphan, grp, mine]
+    flow.annotate(blocks)
+    assert [b['flow'] for b in blocks] == ['main', 'insert', 'insert', 'insert', 'insert', 'main']
+    fig['flow_override'] = 'main'                         # the figure set to the main text: its caption follows
+    flow.annotate(blocks)
+    assert cap['flow'] == 'main' and orphan['flow'] == 'insert'
+
+
 def test_childless_marker_list_is_kept_and_split_into_items_with_docling_boxes():
     """Marker 2.1 returns a ListGroup with no children (only HTML). It is never dropped: each <li> becomes a Marker
     ListItem whose box is the union of the Docling boxes carrying its text (an item's wrapped tail included); when

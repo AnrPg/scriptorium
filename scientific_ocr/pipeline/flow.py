@@ -1,8 +1,10 @@
 """Stage: reading-flow annotation for linear outputs.
 
 Every block gets a `flow` role:
-  main       body text (paragraphs, headings, captions without a figure)
-  insert     content placed INTO the text flow: figures (with their captions), tables, equations, excerpts
+  main       body text (paragraphs, headings)
+  insert     content placed INTO the text flow: figures, tables, equations, excerpts, and every caption
+             (a caption follows its figure's role; one without a figure, or of a group, is an insert by default)
+The reviewer's set_flow overrides any of these.
   furniture  running headers/footers/page numbers (not part of the argument of the text)
 and body paragraphs that the page layout split (a sentence interrupted by an insert or a page break) are linked
 with relations.continues_in / relations.continues_from, so a linear reader knows exactly where the interrupted
@@ -19,13 +21,15 @@ INSERT_KINDS = CAPTIONABLE_KINDS | EQUATION_KINDS | {'excerpt'}
 _SENTENCE_END = re.compile(r'[.;!?·:»"\')\]]\s*$|[.;!?·]\**\s*$')
 
 
-def role(b: dict) -> str:
+def role(b: dict, by_id: dict | None = None) -> str:
     if b.get('excluded'):                              # furniture CONFIRMED by pipeline.furniture (or the reviewer);
         return 'furniture'                             # an engine label alone does not take print out of the text
     if b.get('flow_override') in ('main', 'insert'):   # the reviewer's decision (set_flow)
         return b['flow_override']
-    if b['kind'] == 'caption' and b['relations'].get('caption_for'):
-        return 'insert'                                # travels with its figure
+    if b['kind'] == 'caption':                         # travels with its figure (inherits its role); a caption
+        owner = (by_id or {}).get(b['relations'].get('caption_for'))   # of a group, or still unlinked: an insert
+        return role(owner, by_id) if owner is not None and owner is not b and owner['kind'] != 'caption' \
+            and role(owner, by_id) != 'furniture' else 'insert'
     if b['kind'] in INSERT_KINDS and b['chosen']['type'] != 'text':
         return 'insert'
     if b['kind'] == 'excerpt':                         # reviewer turned an excerpt into text
@@ -50,8 +54,9 @@ def annotate(blocks: list[dict]):
     """Mutates blocks (in final reading order): sets b['flow'] and continuation relations."""
     last_main = None
     between: list[dict] = []
+    by_id = {b['id']: b for b in blocks}
     for b in blocks:
-        b['flow'] = role(b)
+        b['flow'] = role(b, by_id)
         for k in ('continues_in', 'continues_from', 'interrupted_by'):
             b['relations'].pop(k, None)
         if b['flow'] != 'main':
