@@ -147,19 +147,83 @@ def marker_blocks(raw: dict, page: int) -> list[dict]:
 
     def walk(block, pointer, group):
         bt = block.get('block_type')
-        if bt in MARKER_GROUPS:
-            for i, c in enumerate(block.get('children') or []):
+        if bt in MARKER_GROUPS and block.get('children'):
+            for i, c in enumerate(block['children']):
                 walk(c, f'{pointer}/children/{i}', block['id'])
             return
+        # A group WITHOUT children (Marker 2.1 returns every ListGroup like this: only its HTML) is a block in its
+        # own right — never dropped with its text. A list keeps its items for split_list_groups.
+        items = list_items(block.get('html') or '') if bt == 'ListGroup' else []
         text, latex = html_to_md(block.get('html') or '')
         out.append({'ref': 'marker:' + block['id'], 'engine': 'marker', 'page': page, 'label': bt,
                     'kind': MARKER_KIND.get(bt, 'unknown'), 'role': MARKER_ROLE.get(bt), 'text': text,
                     'html': block.get('html') or '', 'latex': latex,
                     'bbox': [float(v) for v in block['bbox']], 'order': len(out), 'group': group,
                     'raw_pointer': pointer, 'extra': {'images': sorted((block.get('images') or {}).keys()),
-                                                      **_heading_level(bt, block.get('html') or '')}})
+                                                      **_heading_level(bt, block.get('html') or ''),
+                                                      **({'list_items': items} if items else {})}})
     for i, c in enumerate(pg.get('children') or []):
         walk(c, f'/children/0/children/{i}', None)
+    return out
+
+
+_BULLET = re.compile(r'^(- )?[•·●▪◦‣∙○■□➢►✓\-–]\s*')
+
+
+def list_items(html: str) -> list[dict]:
+    """<li> items of a list's HTML: [{'text', 'html', 'latex'}] (a leading bullet glyph is dropped: the role says
+    it is a list item; the text then reads like any Marker ListItem, '- …')."""
+    if '<li' not in html:
+        return []
+    out = []
+    for li in BeautifulSoup(html, 'html.parser').find_all('li'):
+        if li.find_parent('li'):
+            continue                                  # a nested list stays inside its item
+        text, latex = html_to_md(str(li))
+        text = '- ' + _BULLET.sub('', text).strip()
+        if text.strip('- '):
+            out.append({'text': text, 'html': str(li), 'latex': latex})
+    return out
+
+
+def split_list_groups(mblocks: list[dict], dblocks: list[dict], min_cover: float = 0.6) -> list[dict]:
+    """A Marker list without item boxes (childless ListGroup, see marker_blocks) -> one Marker ListItem per <li>.
+    Marker gives no geometry per item, so each item takes the union of the Docling boxes INSIDE the list whose
+    text it contains (monotone in reading order: a box belongs to the current item or starts the next one; an
+    item's tail wrapped onto its own line goes with it). Text stays Marker's; the box provenance is recorded
+    (extra.bbox_from). Unless every item gets a box and every box an item, the list stays ONE block (its text is
+    never lost; the reviewer can still split it)."""
+    from rapidfuzz import fuzz
+    from ..core.geometry import containment
+    from ..core.text import match_norm
+    out = []
+    for m in mblocks:
+        items = m['extra'].get('list_items') or []
+        inside = sorted((d for d in dblocks if d['kind'] not in ('figure', 'molecular_structure')
+                         and containment(m['bbox'], d['bbox']) >= 0.5 and match_norm(d['text'])),
+                        key=lambda d: (d['bbox'][1], d['bbox'][0]))
+        if len(items) < 2 or len(inside) < len(items):
+            out.append(m)
+            continue
+        norm = [match_norm(it['text'].lstrip('- ')) for it in items]
+        cover = lambda d, i: fuzz.partial_ratio(match_norm(d['text']), norm[i]) / 100.0
+        assign, cur = [], 0
+        for d in inside:
+            if cur + 1 < len(items) and cover(d, cur + 1) > cover(d, cur):
+                cur += 1
+            assign.append(cur)
+        boxes = [[d['bbox'] for d, a in zip(inside, assign) if a == i] for i in range(len(items))]
+        if any(not b for b in boxes) or any(cover(d, a) < min_cover for d, a in zip(inside, assign)):
+            out.append(m)
+            continue
+        for i, (it, bbs) in enumerate(zip(items, boxes)):
+            bb = [min(b[0] for b in bbs), min(b[1] for b in bbs), max(b[2] for b in bbs), max(b[3] for b in bbs)]
+            out.append({**m, 'ref': f"{m['ref']}/li{i}", 'label': 'ListItem', 'kind': 'paragraph', 'role': 'list_item',
+                        'text': it['text'], 'html': it['html'], 'latex': it['latex'], 'bbox': bb, 'group': m['ref'],
+                        'raw_pointer': m['raw_pointer'],
+                        'extra': {'images': [], 'bbox_from': 'docling', 'list_item_of': m['ref'], 'item': i}})
+    for i, b in enumerate(out):
+        b['order'] = i
     return out
 
 

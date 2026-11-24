@@ -60,6 +60,7 @@ class PageContext:
                 except (ValueError, KeyError, TypeError) as exc:
                     ctx.engines[eng].update(status='NORMALIZE_FAILED', error=str(exc))
             ctx.engines[eng]['blocks'] = len(getattr(ctx, eng))
+        ctx.marker = engine_json.split_list_groups(ctx.marker, ctx.docling)    # lists Marker gave without item boxes
         ctx.alignment = align(ctx.marker, ctx.docling)
         dens = [len(plain_text(b['text'])) / geo.area(b['bbox']) for b in ctx.marker
                 if b['kind'] == 'paragraph' and b['text'] and geo.area(b['bbox']) > ctx.min_paragraph_area]

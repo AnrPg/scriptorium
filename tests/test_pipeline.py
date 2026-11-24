@@ -1487,3 +1487,26 @@ def test_a_group_of_figures_has_its_own_caption_besides_each_figure_caption():
     inner1, inner2, group = md.index('(Α) Σκελετικό'), md.index('(Β) Μοντέλο'), md.index('ΕΙΚΟΝΑ 2-9')
     assert inner1 < inner2 < group and md.count('<figure>') == md.count('</figure>') == 3
     assert md.count('ΕΙΚΟΝΑ 2-9') == 1 and md.rstrip().endswith('</figure>')
+
+
+def test_childless_marker_list_is_kept_and_split_into_items_with_docling_boxes():
+    """Marker 2.1 returns a ListGroup with no children (only HTML). It is never dropped: each <li> becomes a Marker
+    ListItem whose box is the union of the Docling boxes carrying its text (an item's wrapped tail included); when
+    the boxes do not account for every item, the list stays one block with all its text."""
+    from scientific_ocr.pipeline import engine_json as ej
+    html = '<ul><li>• Alpha items contain a long first sentence that wraps onto a second line ending in bonds.</li>' \
+           '<li>• Bravo is the second item of the list.</li><li>• Charlie closes the list.</li></ul>'
+    raw = {'children': [{'block_type': 'Page', 'id': '/page/0/Page/0', 'children': [
+        {'block_type': 'ListGroup', 'id': '/page/0/ListGroup/1', 'bbox': [50, 100, 500, 220], 'html': html, 'children': None}]}]}
+    (m,) = ej.marker_blocks(raw, 1)
+    assert m['label'] == 'ListGroup' and 'Bravo' in m['text'] and len(m['extra']['list_items']) == 3
+    d = lambda i, y, t: {'ref': f'docling:{i}', 'engine': 'docling', 'kind': 'paragraph', 'text': t, 'bbox': [52, y, 498, y + 12]}
+    dl = [d(0, 102, '5 Alpha items contain a long first sentence that wraps onto a second line'), d(1, 116, 'bonds.'),
+          d(2, 140, '9 Bravo is the second item of the list.'), d(3, 170, 'e Charlie closes the list.')]
+    items = ej.split_list_groups([m], dl)
+    assert [x['label'] for x in items] == ['ListItem'] * 3 and all(x['role'] == 'list_item' for x in items)
+    assert items[0]['text'].startswith('- Alpha') and items[0]['bbox'][1] == 102 and items[0]['bbox'][3] == 128
+    assert items[1]['bbox'][1] == 140 and items[2]['text'] == '- Charlie closes the list.'
+    assert all(x['extra']['bbox_from'] == 'docling' for x in items)
+    kept = ej.split_list_groups([m], dl[:2])                     # boxes cannot account for every item
+    assert kept == [m]

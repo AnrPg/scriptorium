@@ -33,13 +33,16 @@ def test_schema_integrity_and_retention(real):
 
 
 def test_p5_question_items_missed_by_marker_are_preserved(real):
-    """p.5 question box has items α. and β.; Marker drops both, Docling finds them."""
+    """p.5 question box has items α. and β.; Marker returns them only inside a childless ListGroup (no item boxes),
+    which used to be dropped. Now each is its own list item with Marker's text (or, failing that, a Docling-only
+    segment / a reviewer region): never lost, always in order."""
     out, c, md = real
     p5 = [b for b in c['blocks'] if b['page'] == 5]
     txt = lambda b: (b['chosen'].get('text') or '') + ' '.join(x.get('text') or '' for x in b['candidates'])
-    # kept either as Docling-only segments or, after review, as reviewer regions: never lost, always in order
-    a = next(b for b in p5 if 'πολικότητα' in txt(b) and ('SINGLE_ENGINE_DOCLING' in b['reasons'] or b['source'] == 'region'))
-    bb = next(b for b in p5 if 'G-C' in txt(b) and ('SINGLE_ENGINE_DOCLING' in b['reasons'] or b['source'] == 'region'))
+    kept = lambda b: b.get('role') == 'list_item' or 'SINGLE_ENGINE_DOCLING' in b['reasons'] or b['source'] == 'region'
+    a = next(b for b in p5 if 'πολικότητα' in txt(b) and kept(b))
+    bb = next(b for b in p5 if 'G-C' in txt(b) and kept(b))
+    assert a['id'] != bb['id'] and 'πολικότητα' in (a['chosen'].get('text') or '')     # separate items, with text
     ids = [b['id'] for b in p5]
     q = next(b for b in p5 if b['chosen'].get('text', '').startswith('Ποιες'))
     assert ids.index(q['id']) < ids.index(a['id']) < ids.index(bb['id'])
