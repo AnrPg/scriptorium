@@ -170,11 +170,16 @@ def region_ocr(out: Path, src_pdf: Path, region: dict, force_block: str, log=pri
         os.replace(tmp_pdf, final_pdf)
     else:
         tmp_pdf.unlink()
-    res = {}
-    for engine in ('marker', 'docling'):
+    # The two engines are independent subprocesses: run them AT ONCE (a region costs the slower one, not both).
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(engine):
         extra = ['--force_layout_block', force_block] if engine == 'marker' else None
-        res[engine] = extract_page(engine, final_pdf, sha, 1, out / 'raw', engine_version(engine), log, lang,
-                                   'standard', extra, subdir=f'regions/{engine}-{sha[:16]}')
+        return extract_page(engine, final_pdf, sha, 1, out / 'raw', engine_version(engine), log, lang,
+                            'standard', extra, subdir=f'regions/{engine}-{sha[:16]}')
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {e: pool.submit(one, e) for e in ('marker', 'docling')}
+        res = {e: f.result() for e, f in futures.items()}
     return {'crop_pdf': str(final_pdf.relative_to(out)), 'crop_sha': sha, 'engines': res}
 
 

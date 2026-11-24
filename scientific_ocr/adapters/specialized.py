@@ -6,7 +6,9 @@ inference is cached, so failures are retried next time. Outputs are candidates, 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import uuid
 from pathlib import Path
 
 from .. import config
@@ -48,7 +50,8 @@ def run(engine: str, jobs: list[dict], out: Path, allow_inference: bool, log=pri
         return results
     if not todo:
         return results
-    inp, res = cache / '_jobs.json', cache / '_results.json'
+    run_id = f'{os.getpid()}-{uuid.uuid4().hex[:8]}'          # a page preview and a full build may run at once
+    inp, res = cache / f'_jobs.{run_id}.json', cache / f'_results.{run_id}.json'
     inp.write_text(json.dumps(todo))
     cmd = [str(c) for c in COMMANDS[engine](ocr)] + ['--input', str(inp), '--output', str(res)]
     log(f'[{engine}] {len(todo)} crops: {" ".join(cmd)}')
@@ -60,11 +63,17 @@ def run(engine: str, jobs: list[dict], out: Path, allow_inference: bool, log=pri
         err = None if p.returncode == 0 else f'exit {p.returncode}: {p.stderr[-1500:]}'
     except Exception as exc:  # recorded, never hidden
         got, err = {}, f'{type(exc).__name__}: {exc}'
+    finally:
+        inp.unlink(missing_ok=True)
+        res.unlink(missing_ok=True)
     for j in todo:
         r = got.get(j['id']) or {'status': 'FAILED', 'error': err or 'no result returned'}
         r = {**r, 'engine': engine, 'command': ' '.join(cmd), 'crop_sha256': j['sha256'], 'model': MODEL_IDS[engine]}
-        if r.get('status') == 'OK':          # only successful inference is cached
-            (cache / f'{j["sha256"][:24]}.json').write_text(json.dumps(r, ensure_ascii=False, indent=2))
+        if r.get('status') == 'OK':          # only successful inference is cached (atomically)
+            dest = cache / f'{j["sha256"][:24]}.json'
+            tmp = dest.with_name(f'{dest.name}.{run_id}.tmp')
+            tmp.write_text(json.dumps(r, ensure_ascii=False, indent=2))
+            os.replace(tmp, dest)
         else:
             log(f'[{engine}] {j["id"]}: {r.get("status")} {str(r.get("error"))[:300]}')
         cached = cache / f'{j["sha256"][:24]}.json'

@@ -118,7 +118,9 @@ def crop(pdf: Path, page: int, bbox, out: Path, pad: float = config.CROP_PAD_PT,
         zoom = faithful_zoom(pg, zoom)              # excerpts keep every pixel of the scan
         pix = pg.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=pymupdf.Rect(*padded))
         out.parent.mkdir(parents=True, exist_ok=True)
-        pix.save(out)
+        tmp = out.with_name(f'{out.stem}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp{out.suffix}')
+        pix.save(tmp)                               # atomic: a page preview and a full build may crop at once
+        os.replace(tmp, out)
     return {'path': str(out), 'page': page, 'bbox': [round(v, 2) for v in bbox],
             'crop_bbox': [round(v, 2) for v in padded], 'pad_pt': pad, 'zoom': zoom,
             'width_px': pix.width, 'height_px': pix.height, 'sha256': sha256_file(out)}

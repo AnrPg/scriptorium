@@ -13,6 +13,7 @@ import { labelPicker } from '../ui/math.js';
 import { EMBED } from '../ui/page_overlay.js';
 import { hoverSeg } from '../workspace/hover.js';
 import { outputView } from '../workspace/output.js';
+import { updateSelectionPalette } from '../ui/selpalette.js';
 
 // ------------------------------------------------------------------ Page workspace
 // ------------------------------------------------------------------ page views and the tools each one supports
@@ -85,6 +86,7 @@ export function renderWorkspace() {
   if (!same) { S.scrolledTo = null; S.outputScrolledTo = null; }   // new screen: bring the selected segment into view once
   S.wsScrollKey = key;
   if (same) keepScroll($('#view'), buildWorkspace); else buildWorkspace();
+  updateSelectionPalette();
 }
 // The side panel is resizable like a deck. Wide screens: a vertical handle between page and panel (drag, ←/→ when
 // focused, double-click resets). Narrow screens (≤900px, the panel sits below the page): the handle becomes a bottom

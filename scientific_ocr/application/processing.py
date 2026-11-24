@@ -120,11 +120,11 @@ def ocr_regions(out: Path, log: Log, progress=None) -> int:
         return _ocr_regions(out, log, progress)
 
 
-def _ocr_regions(out: Path, log: Log, progress=None) -> int:
-    human = EventStore(out).state()
+def regions_to_ocr(out: Path, human: dict | None = None) -> list[tuple[dict, dict, dict]]:
+    """Reviewer regions whose box, label or OCR language is new or changed: [(region, label, spec)]."""
+    human = human or EventStore(out).state()
     book = read_json(out / 'book.json', {}) or {}
-    idx_path = out / 'raw' / 'regions' / 'index.json'
-    idx = read_json(idx_path, {}) or {}
+    idx = read_json(out / 'raw' / 'regions' / 'index.json', {}) or {}
     lang = book.get('ocr_lang') or config.DEFAULT_OCR_LANG
     todo = []
     for r in human['regions']:
@@ -134,6 +134,15 @@ def _ocr_regions(out: Path, log: Log, progress=None) -> int:
         if not spec['image_only'] and (done.get('bbox') != r['bbox'] or done.get('label') != label
                                        or done.get('lang', lang) != lang):
             todo.append((r, label, spec))
+    return todo
+
+
+def _ocr_regions(out: Path, log: Log, progress=None) -> int:
+    book = read_json(out / 'book.json', {}) or {}
+    idx_path = out / 'raw' / 'regions' / 'index.json'
+    idx = read_json(idx_path, {}) or {}
+    lang = book.get('ocr_lang') or config.DEFAULT_OCR_LANG
+    todo = regions_to_ocr(out)
     for i, (r, label, spec) in enumerate(todo):
         if progress:
             progress('regions', i, len(todo), page=r['page'])
@@ -201,14 +210,22 @@ def reproject_pages(out: Path, log: Log | None = None) -> int:
         code = reproject(out, log)
         log(joblog.fact('pages', pages=pages, seconds=round(_t.perf_counter() - t0, 1), full=True))
         return code
-    if pages:
-        ocr_regions(out, log, progress)
+    # First every changed page at once (a new region shows as its crop, «OCR pending»), THEN the slow region OCR
+    # (~30 s: the engines load their models), then the pages of the regions just read — so a click elsewhere on
+    # the page is never held back by a region's OCR.
+    ocr_pages = sorted({int(r['page']) for r, _, _ in regions_to_ocr(out)} & set(pages))
     code = 0
     for i, p in enumerate(pages):
         progress('compose', i, len(pages), page=p)
         c = projection.build_page(out, p, log)
         code = code or (c if c not in (0, 2) else 0)
-    log(joblog.fact('pages', pages=pages, seconds=round(_t.perf_counter() - t0, 1)))
+    if ocr_pages:
+        ocr_regions(out, log, progress)
+        for p in ocr_pages:
+            progress('compose', 0, 1, page=p)
+            c = projection.build_page(out, p, log)
+            code = code or (c if c not in (0, 2) else 0)
+    log(joblog.fact('pages', pages=pages, seconds=round(_t.perf_counter() - t0, 1), ocr_pages=ocr_pages))
     progress('done', 1, 1, code=code)
     return code
 

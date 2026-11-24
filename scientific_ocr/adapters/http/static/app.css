@@ -462,3 +462,12 @@ button.view-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
 .chip.exc{flex:none;font-size:10.5px;padding:0 6px;background:var(--acc-weak);color:var(--acc);border:1px dashed var(--acc)}
 .chip.cont-to{flex:none;font-size:10.5px;padding:0 6px;text-decoration:none}
 .excursus-banner{margin-bottom:8px;gap:6px;align-items:center}
+/* floating palette of the selection's actions (ui/selpalette.js) */
+.sel-palette{position:fixed;z-index:60;width:min(380px,calc(100vw - 16px));max-height:min(70vh,560px);display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);overflow:hidden}
+.sel-palette[hidden]{display:none}
+.sel-palette.pinned{border-color:var(--acc)}
+.sel-palette-head{display:flex;align-items:center;gap:4px;padding:6px 8px;background:var(--acc-weak);cursor:grab;user-select:none;font-size:12px;font-weight:600}
+.sel-palette-body{overflow:auto;padding:4px 8px 8px}
+.sel-palette-body .props.card{border:0;box-shadow:none;padding:0;margin:0}
+.sel-palette-body .prop-title{display:none}

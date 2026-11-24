@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .. import config
 from ..adapters import latex_render, specialized
 from ..adapters import pdf as pdfio
 from ..adapters.event_store import EventError, EventStore
@@ -68,7 +69,25 @@ def build(out: Path, log: Log = print, allow_inference: bool = True,
     missing or unreadable.
     Serialised per book (storage.book_lock): concurrent builds from the UI and the CLI wait for each other."""
     with book_lock(out):
-        return _build(out, log, allow_inference, runner, progress)
+        code = _build(out, log, allow_inference, runner, progress)
+        if code in (0, 5):
+            _catch_up_previews(out, log, runner)
+        return code
+
+
+def _catch_up_previews(out: Path, log: Log, runner: SpecializedRunner) -> None:
+    """The full build supersedes every page preview. Page previews do not wait for a running full build (their
+    own lock), so actions made WHILE it ran are not in it: their pages are rebuilt right here, at once, so nothing
+    the reviewer did disappears from the page when the book update lands. Under the preview lock: a page preview
+    computed from the previous build is discarded here, never written after."""
+    with book_lock(out, 'preview'):
+        for f in (out / PREVIEW_DIR).glob('p*.json'):
+            f.unlink(missing_ok=True)
+        pages = dirty_pages(out)
+        if pages:
+            log(f'actions made during the book update: page previews of {pages}')
+        for p in pages[:config.PAGE_PREVIEW_MAX_PAGES]:
+            _build_page(out, p, log, runner)
 
 
 @dataclass
@@ -141,9 +160,7 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
                     release_status=canonical['release_status'], seconds=round(sum(clock.values()), 1), timings=clock))
     atomic_write(out / 'cache' / 'build.json', json.dumps({'seconds': round(sum(clock.values()), 1), 'timings': clock,
                                                          'built_utc': canonical['run']['built_utc']}))
-    for f in (out / PREVIEW_DIR).glob('p*.json'):     # the full build supersedes every page preview
-        f.unlink(missing_ok=True)
-    return code
+    return code                                        # page previews: superseded in _catch_up_previews
 
 
 def change_facts(prev: dict, c: dict, history: list[dict]) -> list[str]:
@@ -517,39 +534,44 @@ def dirty_pages(out: Path, canonical: dict | None = None) -> list[int]:
 
 def build_page(out: Path, page: int, log: Log = print, runner: SpecializedRunner = specialized.run) -> int:
     """Rebuild ONE page as a preview (see above). 0 ok; 2 nothing to do (no full build yet / page not processed);
-    other codes as build()."""
-    with book_lock(out):
-        prev = read_json(out / 'canonical.json')
-        if not prev:
-            return 2
-        inp = _load_inputs(out, log)
-        if isinstance(inp, int):
-            return inp
-        if page not in inp.src['pages_processed']:
-            return 2
-        t0 = time.perf_counter()
-        one = _Inputs({**inp.src, 'pages_processed': [page]}, inp.pdf, inp.extraction, inp.regions_index, inp.human)
-        blocks, pages, contexts, _ = _compose_pages(out, one, lambda *a, **k: None)
-        enrich.enrich(out, blocks, runner, True, log)
-        _seal_machine_result(blocks)
-        sha = inp.src['sha256']
-        page_merges = [m for m in inp.human['merges'] if int(m['page']) == page]
-        ids = {b['id'] for b in blocks} | {merge.merged_id(sha, m) for m in page_merges}
-        human = {**inp.human, 'merges': page_merges, 'decisions': [d for d in inp.human['decisions'] if d['block_id'] in ids]}
-        result, _ = _apply_decisions(blocks, pages, contexts, _Inputs(one.src, one.pdf, one.extraction, one.regions_index, human))
-        notation.annotate(blocks)
-        captions.finalize(blocks)
-        old = {b['id']: b for b in prev.get('blocks', []) if b['page'] == page}
-        merged = [_preview_block(b, old.get(b['id'])) for b in blocks]
-        latex_check.annotate(merged, latex_render.check)
-        info = {**pages[0], **page_summary(merged)}
-        last = max((e['seq'] for e in inp.human['history']), default=0)
-        atomic_write(preview_path(out, page), json.dumps({
-            'base': prev['run']['built_utc'], 'page': page, 'last_seq': last, 'built_utc': datetime.now(timezone.utc).isoformat(),
-            'applied': result['applied'], 'stale': result['stale'], 'info': info, 'blocks': merged}, ensure_ascii=False))
-        log(f'page {page} preview: {len(merged)} segments, {sum(b["review"] == "required" for b in merged)} required, '
-            f'{round(time.perf_counter() - t0, 1)} s')
-        return 0
+    other codes as build(). Own lock (not the book's): a page preview never waits for a running full build, whose
+    end (_catch_up_previews) takes the same lock and redoes what changed meanwhile."""
+    with book_lock(out, 'preview'):
+        return _build_page(out, page, log, runner)
+
+
+def _build_page(out: Path, page: int, log: Log, runner: SpecializedRunner) -> int:
+    prev = read_json(out / 'canonical.json')
+    if not prev:
+        return 2
+    inp = _load_inputs(out, log)
+    if isinstance(inp, int):
+        return inp
+    if page not in inp.src['pages_processed']:
+        return 2
+    t0 = time.perf_counter()
+    one = _Inputs({**inp.src, 'pages_processed': [page]}, inp.pdf, inp.extraction, inp.regions_index, inp.human)
+    blocks, pages, contexts, _ = _compose_pages(out, one, lambda *a, **k: None)
+    enrich.enrich(out, blocks, runner, True, log)
+    _seal_machine_result(blocks)
+    sha = inp.src['sha256']
+    page_merges = [m for m in inp.human['merges'] if int(m['page']) == page]
+    ids = {b['id'] for b in blocks} | {merge.merged_id(sha, m) for m in page_merges}
+    human = {**inp.human, 'merges': page_merges, 'decisions': [d for d in inp.human['decisions'] if d['block_id'] in ids]}
+    result, _ = _apply_decisions(blocks, pages, contexts, _Inputs(one.src, one.pdf, one.extraction, one.regions_index, human))
+    notation.annotate(blocks)
+    captions.finalize(blocks)
+    old = {b['id']: b for b in prev.get('blocks', []) if b['page'] == page}
+    merged = [_preview_block(b, old.get(b['id'])) for b in blocks]
+    latex_check.annotate(merged, latex_render.check)
+    info = {**pages[0], **page_summary(merged)}
+    last = max((e['seq'] for e in inp.human['history']), default=0)
+    atomic_write(preview_path(out, page), json.dumps({
+        'base': prev['run']['built_utc'], 'page': page, 'last_seq': last, 'built_utc': datetime.now(timezone.utc).isoformat(),
+        'applied': result['applied'], 'stale': result['stale'], 'info': info, 'blocks': merged}, ensure_ascii=False))
+    log(f'page {page} preview: {len(merged)} segments, {sum(b["review"] == "required" for b in merged)} required, '
+        f'{round(time.perf_counter() - t0, 1)} s')
+    return 0
 
 
 def _same(a: dict, b: dict) -> bool:
