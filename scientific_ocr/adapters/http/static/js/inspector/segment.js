@@ -223,7 +223,8 @@ function propertiesCard(blk, book, decide, seg, rerender) {
       h('div', { class: 'row small' }, 'Ρόλος:', [['main', 'Κείμενο'], ['insert', 'Παρεμβολή'], ['auto', 'Αυτόματα']].map(([k, l]) =>
         h('button', { class: 'small' + ((blk.flow_override || 'auto') === k ? ' primary' : ''), onclick: () => send('set_flow', { flow: k }, `Ροή: ${l}`) }, l))),
       blk.flow !== 'insert' ? h('div', { class: 'row small' }, 'Συνέχεια της προηγούμενης παραγράφου:', [[true, 'Ναι'], [false, 'Όχι'], ['auto', 'Αυτόματα']].map(([k, l]) =>
-        h('button', { class: 'small' + ((forced == null ? 'auto' : forced) === k ? ' primary' : ''), onclick: () => send('set_continuation', { continues: k }, `Συνέχεια: ${l}`) }, l))) : null));
+        h('button', { class: 'small' + ((forced == null ? 'auto' : forced) === k ? ' primary' : ''), onclick: () => send('set_continuation', { continues: k }, `Συνέχεια: ${l}`) }, l)))
+        : h('div', { class: 'small mut' }, 'Συνέχεια παραγράφου: μόνο για κείμενο. Για να συνεχίζει την προηγούμενη παράγραφο, όρισε πρώτα «Ρόλος: Κείμενο».')));
   };
   const act1 = (k, label) => h('button', { class: 'small ghost prop-btn' + (seg.prop === k ? ' on' : ''), 'aria-expanded': String(seg.prop === k), onclick: () => toggle(k) }, seg.prop === k ? 'Κλείσιμο' : label);
   const row = (k, label, value, action, editor) => [h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, label), h('span', { class: 'prop-v' }, value), h('span', { class: 'prop-a' }, action || '')),

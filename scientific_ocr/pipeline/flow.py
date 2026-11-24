@@ -5,8 +5,10 @@ Every block gets a `flow` role:
   insert     content placed INTO the text flow: figures, tables, equations, excerpts, and every caption
              (a caption follows its figure's role; one without a figure, or of a group, is an insert by default)
 Visual content is ALWAYS an insert by default: a figure/chart/table/equation kind, a segment the reviewer
-categorised as one (an entity type of the 'insert' family: figure, table, equation…), and any segment whose
-output is an image (image only, unreadable, an untranscribed excerpt). The reviewer's set_flow overrides any of these.
+categorised as one (an entity type of the 'insert' family: figure, table, equation…) and an untranscribed
+excerpt. A TEXT segment (paragraph, list item, heading…) stays body text even while its output is an image
+(unreadable, image only, OCR pending): it is still part of the argument and may continue a paragraph.
+The reviewer's set_flow overrides any of these.
   furniture  running headers/footers/page numbers (not part of the argument of the text)
 and body paragraphs that the page layout split (a sentence interrupted by an insert or a page break) are linked
 with relations.continues_in / relations.continues_from, so a linear reader knows exactly where the interrupted
@@ -36,7 +38,7 @@ def role(b: dict, by_id: dict | None = None, inserts: frozenset = frozenset()) -
         return 'main' if b['chosen']['type'] == 'text' else 'insert'
     if b['kind'] in INSERT_KINDS or b['id'] in inserts:     # visual kind, or categorised as visual by the reviewer
         return 'insert'
-    return 'main' if b['chosen']['type'] in ('text', 'latex') else 'insert'     # else its output is an image
+    return 'main'                                      # text segments: even when shown as an image for now
 
 
 def _text(b) -> str:

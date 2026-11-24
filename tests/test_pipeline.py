@@ -1535,8 +1535,9 @@ def test_captions_are_inserts_by_default_and_follow_their_figure_unless_the_revi
 
 
 def test_images_figures_and_tables_are_always_inserts_by_default():
-    """Visual content is an insert whatever made it visual: its kind, the reviewer's category, or an image output.
-    Text stays main text; the reviewer's set_flow overrides."""
+    """Visual content is an insert whatever made it visual: its kind or the reviewer's category. A text segment
+    shown as an image for now (unreadable, image only, OCR pending) stays main text and may continue a paragraph;
+    the reviewer's set_flow overrides."""
     from scientific_ocr.pipeline import flow
     def blk(i, kind, ctype='text', **kw):
         return {'id': i, 'page': 1, 'kind': kind, 'chosen': {'type': ctype, 'text': 'λέξη'}, 'relations': {}, 'excluded': {}, **kw}
@@ -1544,7 +1545,7 @@ def test_images_figures_and_tables_are_always_inserts_by_default():
               blk('u', 'unknown', 'unreadable'), blk('cat', 'paragraph'), blk('x', 'excerpt', 'excerpt'), blk('xt', 'excerpt'),
               blk('mine', 'figure', 'image_only', flow_override='main')]
     flow.annotate(blocks, frozenset({'cat'}))             # 'cat': the reviewer categorised it as a figure/table
-    assert {b['id']: b['flow'] for b in blocks} == {'p': 'main', 't': 'insert', 'f': 'insert', 'img': 'insert', 'u': 'insert',
+    assert {b['id']: b['flow'] for b in blocks} == {'p': 'main', 't': 'insert', 'f': 'insert', 'img': 'main', 'u': 'main',
                                                      'cat': 'insert', 'x': 'insert', 'xt': 'main', 'mine': 'main'}
 
 
