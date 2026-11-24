@@ -1534,6 +1534,20 @@ def test_captions_are_inserts_by_default_and_follow_their_figure_unless_the_revi
     assert cap['flow'] == 'main' and orphan['flow'] == 'insert'
 
 
+def test_images_figures_and_tables_are_always_inserts_by_default():
+    """Visual content is an insert whatever made it visual: its kind, the reviewer's category, or an image output.
+    Text stays main text; the reviewer's set_flow overrides."""
+    from scientific_ocr.pipeline import flow
+    def blk(i, kind, ctype='text', **kw):
+        return {'id': i, 'page': 1, 'kind': kind, 'chosen': {'type': ctype, 'text': 'λέξη'}, 'relations': {}, 'excluded': {}, **kw}
+    blocks = [blk('p', 'paragraph'), blk('t', 'table'), blk('f', 'figure', 'image_only'), blk('img', 'paragraph', 'image_only'),
+              blk('u', 'unknown', 'unreadable'), blk('cat', 'paragraph'), blk('x', 'excerpt', 'excerpt'), blk('xt', 'excerpt'),
+              blk('mine', 'figure', 'image_only', flow_override='main')]
+    flow.annotate(blocks, frozenset({'cat'}))             # 'cat': the reviewer categorised it as a figure/table
+    assert {b['id']: b['flow'] for b in blocks} == {'p': 'main', 't': 'insert', 'f': 'insert', 'img': 'insert', 'u': 'insert',
+                                                     'cat': 'insert', 'x': 'insert', 'xt': 'main', 'mine': 'main'}
+
+
 def test_childless_marker_list_is_kept_and_split_into_items_with_docling_boxes():
     """Marker 2.1 returns a ListGroup with no children (only HTML). It is never dropped: each <li> becomes a Marker
     ListItem whose box is the union of the Docling boxes carrying its text (an item's wrapped tail included); when

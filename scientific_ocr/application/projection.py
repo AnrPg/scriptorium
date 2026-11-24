@@ -31,6 +31,7 @@ from ..core import joblog, lineage
 from ..core.decisions import event_pages, page_of
 from ..core.reasons import flag
 from ..core.model import block_id, content_hash, page_summary, release_status
+from ..core.vocabulary import family_of
 from ..pipeline import (
     audit,
     captions,
@@ -336,6 +337,8 @@ def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None
     dismissed = set(human['dismissed'])
     toc_ids = frozenset(m for g in human['groups'] if g.get('type') == 'toc' for m in g.get('members', [])) | \
         frozenset(m for e in human['assigned'].values() if e.get('entity_type') == 'toc' for m in e.get('members', []))
+    inserts = frozenset(m for e in human['assigned'].values() if family_of(e.get('entity_type')) == 'insert'
+                        for m in e.get('members', []))        # categorised as figure/table/equation by the reviewer
     fixes = furniture.classify(blocks, dims, dismissed)
     fixes += document.captions_across_pages(blocks, dismissed)
     fixes += captions.continuations(blocks, {p['page']: p.get('typography_ref') for p in pages},
@@ -350,7 +353,7 @@ def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None
         toc = sections.annotate(blocks, dismissed, heading_prior, heading_review,
                                 [(p['page'], x.get('text') or '') for p in pages for x in p.get('hidden', [])], model,
                                 {p['page']: p.get('typography_ref') for p in pages}, toc_ids)
-        flow.annotate(blocks)
+        flow.annotate(blocks, inserts)
         auto_groups = structure.suggest(blocks, toc, pages, dismissed)
         auto_groups, box_fixes = document.boxes_across_pages(auto_groups, blocks, dismissed)
         new = document.box_headings(auto_groups, blocks, dismissed)
