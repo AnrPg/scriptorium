@@ -68,6 +68,27 @@ def test_decide_undo_redo_cycle(app):
         a.decide('run', blk['id'], 'replace_text', value='  ')
 
 
+def test_one_property_on_a_whole_selection_is_one_undo_and_rejected_segments_are_reported(app):
+    a, out = app
+    blocks = [b for b in load(out)[0]['blocks'] if not b.get('excluded')]
+    text = [b['id'] for b in blocks if b['kind'] in ('paragraph', 'heading')][:2]
+    fig = next((b['id'] for b in blocks if b['kind'] in ('figure', 'table', 'math')), None)
+    r = a.decide_many('run', text + ([fig] if fig else []), 'set_flow', flow='insert')
+    assert r['applied'] == len(text) + (1 if fig else 0)
+    build(out)
+    got = {b['id']: b for b in load(out)[0]['blocks']}
+    assert all(got[i]['flow'] == 'insert' and got[i]['flow_override'] == 'insert' for i in text)
+    a.undo('run')                                          # ONE step undoes the whole selection
+    build(out)
+    got = {b['id']: b for b in load(out)[0]['blocks']}
+    assert all(not got[i].get('flow_override') for i in text)
+    with pytest.raises(ServiceError):
+        a.decide_many('run', [], 'set_flow', flow='main')
+    if fig and len(text) == 2:                             # a figure in the selection is skipped, not recorded stale
+        r = a.decide_many('run', [text[0], fig], 'associate_group_caption', group_id='G-x')
+        assert r['applied'] == 1 and [x['id'] for x in r['skipped']] == [fig]
+
+
 def test_approve_any_block_even_if_not_flagged(app):
     a, out = app
     ok = next(b for b in load(out)[0]['blocks'] if b['review'] in ('not_needed', 'recommended') and not b.get('excluded'))

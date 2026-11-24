@@ -3,6 +3,7 @@ import { B, api } from '../core/api.js';
 import { $, clear, h } from '../core/dom.js';
 import { S, kindLabel } from '../core/state.js';
 import { act, toast } from '../ui/feedback.js';
+import { selectionProps } from '../inspector/multiprops.js';
 import { hoverSeg } from '../workspace/hover.js';
 import { clearSelection, renderWorkspace, reorderSelection, setSelection } from '../workspace/workspace.js';
 
@@ -125,6 +126,8 @@ export function multiPanel(body) {
   const gBtn = h('button', { class: 'primary', onclick: (e) => openGroupMenu(e.currentTarget) }, 'Ομαδοποίηση…', h('kbd', {}, 'G'));
   const mBtn = h('button', { disabled: multiPage, title: multiPage ? 'Η συγχώνευση γίνεται μέσα σε μία σελίδα' : '', onclick: (e) => openMergeMenu(e.currentTarget) }, 'Συγχώνευση σε ένα…', h('kbd', {}, 'M'));
   const cBtn = assignSelectionButton(entries.map(([id]) => id));
+  S.multiProps = S.multiProps || { prop: null };
+  body.append(selectionProps(entries.map(([id]) => id), S.multiProps));
   body.append(h('div', { class: 'actions' }, gBtn, mBtn, cBtn, h('button', { class: 'ghost', onclick: () => { clearSelection(); renderWorkspace(); } }, 'Καθαρισμός', h('kbd', {}, 'Esc'))),
     h('div', { class: 'small mut', style: { marginTop: '8px' } },
       h('div', {}, h('b', {}, 'Ομαδοποίηση: '), 'κάθε τμήμα κρατά id, είδος και κείμενο· προστίθεται μια ομάδα (π.χ. «Παράδειγμα») ως μεταδεδομένα. Μπορεί να εκτείνεται σε σελίδες.'),

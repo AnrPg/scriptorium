@@ -5,6 +5,7 @@ import uuid
 
 from ...core import proposals
 from ...core import rules as book_rules
+from ...core.model import CAPTIONABLE_KINDS, EQUATION_KINDS
 from ...core.model import block_id as block_id_of
 from ...pipeline import engine_json
 from ...pipeline.overlay import (
@@ -15,6 +16,9 @@ from ...pipeline.overlay import (
 )
 from .base import PROFILES, ServiceBase, ServiceError, _now  # noqa: F401
 from .structure import _pad
+
+
+CAPTION_ACTIONS = {'associate_caption', 'associate_group_caption'}
 
 
 class ReviewService(ServiceBase):
@@ -40,6 +44,57 @@ class ReviewService(ServiceBase):
         out = b.events.append(*evs, actor=actor)
         self._reproject(b)
         return out[0]
+
+    def decide_many(self, book_id: str, block_ids: list[str], action: str, actor: str = 'reviewer', **params) -> dict:
+        """The same decision (any property of the segment card: flow, continuation, heading level, caption link,
+        group caption, caption role, image only…) on a whole SELECTION: ONE undoable step, one rebuild. A segment
+        the command rejects (e.g. a figure cannot be a caption) is skipped and reported, the rest apply. A new
+        machine tag ('relabel', params['label']) re-OCRs every selected segment as that type."""
+        b = self._book(book_id)
+        ids = list(dict.fromkeys(block_ids or []))
+        if not ids:
+            raise ServiceError('empty selection')
+        if action == 'relabel':
+            with self._batch() as evs:
+                for i in ids:
+                    self.relabel(book_id, i, params.get('label') or {}, actor)
+            b.events.append(*evs, actor=actor)
+            self._reproject(b, f'Νέα ετικέτα σε {len(ids)} τμήματα')
+            return {'applied': len(ids), 'skipped': []}
+        by_id = self._blocks_seen(b)
+        evs, skipped = [], []
+        try:
+            if action == 'set_heading_level' and isinstance(params.get('level'), int):
+                ok = []
+                for i in ids:
+                    if i not in by_id:
+                        skipped.append({'id': i, 'reason': 'unknown segment (reload)'})
+                        continue
+                    try:
+                        decision_event(action, by_id[i], params, by_id.get)
+                        ok.append(i)
+                    except CommandError as exc:
+                        skipped.append({'id': i, 'reason': str(exc)})
+                evs = heading_level_events(b.canonical() or {}, {i: params['level'] for i in ok}, by_id.get)
+            else:
+                for i in ids:
+                    if i not in by_id:
+                        skipped.append({'id': i, 'reason': 'unknown segment (reload)'})
+                        continue
+                    if action in CAPTION_ACTIONS and by_id[i]['kind'] in CAPTIONABLE_KINDS | EQUATION_KINDS:
+                        skipped.append({'id': i, 'reason': 'a figure/table/equation cannot be a caption'})
+                        continue                    # (the overlay would only mark it stale at the next rebuild)
+                    try:
+                        evs.append(decision_event(action, by_id[i], params, by_id.get))
+                    except CommandError as exc:
+                        skipped.append({'id': i, 'reason': str(exc)})
+        except CommandError as exc:
+            raise ServiceError(str(exc)) from None
+        if not evs:
+            raise ServiceError('nothing to apply: ' + '; '.join(sorted({x['reason'] for x in skipped}))[:300])
+        b.events.append(*evs, actor=actor)
+        self._reproject(b, f'Αλλαγή σε {len(ids) - len(skipped)} τμήματα')
+        return {'applied': len(ids) - len(skipped), 'skipped': skipped}
 
     def move_segments(self, book_id: str, block_ids: list[str], after: str | None = None, before: str | None = None,
                       actor: str = 'reviewer') -> dict:

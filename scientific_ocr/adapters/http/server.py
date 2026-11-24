@@ -309,6 +309,13 @@ class Handler(BaseHTTPRequestHandler):
             b.pop(reserved, None)
         self._json(200, self.app.decide(bid, b.pop('block_id', ''), b.pop('action', ''), self._actor(), **b))
 
+    @route('POST', r'/api/books/([\w.-]+)/decide-many')
+    def decide_many(self, bid):
+        b = self._body()
+        for reserved in ('actor', 'book_id'):              # never taken from the body
+            b.pop(reserved, None)
+        self._json(200, self.app.decide_many(bid, b.pop('blocks', None) or [], b.pop('action', ''), self._actor(), **b))
+
     @route('POST', r'/api/books/([\w.-]+)/undo')
     def undo(self, bid):
         self._json(200, self.app.undo(bid, self._actor()))
