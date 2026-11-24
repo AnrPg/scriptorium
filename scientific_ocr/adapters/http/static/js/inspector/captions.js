@@ -21,7 +21,7 @@ export function captionPanel(blk) {
     const pageGroups = [...(S.book.groups || []), ...pendingGroups].filter(g => g.members.some(m => byId[m]) && !g.members.includes(blk.id));
     const ownGroup = [...(S.book.groups || []), ...pendingGroups].find(g => g.id === blk.relations?.caption_group);
     const groupBtn = pageGroups.length ? h('button', { onclick: (e) => dropdown(e.currentTarget,
-      [{ title: 'Ομάδες της σελίδας', items: pageGroups.map(g => ({ label: (g.name || S.meta.group_types[g.type] || g.type) + (g.pending ? ' (σε αναμονή)' : ''), hint: `${g.members.length} τμήματα`, value: g.id })) }],
+      [{ title: 'Ομάδες της σελίδας', items: pageGroups.map(g => ({ label: (g.name || S.meta.group_types[g.type] || g.type) + (g.pending ? ' (σε αναμονή)' : ''), hint: `${g.figure ? 'σχήμα · ' : ''}${g.members.length} τμήματα`, value: g.id })) }],
       (it) => decide('associate_group_caption', { group_id: it.value }, 'Έγινε λεζάντα της ομάδας')) }, 'Λεζάντα όλης της ομάδας…') : null;
     if (blk.kind !== 'caption' && !owner) return h('details', {}, h('summary', {}, 'Λεζάντα'), h('div', {},
       h('p', { class: 'small mut' }, 'Αν αυτό το τμήμα είναι λεζάντα (π.χ. «Σχήμα 4.9»), σύνδεσέ το με το σχήμα του.'),

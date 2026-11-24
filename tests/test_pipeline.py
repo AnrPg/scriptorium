@@ -1489,6 +1489,33 @@ def test_a_group_of_figures_has_its_own_caption_besides_each_figure_caption():
     assert md.count('ΕΙΚΟΝΑ 2-9') == 1 and md.rstrip().endswith('</figure>')
 
 
+def test_text_inside_a_group_of_figures_does_not_change_its_nature_or_its_group_caption():
+    """Figures with parsed text (labels, important words in the picture) and their own captions are still a figure
+    group: one outer figure in the export, with the caption given to the group. The type still rules semantic
+    boxes (a sidebar with a figure and text stays a box)."""
+    from scientific_ocr.pipeline import groups, markdown, overlay
+    from scientific_ocr.pipeline.groups import is_figure_group
+    def blk(i, kind, text='', **rel):
+        return {'id': i, 'page': 1, 'kind': kind, 'chosen': {'type': 'text', 'text': text} if text else {'type': 'image_only'},
+                'relations': {'captions': [], **rel}, 'reasons': [], 'review': 'not_needed', 'reading_order': 0,
+                'source_crop': {'path': f'assets/{i}.png'}, 'excluded': {}, 'flow': 'insert'}
+    f1, c1 = blk('f1', 'figure', captions=['c1']), blk('c1', 'caption', '(Α) μιτοχόνδριο', caption_for='f1')
+    t1, f2 = blk('t1', 'paragraph', 'ATP συνθάση → 3 ATP'), blk('f2', 'figure')
+    gc = blk('gc', 'paragraph', 'ΕΙΚΟΝΑ 3-1 Οξειδωτική φωσφορυλίωση')
+    blocks = [f1, c1, t1, f2, gc]
+    overlay.COMMANDS['associate_group_caption'](gc, {'group_id': 'G1'}, {'blocks': blocks, 'by_id': {b['id']: b for b in blocks}})
+    kinds = {b['id']: b['kind'] for b in blocks}
+    for gtype, figure in (('figure_group', True), ('other', True), ('sidebar', False), ('example', False)):
+        out = groups.annotate(blocks, [{'id': 'G1', 'type': gtype, 'name': '', 'members': ['f1', 'c1', 't1', 'f2']}], {})
+        assert out[0]['figure'] is figure and out[0]['captions'] == ['gc'] and not gc['reasons']
+        md = markdown.markdown({'blocks': blocks, 'groups': out, 'entities': [], 'source': {}, 'pages': []})
+        outer = 'figure' if figure else 'aside'
+        assert md.startswith(f'<{outer}>') and md.rstrip().endswith(f'</{outer}>')
+        assert md.index('ATP συνθάση') < md.index('ΕΙΚΟΝΑ 3-1') and md.count('ΕΙΚΟΝΑ 3-1') == 1
+    assert is_figure_group({'type': 'example', 'members': ['f1', 'c1', 'f2']}, kinds)      # all visual: a figure
+    assert not is_figure_group({'type': 'other', 'members': ['t1', 'gc']}, kinds)          # no figure at all
+
+
 def test_childless_marker_list_is_kept_and_split_into_items_with_docling_boxes():
     """Marker 2.1 returns a ListGroup with no children (only HTML). It is never dropped: each <li> becomes a Marker
     ListItem whose box is the union of the Docling boxes carrying its text (an item's wrapped tail included); when

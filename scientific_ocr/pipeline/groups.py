@@ -7,7 +7,24 @@ missing (the group survives with the rest).
 """
 from __future__ import annotations
 
+from ..core.model import CAPTIONABLE_KINDS
 from ..core.reasons import flag
+
+GENERIC_GROUP_TYPES = {'other', ''}       # types that say nothing about the group's nature: its members decide
+
+
+def is_figure_group(g: dict, kinds: dict[str, str]) -> bool:
+    """The nature of a group: a FIGURE (one outer figure in the export, may take a group caption) or a box.
+    Text never changes it: a figure may hold parsed text (labels, values, important words in the picture) and its
+    members' own captions. 'figure_group' is always a figure; a generic group is a figure when it holds a figure;
+    a semantic type (example, sidebar…) is a figure only when everything in it besides text captions is visual."""
+    if g['type'] == 'figure_group':
+        return True
+    body = [kinds[m] for m in g['members'] if m in kinds and kinds[m] != 'caption']
+    visual = [k for k in body if k in CAPTIONABLE_KINDS]
+    if (g.get('type') or '') in GENERIC_GROUP_TYPES:
+        return bool(visual)
+    return bool(body) and len(visual) == len(body)
 
 
 def gaps(members: list[str], blocks: list[dict]) -> list[str]:
@@ -55,6 +72,9 @@ def annotate(blocks: list[dict], groups: list[dict], merged_into: dict[str, str]
                     'stop': g.get('stop'), 'ambiguous': bool(g.get('ambiguous')),
                     'ordered': bool(g.get('ordered'))})
     _group_captions(blocks, out, by_id)
+    kinds = {b['id']: b['kind'] for b in blocks}
+    for g in out:
+        g['figure'] = is_figure_group(g, kinds)
     return out
 
 

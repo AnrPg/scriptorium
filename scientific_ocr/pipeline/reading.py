@@ -30,7 +30,7 @@ import re
 from ..core.model import CAPTIONABLE_KINDS, FIGURE_KINDS, chosen_text, in_reader_output
 from ..core.vocabulary import entity_label, family_of
 from .entities import excluded_blocks, is_captioned_visual
-from .groups import gaps
+from .groups import gaps, is_figure_group
 from .merge import join_texts
 
 LABELS = {'el': {'figure': 'Εικόνα', 'table': 'Πίνακας', 'figures': 'Εικόνες', 'source': 'απόσπασμα πηγής'},
@@ -256,7 +256,7 @@ def _boxes(c, pos, flow_blocks) -> list[dict]:
     """Non-overlapping, contiguous boxed elements (groups) in reading order; nested, crossing or broken groups are
     not boxed (broken ones are reported by the document stage)."""
     out, end, ids = [], -1, list(pos)
-    cands = []
+    cands, kinds = [], {b['id']: b['kind'] for b in flow_blocks}
     for g in c.get('groups', []):
         idx = sorted(pos[m] for m in g['members'] if m in pos)
         if len(idx) >= 2:
@@ -264,8 +264,7 @@ def _boxes(c, pos, flow_blocks) -> list[dict]:
     for a, z, g in sorted(cands, key=lambda x: (x[0], -x[1])):
         if a <= end or gaps(g['members'], flow_blocks):
             continue
-        kinds = {b['id']: b['kind'] for b in flow_blocks}
-        figure = g['type'] == 'figure_group' or all(kinds.get(m) in CAPTIONABLE_KINDS for m in g['members'] if m in kinds)
+        figure = is_figure_group(g, kinds)
         out.append({'first': ids[a], 'last': ids[z], 'type': g['type'], 'name': g.get('name') or '', 'id': g.get('id'),
                     'figure': figure, 'captions': list(g.get('captions') or [])})
         end = z
