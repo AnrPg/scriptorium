@@ -94,10 +94,16 @@ class ServiceBase:
         if b.settings().get('page_updates_paused'):
             return None
         from ..projection import dirty_pages            # lazy: the projection pulls in the whole pipeline
+        from ..processing import regions_to_ocr
         pages = dirty_pages(b.dir, b.canonical())
         if not pages:
             return None
-        return self.jobs.submit(b.id, 'pages', ['reproject-pages', '--book', str(b.dir)], _pages_label(pages), lane='light')
+        job = self.jobs.submit(b.id, 'pages', ['reproject-pages', '--book', str(b.dir)], _pages_label(pages), lane='light')
+        # a new/changed region also needs OCR (~30 s): its own job, beside the page update, which never waits for it
+        ocr = sorted({int(r['page']) for r, _, _ in regions_to_ocr(b.dir)})
+        if ocr and len(pages) <= config.PAGE_PREVIEW_MAX_PAGES:     # (more: reproject_pages rebuilds the book, OCR incl.)
+            self.jobs.submit(b.id, 'regions', ['ocr-regions', '--book', str(b.dir)], _ocr_label(ocr), lane='light')
+        return job
 
     def rebuild(self, book_id: str) -> dict:
         """Apply every banked action now (one rebuild for all of them)."""
@@ -136,3 +142,9 @@ def _pages_label(pages: list[int]) -> str:
         return f'Σελίδα {pages[0]}: ενημέρωση'
     shown = ', '.join(map(str, pages[:3])) + (f' … ({len(pages)})' if len(pages) > 3 else '')
     return f'Σελίδες {shown}: ενημέρωση'
+
+
+def _ocr_label(pages: list[int]) -> str:
+    """«Σελίδα 406: OCR νέας περιοχής (~30″)» — says why that job takes longer than a page update."""
+    where = f'Σελίδα {pages[0]}' if len(pages) == 1 else 'Σελίδες ' + ', '.join(map(str, pages[:3])) + (' …' if len(pages) > 3 else '')
+    return f'{where}: OCR νέας περιοχής (~30″)'

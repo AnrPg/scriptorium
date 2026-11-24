@@ -29,7 +29,7 @@ def main(argv=None) -> int:
     p.add_argument('pdf', type=Path)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--pages', default=None)
-    for name in ('reproject', 'render', 'reproject-pages'):
+    for name in ('reproject', 'render', 'reproject-pages', 'ocr-regions'):
         p = sub.add_parser(name)
         p.add_argument('--book', '--output', dest='book', type=Path, required=True)
     for name in ('propose-structure', 'propose-entities', 'propose-extents'):   # second passes with the local model: proposals only
@@ -59,6 +59,9 @@ def main(argv=None) -> int:
     if a.cmd == 'reproject-pages':
         from .application import processing
         return processing.reproject_pages(a.book.resolve())
+    if a.cmd == 'ocr-regions':
+        from .application import processing
+        return processing.ocr_region_pages(a.book.resolve())
     if a.cmd == 'reproject':
         from .application import processing
         return processing.reproject(a.book.resolve())

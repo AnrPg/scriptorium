@@ -1186,7 +1186,8 @@ def test_actions_are_banked_in_slow_books_until_rebuild(app):
     before = len(a.jobs.submitted)
     a.decide('run', blk['id'], 'replace_text', value='fixed text')
     a.add_region('run', 1, [10, 10, 200, 60], {'engine': 'marker', 'name': 'Text'})
-    assert set(a.jobs.submitted[before:]) == {('pages', 'light')}             # only the touched pages, no full rebuild
+    # only the touched pages (and the new region's OCR, a job of its own beside them), no full rebuild
+    assert set(a.jobs.submitted[before:]) == {('pages', 'light'), ('regions', 'light')}
     p = a.book('run')['pending']
     assert p['count'] >= 2 and p['ocr'] == 1 and p['estimate_s'] == 400
     rev = a.revision('run')
@@ -1399,3 +1400,45 @@ def test_actions_can_target_segments_that_exist_only_in_the_page_preview(app):
     assert projection.build_page(out, 1, log=lambda m: None, runner=no_models) == 0
     seg = {b['id']: b for b in a.page('run', 1)['blocks']}
     assert seg[cap['id']]['relations']['caption_for'] == merged['id'] and cap['id'] in seg[merged['id']]['relations']['captions']
+
+
+def test_page_preview_does_not_wait_for_a_running_book_update_and_nothing_made_meanwhile_is_lost(app, monkeypatch):
+    """A page preview has its own lock: it runs while a full build holds the book's. An action made DURING a full
+    build is not in it; the build's end rebuilds that page's preview at once (_catch_up_previews), so the change
+    never disappears from the page when the book update lands."""
+    import json, threading, time
+    from scientific_ocr.adapters.storage import book_lock
+    from scientific_ocr.application import projection
+    from conftest import no_models
+    a, out = app
+    (out / 'cache').mkdir(exist_ok=True)
+    (out / 'cache' / 'build.json').write_text(json.dumps({'seconds': 400}))
+    blk = next(b for b in a.page('run', 1)['blocks'] if 'SINGLE_ENGINE_DOCLING' in b['reasons'])
+    a.decide('run', blk['id'], 'replace_text', value='first fix')
+    held, release = threading.Event(), threading.Event()
+
+    def full_build_running():
+        with book_lock(out):
+            held.set()
+            release.wait(30)
+    t = threading.Thread(target=full_build_running)
+    t.start()
+    held.wait(5)
+    t0 = time.perf_counter()
+    try:
+        assert projection.build_page(out, 1, log=lambda m: None, runner=no_models) == 0
+        assert time.perf_counter() - t0 < 10                                       # did not wait for the book lock
+    finally:
+        release.set()
+        t.join()
+    real_build = projection._build
+
+    def build_then_reviewer_acts(*args, **kw):                                     # the action lands mid-build
+        code = real_build(*args, **kw)
+        a.decide('run', blk['id'], 'replace_text', value='made during the book update')
+        return code
+    monkeypatch.setattr(projection, '_build', build_then_reviewer_acts)
+    assert projection.build(out, log=lambda m: None, runner=no_models) == 0
+    pg = a.page('run', 1)
+    assert pg['preview'] is not None                                               # caught up at the build's end
+    assert next(b for b in pg['blocks'] if b['id'] == blk['id'])['chosen']['text'] == 'made during the book update'

@@ -28,7 +28,8 @@ from . import projection
 STEPS = {
     'process': ['prepare', 'extract', 'regions', 'compose', 'models', 'render'],
     'reproject': ['regions', 'compose', 'models', 'render'],
-    'pages': ['regions', 'compose'],
+    'pages': ['compose'],
+    'regions': ['regions', 'compose'],
     'structure': ['structure'],
     'entities': ['entities'],
     'extents': ['extents'],
@@ -197,9 +198,10 @@ def auto_diligent_pages(out: Path, pages: list[int]) -> list[int]:
 
 
 def reproject_pages(out: Path, log: Log | None = None) -> int:
-    """Fast path after PAGE-LOCAL actions in a book whose full rebuild is slow: OCR new reviewer regions, then
-    rebuild only the pages those actions touched, as page previews (projection.build_page). Book-wide actions stay
-    banked for the next full rebuild."""
+    """Fast path after PAGE-LOCAL actions in a book whose full rebuild is slow: rebuild only the pages those
+    actions touched, as page previews (projection.build_page; ~1 s a page). Book-wide actions stay banked for the
+    next full rebuild. New reviewer regions are NOT read here (that takes ~30 s): a region shows as its crop
+    («OCR pending») until its own job, ocr_region_pages, has read it — so no click waits for a region's OCR."""
     import time as _t
     log = log or file_logger(out)
     progress = progress_for(out, 'pages')
@@ -210,22 +212,31 @@ def reproject_pages(out: Path, log: Log | None = None) -> int:
         code = reproject(out, log)
         log(joblog.fact('pages', pages=pages, seconds=round(_t.perf_counter() - t0, 1), full=True))
         return code
-    # First every changed page at once (a new region shows as its crop, «OCR pending»), THEN the slow region OCR
-    # (~30 s: the engines load their models), then the pages of the regions just read — so a click elsewhere on
-    # the page is never held back by a region's OCR.
-    ocr_pages = sorted({int(r['page']) for r, _, _ in regions_to_ocr(out)} & set(pages))
     code = 0
     for i, p in enumerate(pages):
         progress('compose', i, len(pages), page=p)
         c = projection.build_page(out, p, log)
         code = code or (c if c not in (0, 2) else 0)
-    if ocr_pages:
-        ocr_regions(out, log, progress)
-        for p in ocr_pages:
-            progress('compose', 0, 1, page=p)
+    log(joblog.fact('pages', pages=pages, seconds=round(_t.perf_counter() - t0, 1)))
+    progress('done', 1, 1, code=code)
+    return code
+
+
+def ocr_region_pages(out: Path, log: Log | None = None) -> int:
+    """OCR the reviewer's new or changed regions (both engines at once), then refresh the previews of their pages.
+    A job of its own beside reproject_pages: page updates elsewhere never wait for it."""
+    import time as _t
+    log = log or file_logger(out)
+    progress = progress_for(out, 'regions')
+    t0 = _t.perf_counter()
+    pages = sorted({int(r['page']) for r, _, _ in regions_to_ocr(out)})
+    ocr_regions(out, log, progress)
+    code = 0
+    if (read_json(out / 'canonical.json') or {}).get('run'):    # a built book: refresh the pages now
+        for p in pages:
             c = projection.build_page(out, p, log)
             code = code or (c if c not in (0, 2) else 0)
-    log(joblog.fact('pages', pages=pages, seconds=round(_t.perf_counter() - t0, 1), ocr_pages=ocr_pages))
+    log(joblog.fact('regions', pages=pages, seconds=round(_t.perf_counter() - t0, 1)))
     progress('done', 1, 1, code=code)
     return code
 
