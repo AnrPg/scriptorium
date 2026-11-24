@@ -54,28 +54,67 @@ def continues(prev: str, nxt: str) -> bool:
     return not _SENTENCE_END.search(prev) and nxt[0].isalpha() and nxt[0].islower()
 
 
-def annotate(blocks: list[dict], inserts: frozenset = frozenset()):
-    """Mutates blocks (in final reading order): sets b['flow'] and continuation relations."""
-    last_main = None
-    between: list[dict] = []
+NEVER_CONTINUES = INSERT_KINDS | {'caption', 'heading'}
+
+
+def strand_of(b: dict, boxes: dict) -> str:
+    """The CONTEXT a text continues in: 'main' (the course text), 'x:<id>' (an excursus, pipeline.excursus) or the
+    box it is categorised in ('g:<group>' / 'e:<entity>'). The reviewer's 'main text' takes a segment out of its box,
+    not out of its excursus."""
+    box = boxes.get(b['id']) if b.get('flow_override') != 'main' else None
+    if box:
+        return box
+    return f'x:{b["excursus"]}' if b.get('excursus') else 'main'
+
+
+def annotate(blocks: list[dict], inserts: frozenset = frozenset(), boxes: dict | None = None):
+    """Mutates blocks (in final reading order): sets b['flow'] and continuation relations.
+
+    `boxes`: segment id -> box strand, for segments CATEGORISED as something special (an example, a question, a
+    box…: reviewer groups and entities). They are inserts relative to the course text by default, and text in a
+    box continues text of the same box. Continuation is decided per strand (strand_of): a course paragraph broken
+    by an insert, a box, an excursus of many pages or a page break continues the last COURSE paragraph, and a
+    paragraph of an excursus continues the same excursus — both may happen on the same page.
+    relations.continues_strand names the context of a continuation; interrupted_by lists what lies between
+    (single inserts by id; a whole box, excursus or stretch of course text once)."""
+    boxes = boxes or {}
+    boxed = frozenset(boxes)
     by_id = {b['id']: b for b in blocks}
-    for b in blocks:
-        b['flow'] = role(b, by_id, inserts)
-        for k in ('continues_in', 'continues_from', 'interrupted_by'):
+    last: dict[str, tuple[dict, int]] = {}
+    for i, b in enumerate(blocks):
+        b['flow'] = role(b, by_id, inserts | boxed)
+        for k in ('continues_in', 'continues_from', 'interrupted_by', 'continues_strand'):
             b['relations'].pop(k, None)
-        if b['flow'] != 'main':
-            between.append(b)
+        if b['flow'] == 'furniture':
             continue
+        if b.get('flow_override') == 'insert' and b['id'] not in boxed and b['kind'] != 'heading':
+            continue                                   # text the reviewer placed as an insert: outside every strand
+        key = strand_of(b, boxes)
         if b['kind'] == 'heading':
-            last_main, between = None, []
+            last.pop(key, None)                        # a heading starts new text in its own context only
             continue
+        if b['kind'] in NEVER_CONTINUES:
+            continue
+        prev = last.get(key)
         forced = b.get('continues_override')          # the reviewer's decision (set_continuation) beats the test
-        if last_main is not None and (forced if forced is not None else continues(_text(last_main), _text(b))):
-            last_main['relations']['continues_in'] = b['id']
-            b['relations']['continues_from'] = last_main['id']
-            breaks = [x['id'] for x in between if x['flow'] == 'insert']
-            if b['page'] != last_main['page']:
-                breaks.append(f'page:{last_main["page"]}->{b["page"]}')
+        if prev is not None and (forced if forced is not None else continues(_text(prev[0]), _text(b))):
+            a = prev[0]
+            a['relations']['continues_in'] = b['id']
+            b['relations']['continues_from'] = a['id']
+            b['relations']['continues_strand'] = key
+            breaks, seen = [], set()
+            for x in blocks[prev[1] + 1:i]:
+                if x.get('flow') == 'furniture':
+                    continue
+                k = strand_of(x, boxes)
+                if k == key:
+                    if x.get('flow') == 'insert':
+                        breaks.append(x['id'])
+                elif k not in seen:
+                    seen.add(k)
+                    breaks.append(('excursus:' + k[2:]) if k.startswith('x:') else ('box:' + k[2:]) if k != 'main' else 'course')
+            if b['page'] != a['page']:
+                breaks.append(f'page:{a["page"]}->{b["page"]}')
             if breaks:
                 b['relations']['interrupted_by'] = breaks
-        last_main, between = b, []
+        last[key] = (b, i)

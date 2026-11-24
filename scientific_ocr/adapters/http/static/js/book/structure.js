@@ -8,6 +8,7 @@ import { EV_EL, SRC_EL, infoTip } from '../core/strings.js';
 import { entitiesCard, entityReviewPanel } from '../book/entities.js';
 import { extentReviewPanel, headingReviewCard, outlineCard } from '../book/hierarchy.js';
 import { docStructureCard } from '../inspector/suggestions.js';
+import { excursusCard } from '../inspector/excursus.js';
 import { act, modal } from '../ui/feedback.js';
 
 export function tabStructure(body) {
@@ -16,7 +17,7 @@ export function tabStructure(body) {
   const llm = h('div', { class: 'card', style: { padding: '14px 16px', marginBottom: '16px' } }, h('div', { class: 'small mut' }, 'Φόρτωση προτάσεων…'));
   const ents = h('div', { class: 'card', style: { padding: '14px 16px', marginBottom: '16px' } }, h('div', { class: 'small mut' }, 'Φόρτωση οντοτήτων…'));
   const entLlm = h('div', { class: 'card', style: { padding: '14px 16px', marginBottom: '16px' } }, h('div', { class: 'small mut' }, 'Φόρτωση προτάσεων…'));
-  body.append(rules, llm, ents, entLlm);
+  body.append(excursusCard(), rules, llm, ents, entLlm);
   entitiesCard(ents).catch(e => clear(ents).append(h('div', { class: 'badge-bad' }, e.message)));
   entityReviewPanel(entLlm).catch(e => clear(entLlm).append(h('div', { class: 'badge-bad' }, e.message)));
   structureReviewPanel(llm).catch(e => clear(llm).append(h('div', { class: 'badge-bad' }, e.message)));

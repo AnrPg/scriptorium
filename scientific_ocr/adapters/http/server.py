@@ -316,6 +316,33 @@ class Handler(BaseHTTPRequestHandler):
             b.pop(reserved, None)
         self._json(200, self.app.decide_many(bid, b.pop('blocks', None) or [], b.pop('action', ''), self._actor(), **b))
 
+    @route('POST', r'/api/books/([\w.-]+)/excursus')
+    def excursus_add(self, bid):
+        p = self._body()
+        self._json(200, self.app.set_excursus(bid, p.get('first'), p.get('last'), p.get('pages'), p.get('type') or 'other',
+                                              p.get('name') or '', p.get('placement') or 'inplace', None, self._actor(),
+                                              p.get('blocks')))
+
+    @route('POST', r'/api/books/([\w.-]+)/excursus/place-type')
+    def excursus_place_type(self, bid):
+        p = self._body()
+        self._json(200, self.app.place_excursus_type(bid, p.get('type') or '', p.get('placement') or '', self._actor()))
+
+    @route('POST', r'/api/books/([\w.-]+)/excursus/(\w+)')
+    def excursus_update(self, bid, xid):
+        p = self._body()
+        self._json(200, self.app.update_excursus(bid, xid, self._actor(), **{k: p.get(k) for k in ('first', 'last', 'type', 'name', 'placement')}))
+
+    @route('POST', r'/api/books/([\w.-]+)/excursus/(\w+)/remove')
+    def excursus_remove(self, bid, xid):
+        self._json(200, self.app.remove_excursus(bid, xid, self._actor()))
+
+    @route('POST', r'/api/books/([\w.-]+)/excursus-suggestions/(\w+)/accept')
+    def excursus_accept(self, bid, key):
+        p = self._body()
+        self._json(200, self.app.accept_excursus_suggestion(bid, key, p.get('type') or 'other', p.get('name') or '',
+                                                            p.get('placement') or 'inplace', self._actor()))
+
     @route('POST', r'/api/books/([\w.-]+)/undo')
     def undo(self, bid):
         self._json(200, self.app.undo(bid, self._actor()))

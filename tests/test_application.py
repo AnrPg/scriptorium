@@ -89,6 +89,28 @@ def test_one_property_on_a_whole_selection_is_one_undo_and_rejected_segments_are
         assert r['applied'] == 1 and [x['id'] for x in r['skipped']] == [fig]
 
 
+def test_excursus_is_marked_by_its_ends_or_pages_changed_in_place_never_overlapping_and_undoable(app):
+    a, out = app
+    ex = a.set_excursus('run', pages=[1, 1], type='history', name='Πάουλινγκ')
+    assert ex['type'] == 'history' and ex['placement'] == 'inplace' and ex['first'] != ex['last']
+    build(out)
+    c = load(out)[0]
+    (x,) = c['excursus']
+    assert x['id'] == ex['id'] and x['pages'] == [1] and x['members']
+    assert all(b.get('excursus') == ex['id'] for b in c['blocks'] if b['id'] in x['members'])
+    with pytest.raises(ServiceError):                     # never overlapping another excursus
+        a.set_excursus('run', first=ex['first'], last=ex['first'])
+    a.update_excursus('run', ex['id'], placement='book_end')
+    assert a.book('run')['excursus_marked'][0]['placement'] == 'book_end'
+    assert a.place_excursus_type('run', 'history', 'remove') == {'changed': 1}
+    a.undo('run')
+    assert a.book('run')['excursus_marked'][0]['placement'] == 'book_end'
+    a.remove_excursus('run', ex['id'])
+    assert a.book('run')['excursus_marked'] == []
+    with pytest.raises(ServiceError):
+        a.remove_excursus('run', ex['id'])
+
+
 def test_approve_any_block_even_if_not_flagged(app):
     a, out = app
     ok = next(b for b in load(out)[0]['blocks'] if b['review'] in ('not_needed', 'recommended') and not b.get('excluded'))

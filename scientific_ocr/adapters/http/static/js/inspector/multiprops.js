@@ -9,6 +9,7 @@ import { CAPROLE_EL } from '../core/strings.js';
 import { dropdown } from '../inspector/multi.js';
 import { act, toast } from '../ui/feedback.js';
 import { labelPicker } from '../ui/math.js';
+import { excursusDialog } from '../inspector/excursus.js';
 import { renderWorkspace } from '../workspace/workspace.js';
 
 const FIG = ['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table', 'math', 'chemical_reaction'];
@@ -52,6 +53,8 @@ export function selectionProps(ids, state) {
     row('out', 'Στην έξοδο', h('span', { class: 'prop-line' }, summary(b => b.omitted ? 'όχι' : 'ναι')), h('span', { class: 'row' },
       h('button', { class: 'small', onclick: () => act(() => api(`${B(S.book.id)}/output`, { body: { blocks: ids, include: true } }), `Στην έξοδο (${ids.length})`) }, 'Ναι'),
       h('button', { class: 'small', onclick: () => act(() => api(`${B(S.book.id)}/output`, { body: { blocks: ids, include: false } }), `Εκτός εξόδου (${ids.length})`) }, 'Όχι'))),
+    row('exc', 'Παρέκβαση', h('span', { class: 'mut small' }, 'από το πρώτο έως το τελευταίο επιλεγμένο'),
+      h('button', { class: 'small', onclick: () => excursusDialog({ blocks: ids }, `${ids.length} επιλεγμένα (και ό,τι υπάρχει ανάμεσα)`) }, 'Σήμανση…')),
     row('content', 'Περιεχόμενο', h('span', { class: 'mut small' }, 'όπως είναι / ως εικόνα'), h('span', { class: 'row' },
       h('button', { class: 'small good', onclick: () => many('approve', {}, 'Εγκρίθηκαν') }, 'Έγκριση'),
       h('button', { class: 'small', onclick: () => many('mark_image_only', {}, 'Μόνο εικόνα') }, 'Μόνο εικόνα'))));

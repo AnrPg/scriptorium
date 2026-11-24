@@ -12,7 +12,7 @@ from ...adapters import pdf as pdfio
 from ...core import joblog
 from ...core.decisions import VALUE_DECISIONS
 from ...core.reasons import as_table
-from ...core.vocabulary import GROUP_TYPES
+from ...core.vocabulary import EXCURSUS_PLACEMENTS, EXCURSUS_TYPES, GROUP_TYPES
 from ...pipeline import engine_json, markdown, references
 from ...pipeline.overlay import COMMANDS
 from .. import exports
@@ -55,6 +55,7 @@ class LibraryService(ServiceBase):
         it = self.interpreter()
         return {'reasons': as_table(), 'labels': engine_json.label_catalog(), 'profiles': PROFILES,
                 'note_model': getattr(it, 'name', None), 'group_types': GROUP_TYPES,
+                'excursus_types': EXCURSUS_TYPES, 'excursus_placements': EXCURSUS_PLACEMENTS,
                 'actions': sorted(COMMANDS), 'value_actions': sorted(VALUE_DECISIONS), 'exports': list(exports.EXPORTERS), 'styled_exports': sorted(exports.STYLED),
                 'styles': list(markdown.STYLES), 'entity_types': _entity_types()}
 
@@ -70,7 +71,8 @@ class LibraryService(ServiceBase):
                 'progress': b.progress(), 'jobs': self.jobs.list(b.id)[:20],
                 'can_undo': bool(st['undo_targets']), 'can_redo': bool(st['redo_targets']),
                 'stale': (c.get('human') or {}).get('stale', []), 'sections': c.get('sections', []),
-                'groups': c.get('groups', []), 'document_structure': c.get('document_structure') or {'fixes': [], 'issues': []},
+                'groups': c.get('groups', []), 'excursus': c.get('excursus', []), 'excursus_marked': st['excursus'],
+                'excursus_suggestions': c.get('excursus_suggestions', []), 'document_structure': c.get('document_structure') or {'fixes': [], 'issues': []},
                 'ref_targets': [{'id': t['id'], 'label': t['label'], 'page': t['page']}
                                 for t in references.targets(c.get('blocks', []))] if c else [],
                 'critical': [f for f in c.get('findings', []) if f['severity'] == 'critical']}

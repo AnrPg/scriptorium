@@ -458,3 +458,7 @@ button.view-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
 .review-loop .loop-level{display:inline-flex;align-items:center;gap:6px;padding:0 10px;white-space:nowrap;color:var(--mut);cursor:pointer}
 
 .row.end button.busy{cursor:progress;opacity:.75}.row.end button.busy::after{content:"…"}
+/* excursus (παρέκβαση): intercalated stretches read in their own flow */
+.chip.exc{flex:none;font-size:10.5px;padding:0 6px;background:var(--acc-weak);color:var(--acc);border:1px dashed var(--acc)}
+.chip.cont-to{flex:none;font-size:10.5px;padding:0 6px;text-decoration:none}
+.excursus-banner{margin-bottom:8px;gap:6px;align-items:center}

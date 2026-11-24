@@ -6,6 +6,7 @@ import { entityChip } from '../book/entities.js';
 import { dropInReadingOrder } from '../inspector/lineage.js';
 import { segText, toggleMulti } from '../inspector/multi.js';
 import { pageGroupsPanel, suggestionsPanel } from '../inspector/suggestions.js';
+import { continuationMark, continuesInMark, excursusBanner, excursusChip } from '../inspector/excursus.js';
 import { act } from '../ui/feedback.js';
 import { CAT, legend, rowState } from '../ui/math.js';
 import { hoverSeg } from '../workspace/hover.js';
@@ -23,7 +24,7 @@ export function pageTree(blocks) {
     let depth = own ? own.level - 1 : levelOf(b), mark = null;
     if (own) mark = { text: levelTag(own), cls: own.source === 'labelled_element' || own.source === 'box_heading' ? 'lv-box' : '', title: `επίπεδο ${own.level}` };
     else if (b.kind === 'caption' && b.relations?.caption_for) { depth += 1; mark = { text: 'λεζάντα', cls: 'lv-cap', title: 'ανήκει στο σχήμα από πάνω' }; }
-    else if (b.relations?.continues_from) mark = { text: '↳ συνέχεια', cls: 'lv-cont', title: 'συνέχεια της παραγράφου πριν από την παρεμβολή' };
+    else if (b.relations?.continues_from) mark = continuationMark(b);
     else if (b.flow === 'insert') mark = { text: 'παρεμβολή', cls: 'lv-ins', title: 'σχήμα/εξίσωση/πίνακας μέσα στη ροή του κειμένου' };
     return { b, depth, mark };
   });
@@ -45,6 +46,8 @@ export function groupMark(b) {
 export function pagePanel(body) {
   const pg = S.page, info = pg.info || {};
   if (!info.state) { body.append(h('p', { class: 'mut' }, 'Η σελίδα δεν έχει επεξεργαστεί ακόμα.')); return; }
+  const banner = excursusBanner();
+  if (banner) body.append(banner);
   const sugg = suggestionsPanel(pg);
   body.append(h('div', { class: 'row small mut page-sum' }, h('span', { class: 'grow' }, `${pg.blocks.length} τμήματα · ${info.required || 0} απαιτούν έλεγχο · ${info.recommended || 0} συνιστάται`),
     S.meta.note_model ? h('button', { class: 'small ghost', title: 'Το τοπικό μοντέλο εξετάζει τη σελίδα και προτείνει συγχωνεύσεις/ομάδες (δεν εφαρμόζεται τίποτα χωρίς εσένα)', onclick: () => pg.askModel() }, 'Πρότεινε δομή') : null));
@@ -100,7 +103,7 @@ export function pagePanel(body) {
       h('span', { class: 'k-dot k-' + CAT(b) }), h('span', { class: 'small mut', style: { width: '20px', flex: 'none' } }, b.reading_order),
       h('span', { class: 'rails', 'aria-hidden': 'true' }, Array.from({ length: depth }, () => h('i'))),
       mark ? h('span', { class: 'chip lvl' + (mark.cls ? ' ' + mark.cls : ''), title: mark.title || '' }, mark.text) : null,
-      groupMark(b), h('span', { class: 'txt grow' }, txt), entityChip(b),
+      excursusChip(b), groupMark(b), h('span', { class: 'txt grow' }, txt), entityChip(b), continuesInMark(b),
       S.multi.has(b.id) ? h('span', { class: 'ord', title: 'Θέση στην επιλογή' }, String([...S.multi.keys()].indexOf(b.id) + 1)) : null,
       b.omitted ? h('span', { class: 'chip warn', title: 'Εκτός εξόδου (επιλογή σου) — μένει στο βιβλίο' }, 'εκτός εξόδου') : null,
       settled ? h('span', { class: 'ok-mark' }, '✓') : null));

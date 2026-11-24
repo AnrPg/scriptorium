@@ -3,7 +3,8 @@ a segment's content. Domain policy, shared by the event store, the command overl
 
 UNDOABLE = {'decision', 'rule_add', 'rule_remove', 'region_add', 'region_remove', 'block_hide', 'block_show',
             'page_profile', 'merge_add', 'merge_remove', 'group_add', 'group_remove', 'suggestion_dismiss',
-            'class_accept', 'entity_confirm', 'entity_assign', 'entity_remove', 'page_remove', 'page_restore'}
+            'class_accept', 'entity_confirm', 'entity_assign', 'entity_remove', 'page_remove', 'page_restore',
+            'excursus_set', 'excursus_remove'}
 # Decisions about a segment's CONTENT. "Value" actions set the content; `approve` only confirms the current
 # version; `revert` returns the segment to the machine result.
 VALUE_ACTIONS = {'approve_candidate', 'replace_text', 'replace_latex', 'mark_image_only', 'mark_unreadable', 'revert'}
@@ -24,6 +25,7 @@ EVENT_FIELDS = {
     'class_accept': {'reason', 'n', 'sample'}, 'entity_confirm': {'key', 'entity_type'},
     'entity_assign': {'key', 'members', 'entity_type'}, 'entity_remove': {'key'},
     'page_remove': {'pages'}, 'page_restore': {'pages'},
+    'excursus_set': {'excursus'}, 'excursus_remove': {'excursus_id'},
     'undo': {'targets'}, 'redo': {'targets'},
 }
 # Required fields of a decision per action (one of a tuple-set suffices).

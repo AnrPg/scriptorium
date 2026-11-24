@@ -1549,6 +1549,65 @@ def test_images_figures_and_tables_are_always_inserts_by_default():
                                                      'cat': 'insert', 'x': 'insert', 'xt': 'main', 'mine': 'main'}
 
 
+def _excursus_book():
+    def blk(i, page, text, kind='paragraph', order=1):
+        return {'id': i, 'page': page, 'kind': kind, 'chosen': {'type': 'text', 'text': text}, 'relations': {'captions': []},
+                'reasons': [], 'review': 'not_needed', 'reading_order': order, 'excluded': {}, 'source_crop': None}
+    return [blk('h', 1, 'Πρωτεΐνες', 'heading'), blk('c1', 1, 'Οι πρωτεΐνες αποτελούνται από αμινοξέα που', order=2),
+            blk('xh', 2, 'ΙΣΤΟΡΙΚΟ ΣΗΜΕΙΩΜΑ', 'heading'), blk('x1', 2, 'Ο Πάουλινγκ πρότεινε το 1951 ότι η έλικα', order=2),
+            blk('x2', 3, 'σταθεροποιείται με δεσμούς υδρογόνου.'),
+            blk('c2', 4, 'συνδέονται με πεπτιδικούς δεσμούς.'), blk('h2', 4, 'Ένζυμα', 'heading', order=2),
+            blk('c3', 4, 'Τα ένζυμα καταλύουν αντιδράσεις.', order=3)]
+
+
+def test_an_excursus_of_several_pages_is_suggested_read_in_its_own_flow_and_placed_by_the_reviewer():
+    """A course paragraph broken by two pages of historical note: the pages are suggested as an excursus; once
+    marked, the course paragraph continues across them (context: course text) while the note's own paragraph
+    continues inside the note (context: the excursus) — and the outputs join the paragraph and put the note in a
+    box where the reviewer chose (in place, end of chapter, end of book, or nowhere)."""
+    from scientific_ocr.pipeline import excursus, flow, markdown
+    blocks = _excursus_book()
+    flow.annotate(blocks)
+    (sug,) = excursus.suggest(blocks, set(), flow.continues)
+    assert (sug['first'], sug['last'], sug['interrupted'], sug['resumes']) == ('xh', 'x2', 'c1', 'c2')
+    assert excursus.suggest(blocks, {sug['key']}, flow.continues) == []          # dismissed
+    for placement in ('inplace', 'chapter_end', 'book_end', 'remove'):
+        blocks = _excursus_book()
+        ex = excursus.annotate(blocks, [{'id': 'X1', 'type': 'history', 'first': 'xh', 'last': 'x2', 'placement': placement}], {})
+        assert ex[0]['members'] == ['xh', 'x1', 'x2'] and ex[0]['pages'] == [2, 3]
+        flow.annotate(blocks)
+        r = {b['id']: b['relations'] for b in blocks}
+        assert r['c1']['continues_in'] == 'c2' and r['c2']['continues_strand'] == 'main'
+        assert 'excursus:X1' in r['c2']['interrupted_by']
+        assert r['x1']['continues_in'] == 'x2' and r['x2']['continues_strand'] == 'x:X1'
+        assert excursus.suggest(blocks, set(), flow.continues) == []              # nothing left to suggest
+        md = markdown.markdown({'blocks': blocks, 'groups': [], 'entities': [], 'excursus': ex, 'source': {}, 'pages': []})
+        joined = md.index('αμινοξέα που συνδέονται')
+        if placement == 'remove':
+            assert 'Πάουλινγκ' not in md and '<aside' not in md
+            continue
+        note, enzymes = md.index('Πάουλινγκ'), md.index('Ένζυμα')
+        assert md.count('<aside data-excursus="history"') == 1
+        assert {'inplace': joined < note < enzymes, 'chapter_end': joined < note < enzymes,
+                'book_end': joined < enzymes < note}[placement]
+
+
+def test_categorised_segments_are_inserts_and_continue_inside_their_own_box():
+    """A question box (any special category) is an insert by default: the course paragraph it interrupts
+    continues past it, and the question's own text continues inside the box."""
+    from scientific_ocr.pipeline import flow
+    blocks = _excursus_book()
+    boxes = {'xh': 'e:Q', 'x1': 'e:Q', 'x2': 'e:Q'}
+    flow.annotate(blocks, frozenset(), boxes)
+    f = {b['id']: b for b in blocks}
+    assert [f[i]['flow'] for i in ('c1', 'x1', 'x2', 'c2')] == ['main', 'insert', 'insert', 'main']
+    assert f['c1']['relations']['continues_in'] == 'c2' and 'box:Q' in f['c2']['relations']['interrupted_by']
+    assert f['x1']['relations']['continues_in'] == 'x2' and f['x2']['relations']['continues_strand'] == 'e:Q'
+    f['x1']['flow_override'] = 'main'                    # the reviewer takes a segment out of its box
+    flow.annotate(blocks, frozenset(), boxes)
+    assert f['x1']['flow'] == 'main' and f['c2']['relations']['continues_from'] == 'x1'   # now course text
+
+
 def test_childless_marker_list_is_kept_and_split_into_items_with_docling_boxes():
     """Marker 2.1 returns a ListGroup with no children (only HTML). It is never dropped: each <li> becomes a Marker
     ListItem whose box is the union of the Docling boxes carrying its text (an item's wrapped tail included); when

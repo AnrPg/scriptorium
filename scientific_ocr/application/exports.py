@@ -49,6 +49,7 @@ def normalized(c: dict) -> dict:
             'merged_from': [m['id'] for m in b.get('merged_from', [])] or None,
             'continues_from': b['relations'].get('continues_from'), 'continues_in': b['relations'].get('continues_in'),
             'interrupted_by': b['relations'].get('interrupted_by'),
+            'continues_strand': b['relations'].get('continues_strand'), 'excursus': b.get('excursus'),
             'heading_level': b.get('heading_level') if b['kind'] == 'heading' else None,
             'section_path': [{'id': i, 'level': toc[i]['level'], 'title': toc[i]['title']}
                              for i in b.get('section_path', []) if i in toc],

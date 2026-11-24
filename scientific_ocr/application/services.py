@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .use_cases.base import PROFILES, ServiceError  # noqa: F401  (public names of the application layer)
 from .use_cases.entities import EntityService
+from .use_cases.excursus import ExcursusService
 from .use_cases.export import ExportService
 from .use_cases.hierarchy import HierarchyService
 from .use_cases.library import LibraryService
@@ -18,5 +19,5 @@ from .use_cases.views import ViewsService
 
 
 class App(LibraryService, ViewsService, ReviewService, TriageService, StructureService, HierarchyService, EntityService,
-          ExportService):
+          ExcursusService, ExportService):
     """The application: library, read views, review, triage, structure, entity and export use cases."""

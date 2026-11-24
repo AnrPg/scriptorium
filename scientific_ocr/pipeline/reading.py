@@ -65,6 +65,8 @@ def nodes(c: dict, pages: set | None = None, options: dict | None = None) -> lis
     opt = options or {}
     gone = excluded_blocks(c.get('entities') or [], set(opt.get('exclude') or ()))
     omitted = {b['id'] for b in c['blocks'] if b.get('omitted')}
+    exc = {x['id']: x for x in c.get('excursus') or []}
+    gone |= {b['id'] for b in c['blocks'] if exc.get(b.get('excursus'), {}).get('placement') == 'remove'}
     blocks = [b for b in c['blocks'] if in_reader_output(b) and b.get('flow') != 'furniture'
               and (pages is None or b['page'] in pages) and b['id'] not in gone
               and b['relations'].get('caption_for') not in gone and b['relations'].get('caption_for') not in omitted]
@@ -75,6 +77,13 @@ def nodes(c: dict, pages: set | None = None, options: dict | None = None) -> lis
     for g in boxes:
         starts.setdefault(g['first'], []).append(g)
         ends.setdefault(g['last'], []).append(g)
+    for x in exc.values():                               # an excursus box encloses the groups inside it
+        mem = [m for m in x.get('members') or [] if m in pos]
+        if mem:
+            box = {'first': mem[0], 'last': mem[-1], 'type': 'excursus', 'name': x.get('name') or '', 'figure': False,
+                   'captions': [], 'excursus': x}
+            starts.setdefault(mem[0], []).insert(0, box)
+            ends.setdefault(mem[-1], []).append(box)
     out, done = [], set()
     group_caps = {cid for g in boxes for cid in g['captions'] if cid in by_id}   # rendered at the end of their group
 
@@ -82,7 +91,9 @@ def nodes(c: dict, pages: set | None = None, options: dict | None = None) -> lis
         if b['id'] in done:
             return
         for g in starts.get(b['id'], []):
-            out.append({'t': 'box_start', 'type': g['type'], 'name': g['name'], 'figure': g['figure'], 'blocks': []})
+            out.append({'t': 'box_start', 'type': g['type'], 'name': g['name'], 'figure': g['figure'], 'blocks': [],
+                        **({'excursus': g['excursus']['id'], 'excursus_type': g['excursus']['type'],
+                            'placement': g['excursus']['placement']} if g.get('excursus') else {})})
         done.add(b['id'])
         if b['id'] in group_caps:
             pass                                          # the caption of a whole group: rendered at its end
@@ -116,13 +127,38 @@ def nodes(c: dict, pages: set | None = None, options: dict | None = None) -> lis
                                           'label': x.get('caption_label')} for x in caps if chosen_text(x)],
                             'caption_images': [_image(x) for x in caps if not chosen_text(x) and _image(x)]})
                 done.update(x['id'] for x in caps)
-            out.append({'t': 'box_end', 'type': g['type'], 'figure': g['figure'], 'blocks': []})
+            out.append({'t': 'box_end', 'type': g['type'], 'figure': g['figure'], 'blocks': [],
+                        **({'excursus': g['excursus']['id']} if g.get('excursus') else {})})
 
     for b in blocks:
         emit(b)
-    out = [n for n in out if n]
+    out = _place_excursus([n for n in out if n], int(opt.get('unit_level') or 1))
     move = set(opt.get('move') or ())
     return _move_to_unit_end(out, move, opt.get('images', 'keep'), int(opt.get('unit_level') or 1), c) if move else out
+
+
+def _place_excursus(nodes_: list[dict], level: int) -> list[dict]:
+    """Excursus boxes placed by the reviewer's choice (pipeline.excursus): 'inplace' stays where it is (the course
+    paragraph it interrupted is already joined around it); 'chapter_end' goes before the next heading of level <=
+    `level` (the end of the unit); 'book_end' after everything, in book order."""
+    out, book_end, chapter, span = [], [], [], None
+    for n in nodes_:
+        if span is not None:
+            span['nodes'].append(n)
+            if n['t'] == 'box_end' and n.get('excursus') == span['id']:
+                (book_end if span['placement'] == 'book_end' else chapter).extend(span['nodes'])
+                span = None
+            continue
+        if n['t'] == 'box_start' and n.get('placement') in ('chapter_end', 'book_end'):
+            span = {'id': n['excursus'], 'placement': n['placement'], 'nodes': [n]}
+            continue
+        if n['t'] == 'heading' and n.get('level', 9) <= level and chapter and not n.get('generated'):
+            out.extend(chapter)
+            chapter = []
+        out.append(n)
+    if span is not None:                                  # unterminated (filtered end): keep it where it is
+        out.extend(span['nodes'])
+    return out + chapter + book_end
 
 
 def _entity_routes(ents: list[dict], move: set) -> dict[str, str]:

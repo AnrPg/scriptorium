@@ -13,6 +13,7 @@ from __future__ import annotations
 from html import escape
 
 from ..core.model import in_output
+from ..core.vocabulary import EXCURSUS_TYPES
 from . import reading
 from .inline import HEADING_MARKS, inline_html
 from .markdown import markdown
@@ -80,6 +81,9 @@ def body_html(c: dict, asset_url, reviewer: bool = False, pages: set | None = No
             out.append(f'<figure{cls}>{body}{src}{caps}{chip}</figure>')
         elif t == 'image':
             out.append(f'<div{attrs}>{_img(n["image"], asset_url, lab["figure"])}{chip}</div>')
+        elif t == 'box_start' and n.get('excursus'):
+            label = EXCURSUS_TYPES.get(n.get('excursus_type'), EXCURSUS_TYPES['other']) + (f' — {n["name"]}' if n.get('name') else '')
+            out.append(f'<aside class="pv-box pv-excursus"><div class="pv-excursus-label">{escape(label)}</div>')
         elif t == 'box_start':
             out.append('<figure class="pv-figure pv-figure-group">' if n.get('figure') else '<aside class="pv-box">')
         elif t == 'group_caption':

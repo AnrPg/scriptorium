@@ -11,8 +11,10 @@ running text. Two separator styles:
 """
 from __future__ import annotations
 
+import html
 import re
 
+from ..core.vocabulary import EXCURSUS_TYPES
 from . import reading
 from .inline import inline_html
 
@@ -68,6 +70,12 @@ def markdown(canonical: dict, images: bool = True, style: str = 'tags', pages: s
             out.append(_figure(n, images, style, lab, url))
         elif t == 'image':
             out.append(f'![{lab["figure"]}]({url(n["image"])})' if images else f'[{lab["figure"]}]')
+        elif t == 'box_start' and n.get('excursus'):  # an excursus: intercalated text, marked as such
+            label = EXCURSUS_TYPES.get(n.get('excursus_type'), EXCURSUS_TYPES['other']) + (f' — {n["name"]}' if n.get('name') else '')
+            out.append(f'<aside data-excursus="{n.get("excursus_type") or "other"}" title="{html.escape(label)}">' if style == 'tags'
+                       else f'<!-- excursus: {label} -->')
+        elif t == 'box_end' and n.get('excursus'):
+            out.append('</aside>' if style == 'tags' else '<!-- /excursus -->')
         elif t == 'box_start':                        # a group of figures is one figure (with its own caption)
             out.append(('<figure>' if n.get('figure') else '<aside>') if style == 'tags'
                        else f'<!-- {"figure" if n.get("figure") else BOX_NAMES[lang]} -->')

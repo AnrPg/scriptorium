@@ -8,6 +8,7 @@ import { render } from '../core/nav.js';
 import { R, S, kindLabel } from '../core/state.js';
 import { ACTION_EL, REVIEW_EL, SRC_EL, infoTip } from '../core/strings.js';
 import { captionPanel } from '../inspector/captions.js';
+import { excursusEditor, excursusValue } from '../inspector/excursus.js';
 import { loopPosition, stepReview } from '../inspector/reviewloop.js';
 import { historyPanel } from '../inspector/history.js';
 import { queueNeighbours, renderInspector } from '../inspector/inspector.js';
@@ -215,16 +216,22 @@ function propertiesCard(blk, book, decide, seg, rerender) {
   const flowRow = () => {
     if (blk.flow === 'furniture') return null;
     const cont = blk.relations?.continues_from, forced = blk.continues_override;
-    const val = [blk.flow === 'insert' ? 'παρεμβολή' : 'κείμενο', cont ? ' · ↳ συνεχίζει την προηγούμενη παράγραφο' : '',
+    // continuation applies to every TEXT segment, also inside a box or an excursus (it continues text of the same
+    // box / excursus); only visual content (figures, tables, equations, captions) never continues a paragraph
+    const textual = !['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table', 'math', 'chemical_reaction', 'nuclear_reaction', 'caption', 'heading'].includes(blk.kind)
+      && !(blk.kind === 'excerpt' && blk.chosen?.type !== 'text');
+    const ctx = blk.relations?.continues_strand && blk.relations.continues_strand !== 'main' ? ' (μέσα στο ίδιο πλαίσιο/παρέκβαση)' : '';
+    const val = [blk.flow === 'insert' ? 'παρεμβολή' : 'κείμενο', cont ? ` · ↳ συνεχίζει προηγούμενη παράγραφο${ctx}` : '',
       blk.flow_override || forced != null ? ' (δική σου επιλογή)' : ''].join('');
     const send = (action, extra, msg) => act(() => api(`${B(book.id)}/decide`, { body: { block_id: blk.id, action, ...extra } }), msg);
     return row('flow', 'Ροή', h('span', { class: 'prop-line' }, val), act1('flow', 'Αλλαγή ▾'), () => h('div', { class: 'col' },
       h('div', { class: 'small mut' }, 'Παρεμβολή = σχήμα/πίνακας/εξίσωση μέσα στο κείμενο. Συνέχεια = η παράγραφος συνεχίζει την προηγούμενη, που διακόπηκε από παρεμβολή ή αλλαγή σελίδας· στην εξαγωγή ενώνονται σε μία.'),
       h('div', { class: 'row small' }, 'Ρόλος:', [['main', 'Κείμενο'], ['insert', 'Παρεμβολή'], ['auto', 'Αυτόματα']].map(([k, l]) =>
         h('button', { class: 'small' + ((blk.flow_override || 'auto') === k ? ' primary' : ''), onclick: () => send('set_flow', { flow: k }, `Ροή: ${l}`) }, l))),
-      blk.flow !== 'insert' ? h('div', { class: 'row small' }, 'Συνέχεια της προηγούμενης παραγράφου:', [[true, 'Ναι'], [false, 'Όχι'], ['auto', 'Αυτόματα']].map(([k, l]) =>
+      textual ? h('div', { class: 'row small' }, 'Συνέχεια της προηγούμενης παραγράφου:', [[true, 'Ναι'], [false, 'Όχι'], ['auto', 'Αυτόματα']].map(([k, l]) =>
         h('button', { class: 'small' + ((forced == null ? 'auto' : forced) === k ? ' primary' : ''), onclick: () => send('set_continuation', { continues: k }, `Συνέχεια: ${l}`) }, l)))
-        : h('div', { class: 'small mut' }, 'Συνέχεια παραγράφου: μόνο για κείμενο. Για να συνεχίζει την προηγούμενη παράγραφο, όρισε πρώτα «Ρόλος: Κείμενο».')));
+        : h('div', { class: 'small mut' }, 'Συνέχεια παραγράφου: μόνο για κείμενο (όχι σχήματα, πίνακες, εξισώσεις, λεζάντες, τίτλους).'),
+      textual ? h('div', { class: 'small mut' }, 'Η συνέχεια αναζητείται στο ίδιο πλαίσιο: κυρίως κείμενο με κυρίως κείμενο (και πάνω από παρεκβάσεις), κείμενο ενός πλαισίου/παρέκβασης με το ίδιο πλαίσιο/παρέκβαση.') : null));
   };
   const act1 = (k, label) => h('button', { class: 'small ghost prop-btn' + (seg.prop === k ? ' on' : ''), 'aria-expanded': String(seg.prop === k), onclick: () => toggle(k) }, seg.prop === k ? 'Κλείσιμο' : label);
   const row = (k, label, value, action, editor) => [h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, label), h('span', { class: 'prop-v' }, value), h('span', { class: 'prop-a' }, action || '')),
@@ -255,6 +262,7 @@ function propertiesCard(blk, book, decide, seg, rerender) {
         : mayBeCaption ? 'όχι — μήπως είναι;' : `${(blk.relations?.captions || []).length} λεζάντα(ες)`),
       act1('cap', mayBeCaption ? 'Σύνδεση ▾' : 'Αλλαγή ▾'), () => unwrap(captionPanel(blk))) : null,
     flowRow(),
+    blk.flow !== 'furniture' ? row('exc', 'Παρέκβαση', excursusValue(blk), act1('exc', 'Επιλογές ▾'), () => excursusEditor(blk)) : null,
     row('label', 'Ετικέτα μηχανής', h('span', { class: 'prop-line' }, (blk.engine_label || '—').replace(':', ' · ')), act1('label', 'Αλλαγή ▾'), () => labelStructure(blk)),
     h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, 'Στην έξοδο'),
       h('span', { class: 'prop-v mut', title: (blk.omitted ? 'Δεν μπαίνει στο Markdown/PDF· μένει στο βιβλίο και στα JSON.' : 'Μπαίνει στο Markdown/PDF.') + (grp ? ' Ισχύει για όλη την ομάδα.' : '') },

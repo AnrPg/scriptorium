@@ -366,6 +366,13 @@ paragraphs), caption part order, inserts, groups/boxes, document issues and the 
 - **Export wizard:** 1 format · 2 content (exclusions, verified only) · 3 move to the end (multi-select list; per type: no / margin only / everywhere; figures with or without images) · 4 separators, summary, preview and download. JSON formats skip steps 2–3. Choices are remembered per book.
 
 
+## Excursus (παρέκβαση) and reading strands
+
+- An **excursus** is a stretch intercalated into the course text (historical note, applications, an appendix of another science), on part of a page or over many pages. It is stored by its two ends (first and last segment) as `excursus_set` / `excursus_remove` events, so everything between them in reading order belongs to it even after merges, new regions or re-OCR (`pipeline/excursus.py`).
+- **Marking:** use «Αρχή παρέκβασης εδώ» and then «Τέλος παρέκβασης εδώ» on any later page; a multi-selection (first to last selected segment); or contiguous pages in the «Σελίδες» tab. **Suggestions:** a course paragraph that stops mid-sentence and resumes only after pages that do not continue it.
+- **Reading strands** (`pipeline/flow.py`): continuation is decided within a context. The course text continues across inserts, boxes, excursus and page breaks. Text inside a box, meaning any categorised segment (question, key terms, example, groups with a type), continues inside the same box. Text inside an excursus continues inside the same excursus. `relations.continues_strand` names the context. Every categorised segment is an insert by default, and the reviewer's flow choice overrides this.
+- **Placement in outputs:** in place (a box; the interrupted paragraph is joined around it), at the end of the chapter, at the end of the book, or left out. This is set per excursus or for all excursus of a type.
+
 ## Multi-selection flow
 Selecting segments (S, Shift+click, or clicks in the page list) keeps you in the list. The selected segments show
 their order number on the page and in the list, and a bar shows "N επιλεγμένα". The group/merge screen opens only on

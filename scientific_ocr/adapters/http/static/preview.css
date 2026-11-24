@@ -38,3 +38,5 @@ figcaption.pv-seg{font-size:13.5px;margin:6px 0 0;font-family:-apple-system,syst
 .pv-doc h1,.pv-doc h2,.pv-doc h3,.pv-doc h4,.pv-doc h5,.pv-doc h6{font-family:-apple-system,system-ui,sans-serif;margin:18px 0 8px}
 .pv-doc .pv-text{margin:0 0 10px}
 .pv-doc figure.pv-figure{margin:14px 0;padding:8px;border-radius:4px}
+.pv-excursus{border-left-style:dashed}
+.pv-excursus-label{font-size:.8em;text-transform:uppercase;letter-spacing:.04em;opacity:.7;margin-bottom:4px}

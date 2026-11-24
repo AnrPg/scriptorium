@@ -38,6 +38,7 @@ from ..pipeline import (
     document,
     enrich,
     entities,
+    excursus,
     flow,
     furniture,
     groups,
@@ -110,6 +111,7 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
     struct = _document_structure(blocks, pages, inp.human, dims, heading_prior, model)
     lap('document structure')
     struct.update(_classify_entities(out, blocks, struct, inp.human, dims))
+    _final_flow(blocks, struct, inp.human)
     lap('entities')
     annotations = _annotations(out, blocks, inp.human, result)
     lap('annotations')
@@ -337,8 +339,7 @@ def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None
     dismissed = set(human['dismissed'])
     toc_ids = frozenset(m for g in human['groups'] if g.get('type') == 'toc' for m in g.get('members', [])) | \
         frozenset(m for e in human['assigned'].values() if e.get('entity_type') == 'toc' for m in e.get('members', []))
-    inserts = frozenset(m for e in human['assigned'].values() if family_of(e.get('entity_type')) == 'insert'
-                        for m in e.get('members', []))        # categorised as figure/table/equation by the reviewer
+    inserts = _reviewer_inserts(human)
     fixes = furniture.classify(blocks, dims, dismissed)
     fixes += document.captions_across_pages(blocks, dismissed)
     fixes += captions.continuations(blocks, {p['page']: p.get('typography_ref') for p in pages},
@@ -347,13 +348,17 @@ def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None
     for b in blocks:
         b['lineage'], b['content_source'] = lineage.trace(b), lineage.content_source(b)
     merged_into = {mid: into['into'] for p in pages for into in p.get('merged', []) for mid in into['members']}
+    excursus_list = excursus.annotate(blocks, human.get('excursus') or [], merged_into)
+    boxes = _box_strands([{**g, 'members': [merged_into.get(m, m) for m in g['members']]} for g in human['groups']],
+                         [{'key': k, 'type': e.get('entity_type'), 'members': [merged_into.get(m, m) for m in e.get('members', [])],
+                           'verified': True} for k, e in human['assigned'].items()])
     inner = []
     while True:                                       # hierarchy, flow and boxes until box sub-headings settle
         heading_review: dict = {}
         toc = sections.annotate(blocks, dismissed, heading_prior, heading_review,
                                 [(p['page'], x.get('text') or '') for p in pages for x in p.get('hidden', [])], model,
                                 {p['page']: p.get('typography_ref') for p in pages}, toc_ids)
-        flow.annotate(blocks, inserts)
+        flow.annotate(blocks, inserts, boxes)
         auto_groups = structure.suggest(blocks, toc, pages, dismissed)
         auto_groups, box_fixes = document.boxes_across_pages(auto_groups, blocks, dismissed)
         new = document.box_headings(auto_groups, blocks, dismissed)
@@ -366,7 +371,36 @@ def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None
     fixes += document.group_reports(group_list, blocks)
     issues += document.group_issues(group_list, blocks)
     return {'sections': toc, 'groups': group_list, 'document_structure': {'fixes': fixes, 'issues': issues},
-            'heading_review': heading_review}
+            'heading_review': heading_review, 'excursus': excursus_list}
+
+
+def _reviewer_inserts(human) -> frozenset:
+    """Segments the reviewer categorised as visual content (figure, table, equation…): inserts by default."""
+    return frozenset(m for e in human['assigned'].values() if family_of(e.get('entity_type')) == 'insert'
+                     for m in e.get('members', []))
+
+
+def _box_strands(group_list, entity_list) -> dict[str, str]:
+    """segment id -> box strand (pipeline.flow) for every segment categorised as something special: a group with
+    a type (example, question, box, figure with text…) or an entity that is not plain visual content (question,
+    key terms, historical note, toc…; low-confidence guesses excluded). A segment in several boxes belongs to the
+    largest (a solution continues inside its example)."""
+    cands = [(f'g:{g["id"]}', g['members']) for g in group_list if g.get('type') and g['type'] != 'other']
+    cands += [(f'e:{e["key"]}', e['members']) for e in entity_list
+              if e.get('type') and family_of(e['type']) not in (None, 'insert')
+              and (e.get('verified') or e.get('confidence') != 'low')]
+    out: dict[str, str] = {}
+    for key, members in sorted(cands, key=lambda x: -len(x[1])):
+        for m in members:
+            out.setdefault(m, key)
+    return out
+
+
+def _final_flow(blocks, struct, human) -> None:
+    """Reading flow again once the boxes and entities of the whole book are known (every categorised segment is
+    an insert by default and reads in its own strand), then the excursus suggestions that depend on it."""
+    flow.annotate(blocks, _reviewer_inserts(human), _box_strands(struct['groups'], struct.get('entities') or []))
+    struct['excursus_suggestions'] = excursus.suggest(blocks, set(human['dismissed']), flow.continues)
 
 
 def _classify_entities(out: Path, blocks, struct, human, dims) -> dict:
@@ -441,7 +475,7 @@ def _calibration_books(out: Path) -> list[dict]:
 BOOK_WIDE_FIELDS = ('role', 'excluded', 'heading_level', 'heading_level_source', 'heading_style', 'heading_hints',
                     'heading_evidence', 'heading_shift', 'section_path', 'running_head', 'engine_rank',
                     'style_of_numbered', 'human_style', 'model', 'typography_rel', 'flow', 'entities', 'references',
-                    'box_head', 'groups', 'review_triage')
+                    'box_head', 'groups', 'review_triage', 'excursus')
 BOOK_WIDE_REASONS = ('EXCLUDED_AS_PAGE_FURNITURE', 'ENGINE_FURNITURE_IN_BODY', 'CAPTION_CONTINUATION',
                      'CAPTION_ACROSS_PAGES', 'HEADING_NUMBER_DUPLICATE', 'HEADING_NUMBER_OUT_OF_ORDER',
                      'REFERENCE_AMBIGUOUS', 'TRIAGE_DOWNGRADED', 'ACCEPTED_BY_SAMPLING')

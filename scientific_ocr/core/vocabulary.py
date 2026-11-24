@@ -10,6 +10,13 @@ GROUP_TYPES = {'labelled_box': 'Αριθμημένο πλαίσιο', 'example':
                'theorem': 'Θεώρημα / νόμος', 'sidebar': 'Ένθετο / πλαίσιο', 'figure_group': 'Σχήμα με λεζάντες',
                'table_group': 'Πίνακας με σημειώσεις', 'equation_group': 'Εξίσωση με επεξήγηση', 'question': 'Ερώτηση', 'summary': 'Περίληψη',
                'note': 'Σημείωση', 'toc': 'Πίνακας περιεχομένων', 'other': 'Άλλο'}
+# EXCURSUS (παρέκβαση): a stretch of the book intercalated into the course text (one or many pages, or part of a
+# page) — read in its own flow; where it goes in the outputs is the reviewer's choice (pipeline.excursus)
+EXCURSUS_TYPES = {'history': 'Ιστορικό σημείωμα', 'application': 'Εφαρμογές / καθημερινή ζωή',
+                  'other_science': 'Παράρτημα άλλης επιστήμης', 'appendix': 'Παράρτημα / επιπλέον πληροφορίες',
+                  'biography': 'Βιογραφία', 'other': 'Άλλη παρέκβαση'}
+EXCURSUS_PLACEMENTS = {'inplace': 'Στη θέση της (σε πλαίσιο)', 'chapter_end': 'Στο τέλος του κεφαλαίου',
+                       'book_end': 'Στο τέλος του βιβλίου', 'remove': 'Εκτός εξόδου'}
 # group type -> entity type, for groups that ARE an entity of the taxonomy
 GROUP_ENTITY = {'example': 'example', 'exercise': 'exercise', 'definition': 'definition', 'question': 'question',
                 'problem': 'problem', 'solution': 'solution', 'toc': 'toc'}

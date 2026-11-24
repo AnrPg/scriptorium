@@ -7,6 +7,7 @@ import { R, S, go } from '../core/state.js';
 import { EXPORT_EL, KIND_EL, STATE_EL, infoTip } from '../core/strings.js';
 import { act, modal, openDialog, toast } from '../ui/feedback.js';
 import { ensureFresh } from '../ui/rebuild.js';
+import { excursusDialog } from '../inspector/excursus.js';
 
 // ---------------------------------------------------------------- export wizard
 // Steps: 1 format · 2 content (exclusions) · 3 move to the end of each unit · 4 separators, preview, download.
@@ -206,7 +207,12 @@ export function tabPages(body) {
       kept.length ? h('button', { class: 'danger', title: 'Οι σελίδες βγαίνουν από το βιβλίο και τις εξόδους· το PDF και το OCR μένουν, επαναφέρονται οποτεδήποτε', onclick: () =>
         modal(`Αφαίρεση ${kept.length} σελίδων;`, h('p', {}, `Οι σελίδες ${kept.length > 12 ? kept.length : kept.join(', ')} θα βγουν από το βιβλίο και από όλες τις εξόδους. Το πρωτότυπο PDF και το OCR τους κρατιούνται· επαναφέρονται από το φίλτρο «Αφαιρεμένες» ή με Αναίρεση.`),
           [{ label: 'Άκυρο' }, { label: 'Αφαίρεση', cls: 'danger', run: () => pagesAct('remove', kept, 'Οι σελίδες αφαιρέθηκαν') }]) }, 'Αφαίρεση από το βιβλίο') : null,
-      gone.length ? h('button', { onclick: () => pagesAct('restore', gone, 'Οι σελίδες επανήλθαν') }, `Επαναφορά (${gone.length})`) : null));
+      gone.length ? h('button', { onclick: () => pagesAct('restore', gone, 'Οι σελίδες επανήλθαν') }, `Επαναφορά (${gone.length})`) : null,
+      kept.length ? h('button', { title: 'Οι σελίδες παρεμβάλλονται στο κυρίως κείμενο (ιστορικό σημείωμα, εφαρμογές, παράρτημα…)', onclick: () => {
+        const runs = []; for (const n of kept) { const r = runs[runs.length - 1]; if (r && n === r[1] + 1) r[1] = n; else runs.push([n, n]); }
+        if (runs.length > 1) return toast(`Επίλεξε συνεχόμενες σελίδες (τώρα: ${runs.map(r => r[0] === r[1] ? r[0] : r[0] + '–' + r[1]).join(', ')}) — μία παρέκβαση τη φορά`, { error: true });
+        excursusDialog({ pages: runs[0] }, `σ. ${runs[0][0]}${runs[0][1] > runs[0][0] ? '–' + runs[0][1] : ''}`, () => { S.selPages.clear(); });
+      } }, 'Σήμανση ως παρέκβαση…') : null));
   }
 }
 

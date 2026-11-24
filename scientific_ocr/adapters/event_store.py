@@ -125,7 +125,7 @@ def fold(evs: list[dict]) -> dict:
                 active[t] = True
     live = [by_seq[s] for s, on in active.items() if on]
     rules, regions, profiles, hidden, merges, groups, dismissed, accepts = {}, {}, {}, set(), {}, {}, set(), {}
-    entities, assigned, removed = {}, {}, set()
+    entities, assigned, removed, excursus = {}, {}, set(), {}
     for ev in live:
         t = ev['type']
         if t == 'rule_add':
@@ -164,6 +164,10 @@ def fold(evs: list[dict]) -> dict:
             removed |= {int(p) for p in ev['pages']}
         elif t == 'page_restore':
             removed -= {int(p) for p in ev['pages']}
+        elif t == 'excursus_set':                       # add or change (same id): the last one wins
+            excursus[ev['excursus']['id']] = ev['excursus']
+        elif t == 'excursus_remove':
+            excursus.pop(ev['excursus_id'], None)
     # The reviewer's undo steps through the reviewer's own actions: events written by the system itself (e.g. the
     # automatic careful re-examination after processing) are never the target of Ctrl-Z.
     undo_targets = []
@@ -176,6 +180,6 @@ def fold(evs: list[dict]) -> dict:
             'regions': list(regions.values()), 'profiles': profiles, 'hidden': sorted(hidden),
             'merges': list(merges.values()), 'groups': list(groups.values()), 'dismissed': sorted(dismissed),
             'accepts': list(accepts.values()), 'entities': entities, 'assigned': assigned,
-            'removed_pages': sorted(removed),
+            'removed_pages': sorted(removed), 'excursus': list(excursus.values()),
             'undo_targets': undo_targets, 'redo_targets': redo_stack[-1] if redo_stack else [],
             'history': evs, 'active': {s for s, on in active.items() if on}}
