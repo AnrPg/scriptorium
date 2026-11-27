@@ -58,9 +58,9 @@ def main(argv=None) -> int:
         from .application.services import App
         lib = Library(a.library)
         app = App(lib, JobQueue(lib.root))
-        app.health.start()                       # stuck job processes: at start and every 2 hours
-        serve(app, a.port)
-        return 0
+        # stuck job processes: at start and every 2 hours — only once this server owns the port (a second
+        # instance must not touch the jobs of the running one)
+        return serve(app, a.port, ready=app.health.start)
     if a.cmd in ('process', 'run'):
         from .application import processing
         out = (a.book if a.cmd == 'process' else a.output).resolve()

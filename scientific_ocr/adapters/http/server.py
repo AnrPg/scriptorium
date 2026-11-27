@@ -6,9 +6,11 @@ this server never grants (CSRF). Static assets are served from ./static with no 
 """
 from __future__ import annotations
 
+import errno
 import json
 import mimetypes
 import re
+import sys
 import traceback
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -658,17 +660,30 @@ class Handler(BaseHTTPRequestHandler):
         self._bytes(200, self.app.job_log(jid), 'text/plain; charset=utf-8')
 
 
-def serve(app: App, port: int = 8765):
+def serve(app: App, port: int = 8765, ready=None) -> int:
+    """Serves until Ctrl-C (0). A port already taken (the UI already runs there): a plain message, 1, and nothing
+    else started — `ready` (e.g. the health check) runs only once this server owns the port."""
     import signal
 
     def _graceful(*_):                 # SIGTERM -> normal shutdown, so atexit cleanups (model servers) run
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, _graceful)
     Handler.app = app
-    srv = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    try:
+        srv = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    except OSError as e:
+        if e.errno != errno.EADDRINUSE:
+            raise
+        print(f'Η θύρα {port} χρησιμοποιείται ήδη: μάλλον το UI τρέχει ήδη στο http://127.0.0.1:{port} '
+              f'(άνοιξέ το εκεί). Για να το ξεκινήσεις ξανά, σταμάτησε το άλλο (lsof -i :{port}) ή δώσε --port <άλλη>.',
+              file=sys.stderr, flush=True)
+        return 1
     srv.daemon_threads = True
+    if ready:
+        ready()
     print(f'Scientific OCR: http://127.0.0.1:{port}  (library: {app.library_root()}; Ctrl-C to stop)', flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    return 0
