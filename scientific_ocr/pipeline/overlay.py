@@ -35,10 +35,25 @@ def _approve(b, d, ctx):
         b['display_crop'] = False     # the reviewer compared it with the source image: the text is the content now
 
 
+TEXT_KINDS = {'paragraph', 'heading', 'caption'}
+
+
+def _restore_kind(b, content: str) -> None:
+    """A segment kept as an excerpt only because no reading was safe (pipeline.page: empty / single-engine) gets
+    its content from the reviewer: it is again what it was detected as (a paragraph, a heading, an equation…), so
+    every stage reads it as such — a continuation resumes it, entries and excursus see its text. A region that was
+    never typed (coverage, full page) stays an excerpt with text."""
+    orig = b.get('original_kind')
+    if b['kind'] == 'excerpt' and orig in (EQUATION_KINDS if content == 'latex' else TEXT_KINDS):
+        b['kind'] = orig
+        b.pop('original_kind', None)
+
+
 def _approve_candidate(b, d, ctx):
     c = next((c for c in b['candidates'] if c['engine'] == d.get('engine')), None)
     if c is None:
         raise Stale(f'candidate {d.get("engine")!r} no longer exists')
+    _restore_kind(b, 'latex' if b.get('original_kind') in EQUATION_KINDS and c.get('latex') else 'text')
     if b['kind'] in EQUATION_KINDS:
         lat = c.get('latex')
         b['chosen'] = {'type': 'latex', 'latex': lat if isinstance(lat, str) else ' '.join(lat or [])}
@@ -51,6 +66,7 @@ def _approve_candidate(b, d, ctx):
 def _replace(field):
     def handler(b, d, ctx):
         value = strip_math_delimiters(d['value']) if field == 'latex' else d['value']   # events are immutable;
+        _restore_kind(b, field)
         b['chosen'] = {'type': 'latex' if field == 'latex' else 'text', field: value, **_provenance(d)}  # normalise on read
         b['review'], b['display_crop'] = 'approved', False
     return handler

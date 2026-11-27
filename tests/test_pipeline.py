@@ -1471,6 +1471,30 @@ def test_continuation_resumes_the_text_right_above_even_a_region_read_again():
     assert img['flow'] == 'insert' and p2['relations'].get('continues_from') == 'p1'
 
 
+def test_an_excerpt_given_content_by_the_reviewer_is_again_what_it_was_detected_as():
+    """Root cause of a continuation skipping the text above it: a paragraph kept as an excerpt (no safe reading)
+    stayed an 'excerpt' after the reviewer approved a reading, so every stage treated it as a picture."""
+    from scientific_ocr.pipeline import flow, overlay
+    def b(i, kind, text, ctype='text', **x):
+        return {'id': i, 'page': 1, 'kind': kind, 'chosen': {'type': ctype, 'text': text}, 'relations': {},
+                'reasons': [], 'review': 'required', 'candidates': [], **x}
+    p1 = b('p1', 'paragraph', 'Χημική ένωση με άνθρακα.')
+    ex = b('x', 'excerpt', '', 'image_only', original_kind='paragraph',
+           candidates=[{'engine': 'docling', 'text': 'Δομή που σχηματίζεται από τον πολλαπλασια-'}])
+    p2 = b('p2', 'paragraph', 'σμό των κυττάρων.')
+    ctx = {'blocks': [p1, ex, p2], 'by_id': {}}
+    overlay.COMMANDS['approve_candidate'](ex, {'engine': 'docling'}, ctx)
+    assert ex['kind'] == 'paragraph' and 'original_kind' not in ex
+    flow.annotate([p1, ex, p2])
+    assert p2['relations'].get('continues_from') == 'x'
+    eq = b('e', 'excerpt', '', 'image_only', original_kind='math', candidates=[{'engine': 'marker', 'latex': 'E=mc^2'}])
+    overlay.COMMANDS['approve_candidate'](eq, {'engine': 'marker'}, ctx)
+    assert eq['kind'] == 'math' and eq['chosen']['type'] == 'latex'      # an equation's reading stays LaTeX
+    region = b('r', 'excerpt', '', 'image_only', original_kind='unknown')
+    overlay.COMMANDS['replace_text'](region, {'value': 'Κείμενο.'}, ctx)
+    assert region['kind'] == 'excerpt'                                    # never typed: stays an excerpt
+
+
 def test_merging_images_into_a_figure_needs_no_text_but_a_text_merge_does():
     """Parts without text are what a Picture/Figure merge is made of (the merged entity is the crop of their union):
     no MERGE_PART_WITHOUT_TEXT, no review because of it. A merge meant to be text still flags the missing text."""
