@@ -30,11 +30,13 @@ export function segState(blk) {
 }
 export const isLatexBlock = blk => (blk.chosen || {}).type === 'latex' || ['math', 'chemical_reaction'].includes(blk.kind);
 export const currentValue = blk => { const ch = blk.chosen || {}; return ch.text || ch.latex || ''; };
-export function contentView(blk, value, latex, { codeOpen = null } = {}) {   // rendered first, then the source code
+// rendered first; the source code below only when asked (`code`: comparisons of versions). The segment's own view
+// has none: the raw text is shown where it is edited — the draft's textarea
+export function contentView(blk, value, latex, { codeOpen = null, code: withCode = false } = {}) {
   if (!value) return h('div', { class: 'math-view mut' }, 'Μόνο εικόνα — το απόσπασμα της σελίδας είναι το περιεχόμενο.');
   const marks = conflictRanges(value, conflictsOf(blk));          // where the engines disagree, in the text itself
   const open = codeOpen ?? (marks.length > 0 || latex);
-  const code = h('details', { class: 'code-box', open: open || null }, h('summary', { class: 'small mut' }, latex ? 'Κώδικας LaTeX' : 'Κώδικας (Markdown/LaTeX)', marks.length ? ` · ${marks.length} σημείο(α) διαφωνίας μηχανών` : ''),
+  const code = !withCode ? null : h('details', { class: 'code-box', open: open || null }, h('summary', { class: 'small mut' }, latex ? 'Κώδικας LaTeX' : 'Κώδικας (Markdown/LaTeX)', marks.length ? ` · ${marks.length} σημείο(α) διαφωνίας μηχανών` : ''),
     h('pre', { class: 'preview-pre', style: { maxHeight: '260px' } }, markedText(value, marks)));
   // shown as the outputs will read it: a table read as a list (pipeline/tables.py) is a list here too; the code
   // (the engine's grid) stays below. Only for the version in force: other versions are compared as they are
@@ -144,40 +146,50 @@ export function segmentPanel(body, blk) {
     h('summary', { class: 'small mut' }, `Αναγνώσεις μηχανών (${cands.length})`),
     h('div', { class: 'small mut' }, 'Μη επαληθευμένες. «Ως πρόχειρο» τη φέρνει για επεξεργασία, «Χρήση αυτής» την κάνει απόφασή σου.'),
     cands.map(c => h('div', { class: 'cand' }, h('div', { class: 'row' }, engChip(c.engine), h('span', { class: 'grow small mut' }, c.smiles ? 'SMILES' : '', c.status && c.status !== 'OK' ? ` · ${c.status}` : ''),
-      (c.text || c.latex) && ['marker', 'docling', 'unimernet'].includes(c.engine) ? h('button', { class: 'ghost small', onclick: () => { seg.mode = 'draft'; seg.base = currentValue(blk); seg.draft = latex ? stripMathDelims(c.latex || c.text) : (c.text || c.latex); rerender(); } }, 'Ως πρόχειρο') : null,
+      (c.text || c.latex) && ['marker', 'docling', 'unimernet'].includes(c.engine) && !(seg.mode === 'draft' && seg.from === c.engine) ? h('button', { class: 'ghost small', onclick: () => { seg.mode = 'draft'; seg.from = c.engine; seg.detail = 'engines'; seg.focused = false; seg.base = currentValue(blk); seg.draft = latex ? stripMathDelims(c.latex || c.text) : (c.text || c.latex); rerender(); } }, 'Ως πρόχειρο') : null,
       (c.text || c.latex) && ['marker', 'docling', 'unimernet'].includes(c.engine) && seg.mode === 'view' ? h('button', { class: 'small', onclick: () => decide('approve_candidate', { engine: c.engine }) }, 'Χρήση αυτής') : null),
-      h('pre', {}, c.text || c.latex || c.smiles || c.error), c.latex && !c.text ? mathBox(c.latex) : null)),
+      h('pre', {}, c.text || c.latex || c.smiles || c.error), c.latex && !c.text ? mathBox(c.latex) : null,
+      seg.mode === 'draft' && seg.from === c.engine ? draftEditor(`Πρόχειρο από ${c.engine} (η ανάγνωση της μηχανής πάνω μένει ως έχει):`) : null)),
     (blk.figure_text_candidates || []).length ? h('div', { class: 'cand' }, h('b', {}, 'Κείμενο μέσα στο σχήμα (Docling)'), h('pre', { class: 'small' }, blk.figure_text_candidates.join(' | '))) : null));
   (blk.human_notes || []).forEach(nn => body.append(h('div', { class: 'note' }, `Σημείωση ${nn.actor || ''}: «${nn.note}»`)));
 
-  // 5. content + 6. the actions of THIS state (one primary)
-  body.append(h('h3', {}, 'Περιεχόμενο'));
-  const area = h('div'); body.append(area);
-  if (seg.mode === 'proposal' && seg.proposal) {
-    proposalCard(area, blk, seg, rerender, latex);
-  } else if (seg.mode === 'draft') {
+  // the draft: textarea, then a live PREVIEW (marked as such: nothing is applied until saved) and its actions
+  function draftEditor(title, ...after) {
     const ta = h('textarea', { id: 'editor', spellcheck: 'false', 'aria-label': latex ? 'Πρόχειρο LaTeX' : 'Πρόχειρο κειμένου' }); ta.value = seg.draft ?? '';
     const taWrap = highlightTextarea(ta, conflictsOf(blk));
-    const preview = h('div'), diff = h('div', { class: 'small mut', style: { margin: '6px 0' } });
+    const preview = h('div', { class: 'draft-preview-body' }), diff = h('div', { class: 'small mut', style: { margin: '6px 0' } });
     const save = h('button', { class: 'primary' }, 'Αποθήκευση της διόρθωσής μου', h('kbd', {}, '⌘↵'));
     const upd = () => { seg.draft = ta.value; clear(preview).append(latex ? mathBox(ta.value) : textMathBox(ta.value));
       const changed = ta.value.trim() !== (seg.base || '').trim(); save.disabled = !changed || pending;
       diff.textContent = changed ? 'Αλλαγή σε σχέση με την τρέχουσα εκδοχή.' : 'Καμία αλλαγή ακόμα.'; };
     ta.addEventListener('input', upd);
     const doSave = () => !save.disabled && decide(latex ? 'replace_latex' : 'replace_text', { value: ta.value }, 'Η διόρθωσή σου ισχύει πλέον');
-    const discard = () => { S.seg = null; rerender(); };
+    const discard = () => { S.seg = null; seg.detail && (segState(blk).seg.detail = seg.detail); rerender(); };
     save.onclick = doSave;
-    area.append(h('div', { class: 'small mut' }, latex ? 'Πρόχειρο (LaTeX):' : 'Πρόχειρο:'), taWrap,
-      h('div', { class: 'small mut', style: { margin: '6px 0 2px' } }, 'Όπως θα αποδοθεί (ζωντανά):'), preview, diff,
-      h('div', { class: 'actions' }, save, h('button', { onclick: discard }, 'Απόρριψη αλλαγών', h('kbd', {}, 'Esc'))),
-      h('details', {}, h('summary', { class: 'small mut' }, 'Τρέχουσα εκδοχή (για σύγκριση)'), contentView(blk, seg.base, latex)));
     upd();
     // focus once when the draft opens; later re-renders (poll refresh) must not pull focus back from elsewhere
-    if (!seg.focused) { seg.focused = true; setTimeout(() => ta.focus(), 30); }
+    if (!seg.focused) { seg.focused = true; setTimeout(() => { ta.focus(); ta.scrollIntoView({ block: 'nearest' }); }, 30); }
     S.segActions = { save: pending ? null : doSave, discard };
+    return h('div', { class: 'draft-editor' }, h('div', { class: 'small mut' }, title), taWrap,
+      h('div', { class: 'draft-preview', role: 'region', 'aria-label': 'Προεπισκόπηση του πρόχειρου' },
+        h('div', { class: 'draft-preview-tag' }, 'Προεπισκόπηση — δεν έχει εφαρμοστεί'), preview), diff,
+      h('div', { class: 'actions' }, save, h('button', { onclick: discard }, 'Απόρριψη αλλαγών', h('kbd', {}, 'Esc'))), ...after);
+  }
+
+  // 5. content + 6. the actions of THIS state (one primary)
+  body.append(h('h3', {}, 'Περιεχόμενο'));
+  const area = h('div'); body.append(area);
+  if (seg.mode === 'proposal' && seg.proposal) {
+    proposalCard(area, blk, seg, rerender, latex);
+  } else if (seg.mode === 'draft' && seg.from) {    // the draft is open under the engine reading it came from
+    area.append(h('div', { class: 'note small' }, `Επεξεργάζεσαι πρόχειρο από ${seg.from}, κάτω από την ανάγνωσή του στις «Αναγνώσεις μηχανών». Μέχρι να το αποθηκεύσεις, ισχύει αυτό:`),
+      contentView(blk, currentValue(blk), latex));
+  } else if (seg.mode === 'draft') {
+    area.append(draftEditor(latex ? 'Πρόχειρο (LaTeX):' : 'Πρόχειρο:',
+      h('details', {}, h('summary', { class: 'small mut' }, 'Τρέχουσα εκδοχή (για σύγκριση)'), contentView(blk, seg.base, latex))));
   } else {
     area.append(contentView(blk, currentValue(blk), latex));
-    const edit = () => { seg.mode = 'draft'; const raw = currentValue(blk) || (blk.chosen.withheld_latex || blk.chosen.withheld_text || ((blk.candidates || []).find(c => c.latex || c.text) || {})[latex ? 'latex' : 'text'] || ((blk.candidates || []).find(c => c.text) || {}).text || '');
+    const edit = () => { seg.mode = 'draft'; seg.from = null; const raw = currentValue(blk) || (blk.chosen.withheld_latex || blk.chosen.withheld_text || ((blk.candidates || []).find(c => c.latex || c.text) || {})[latex ? 'latex' : 'text'] || ((blk.candidates || []).find(c => c.text) || {}).text || '');
       seg.base = latex ? stripMathDelims(raw) : raw; seg.draft = seg.base; rerender(); };
     const imageOnly = blk.chosen.type === 'image_only';
     const approve = () => decide('approve');

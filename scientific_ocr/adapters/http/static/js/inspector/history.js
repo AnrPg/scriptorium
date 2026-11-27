@@ -15,7 +15,7 @@ export function historyPanel(blk, latex) {
     try { H = await api(`${B(S.book.id)}/blocks/${blk.id}/history`); } catch (e) { delete det.dataset.loaded; loadFailed(box, e); return; }
     const cur = currentValue(blk);
     const compare = (label, val) => modal(`Σύγκριση: ${label} ↔ τρέχουσα`, h('div', { class: 'cmp' },
-      h('div', {}, h('b', {}, label), contentView(blk, val, latex)), h('div', {}, h('b', {}, 'Τρέχουσα'), contentView(blk, cur, latex))), [{ label: 'Κλείσιμο' }]);
+      h('div', {}, h('b', {}, label), contentView(blk, val, latex, { code: true })), h('div', {}, h('b', {}, 'Τρέχουσα'), contentView(blk, cur, latex, { code: true }))), [{ label: 'Κλείσιμο' }]);
     const rows = [];
     for (const m of H.machine) rows.push(h('div', { class: 'list-item' }, engChip(m.engine), h('span', { class: 'grow small mut' }, 'ανάγνωση μηχανής'), h('button', { class: 'ghost small', onclick: () => compare(m.engine, m.text || m.latex) }, 'Σύγκριση')));
     for (const p of H.proposals) rows.push(h('div', { class: 'list-item' }, engChip('μοντέλο'), h('span', { class: 'grow small' }, `«${(p.note || '').slice(0, 50)}» → ${p.proposal?.action}${p.valid ? '' : ' (άκυρη)'}`),

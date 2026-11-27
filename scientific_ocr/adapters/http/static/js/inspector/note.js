@@ -34,7 +34,7 @@ export function proposalCard(area, blk, seg, rerender, latex) {
     await act(() => api(`${B(S.book.id)}/blocks/${blk.id}/proposal/apply`, { body: { proposal: prop, note: seg.note, model: res.model } }), 'Η πρόταση εφαρμόστηκε');
     S.seg = null; };
   const editFirst = ['replace_text', 'replace_latex'].includes(p.action)
-    ? h('button', { onclick: () => { seg.mode = 'draft'; seg.base = currentValue(blk); seg.draft = (parse() || p).value; seg.proposal = null; rerender(); } }, 'Επεξεργασία πριν την εφαρμογή') : null;
+    ? h('button', { onclick: () => { seg.mode = 'draft'; seg.from = null; seg.base = currentValue(blk); seg.draft = (parse() || p).value; seg.proposal = null; rerender(); } }, 'Επεξεργασία πριν την εφαρμογή') : null;
   const reject = () => { seg.mode = 'view'; seg.proposal = null; rerender(); };
   area.append(h('div', { class: 'proposal' },
     h('div', { class: 'small mut' }, `Πρόταση από ${res.model} · ${res.seconds}s · βεβαιότητα: ${({ high: 'υψηλή', medium: 'μέτρια', low: 'χαμηλή' })[p.confidence] || p.confidence}`),
@@ -42,8 +42,8 @@ export function proposalCard(area, blk, seg, rerender, latex) {
     p.clarification ? h('div', { class: 'note' }, h('b', {}, 'Ερώτηση του μοντέλου: '), p.clarification) : null,
     h('div', { class: 'small mut', style: { marginTop: '6px' } }, 'Τι θα κάνει ο κώδικας (από το JSON):'), will,
     p.value && ['replace_text', 'replace_latex'].includes(p.action) ? h('div', { class: 'cmp' },
-      h('div', {}, h('div', { class: 'small mut' }, 'Τρέχουσα'), contentView(blk, currentValue(blk), latex)),
-      h('div', {}, h('div', { class: 'small mut' }, 'Προτεινόμενη'), contentView(blk, p.value, p.action === 'replace_latex'))) : null,
+      h('div', {}, h('div', { class: 'small mut' }, 'Τρέχουσα'), contentView(blk, currentValue(blk), latex, { code: true })),
+      h('div', {}, h('div', { class: 'small mut' }, 'Προτεινόμενη'), contentView(blk, p.value, p.action === 'replace_latex', { code: true }))) : null,
     h('details', {}, h('summary', {}, 'JSON που θα εκτελεστεί (επεξεργάσιμο)'), h('div', {}, json,
       h('button', { class: 'small', onclick: async () => { const prop = parse(); if (prop) setStatus(await api(`${B(S.book.id)}/blocks/${blk.id}/proposal/check`, { body: { proposal: prop } })); } }, 'Έλεγχος σχήματος'))),
     status, h('div', { class: 'actions' }, apply, editFirst, h('button', { onclick: reject }, 'Απόρριψη', h('kbd', {}, 'Esc')))));
