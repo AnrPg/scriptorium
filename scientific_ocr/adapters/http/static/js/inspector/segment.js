@@ -19,7 +19,7 @@ import { groupsPanel } from '../inspector/multi.js';
 import { notePanel, proposalCard } from '../inspector/note.js';
 import { act, actLater } from '../ui/feedback.js';
 import { glossaryToggle } from './glossary.js';
-import { currentLabels, labelPicker, mathBox, stripMathDelims, textMathBox } from '../ui/math.js';
+import { asDraft, currentLabels, hasMath, labelPicker, mathBox, textMathBox } from '../ui/math.js';
 import { renderWorkspace, selectBlock, setSelection } from '../workspace/workspace.js';
 
 // ---------------------------------------------------------------- segment review: one current version, explicit modes
@@ -31,7 +31,9 @@ export function segState(blk) {
   const human = (blk.decisions || []).filter(d => S.meta.value_actions.includes(d.action));
   return { seg: S.seg, decided: human.length ? human[human.length - 1] : null };
 }
-export const isLatexBlock = blk => (blk.chosen || {}).type === 'latex' || ['math', 'chemical_reaction'].includes(blk.kind);
+// LaTeX content, or an equation not transcribed yet (its draft then opens as LaTeX); an equation whose content is
+// text (the reviewer wrote it without the LaTeX marks) is text
+export const isLatexBlock = blk => (blk.chosen || {}).type === 'latex' || (['math', 'chemical_reaction'].includes(blk.kind) && (blk.chosen || {}).type !== 'text');
 export const currentValue = blk => { const ch = blk.chosen || {}; return ch.text || ch.latex || ''; };
 // rendered first; the source code below only when asked (`code`: comparisons of versions). The segment's own view
 // has none: the raw text is shown where it is edited — the draft's textarea
@@ -150,7 +152,7 @@ export function segmentPanel(body, blk) {
     h('summary', { class: 'small mut' }, `Αναγνώσεις μηχανών (${cands.length})`),
     h('div', { class: 'small mut' }, 'Μη επαληθευμένες. «Ως πρόχειρο» τη φέρνει για επεξεργασία, «Χρήση αυτής» την κάνει απόφασή σου.'),
     cands.map(c => h('div', { class: 'cand' }, h('div', { class: 'row' }, engChip(c.engine), h('span', { class: 'grow small mut' }, c.smiles ? 'SMILES' : '', c.status && c.status !== 'OK' ? ` · ${c.status}` : ''),
-      (c.text || c.latex) && ['marker', 'docling', 'unimernet'].includes(c.engine) && !(seg.mode === 'draft' && seg.from === c.engine) ? h('button', { class: 'ghost small', onclick: () => { seg.mode = 'draft'; seg.from = c.engine; seg.detail = 'engines'; seg.focused = false; seg.base = currentValue(blk); seg.draft = latex ? stripMathDelims(c.latex || c.text) : (c.text || c.latex); rerender(); } }, 'Ως πρόχειρο') : null,
+      (c.text || c.latex) && ['marker', 'docling', 'unimernet'].includes(c.engine) && !(seg.mode === 'draft' && seg.from === c.engine) ? h('button', { class: 'ghost small', onclick: () => { seg.mode = 'draft'; seg.from = c.engine; seg.detail = 'engines'; seg.focused = false; seg.base = asDraft(currentValue(blk), latex); seg.draft = c.latex && (latex || !c.text) ? asDraft(c.latex, true) : (c.text || ''); rerender(); } }, 'Ως πρόχειρο') : null,
       (c.text || c.latex) && ['marker', 'docling', 'unimernet'].includes(c.engine) && seg.mode === 'view' ? h('button', { class: 'small', onclick: () => decide('approve_candidate', { engine: c.engine }) }, 'Χρήση αυτής') : null),
       h('pre', {}, c.text || c.latex || c.smiles || c.error), c.latex && !c.text ? mathBox(c.latex) : null,
       seg.mode === 'draft' && seg.from === c.engine ? draftEditor(`Πρόχειρο από ${c.engine} (η ανάγνωση της μηχανής πάνω μένει ως έχει):`) : null)),
@@ -159,15 +161,19 @@ export function segmentPanel(body, blk) {
 
   // the draft: textarea, then a live PREVIEW (marked as such: nothing is applied until saved) and its actions
   function draftEditor(title, ...after) {
-    const ta = h('textarea', { id: 'editor', spellcheck: 'false', 'aria-label': latex ? 'Πρόχειρο LaTeX' : 'Πρόχειρο κειμένου' }); ta.value = seg.draft ?? '';
+    const ta = h('textarea', { id: 'editor', spellcheck: 'false', 'aria-label': 'Πρόχειρο κειμένου (τύποι LaTeX μέσα σε $…$ ή $$…$$)' }); ta.value = seg.draft ?? '';
     const taWrap = highlightTextarea(ta, conflictsOf(blk));
     const preview = h('div', { class: 'draft-preview-body' }), diff = h('div', { class: 'small mut', style: { margin: '6px 0' } });
     const save = h('button', { class: 'primary' }, 'Αποθήκευση της διόρθωσής μου', h('kbd', {}, '⌘↵'));
-    const upd = () => { seg.draft = ta.value; clear(preview).append(latex ? mathBox(ta.value) : textMathBox(ta.value));
+    const as = h('span', { class: 'draft-as' });
+    const upd = () => { seg.draft = ta.value; clear(preview).append(textMathBox(ta.value));
+      const m = hasMath(ta.value);
+      as.textContent = m ? 'Κείμενο με τύπους LaTeX' : 'Απλό κείμενο';
+      as.className = 'draft-as ' + (m ? 'is-latex' : 'is-text');
       const changed = ta.value.trim() !== (seg.base || '').trim(); save.disabled = !changed || pending;
       diff.textContent = changed ? 'Αλλαγή σε σχέση με την τρέχουσα εκδοχή.' : 'Καμία αλλαγή ακόμα.'; };
     ta.addEventListener('input', upd);
-    const doSave = () => !save.disabled && decide(latex ? 'replace_latex' : 'replace_text', { value: ta.value }, 'Η διόρθωσή σου ισχύει πλέον');
+    const doSave = () => !save.disabled && decide('replace_text', { value: ta.value }, 'Η διόρθωσή σου ισχύει πλέον');
     const discard = () => { S.seg = null; seg.detail && (segState(blk).seg.detail = seg.detail); rerender(); };
     save.onclick = doSave;
     upd();
@@ -175,6 +181,7 @@ export function segmentPanel(body, blk) {
     if (!seg.focused) { seg.focused = true; setTimeout(() => { ta.focus(); ta.scrollIntoView({ block: 'nearest' }); }, 30); }
     S.segActions = { save: pending ? null : doSave, discard };
     return h('div', { class: 'draft-editor' }, h('div', { class: 'small mut' }, title), taWrap,
+      h('div', { class: 'small draft-notation' }, as, h('span', { class: 'mut' }, ' · ό,τι γράψεις μέσα σε $…$ (στη γραμμή) ή $$…$$ (μόνο του) αποδίδεται ως τύπος· τα υπόλοιπα μένουν κείμενο')),
       h('div', { class: 'draft-preview', role: 'region', 'aria-label': 'Προεπισκόπηση του πρόχειρου' },
         h('div', { class: 'draft-preview-tag' }, 'Προεπισκόπηση — δεν έχει εφαρμοστεί'), preview), diff,
       h('div', { class: 'actions' }, save, h('button', { onclick: discard }, 'Απόρριψη αλλαγών', h('kbd', {}, 'Esc'))), ...after);
@@ -189,12 +196,13 @@ export function segmentPanel(body, blk) {
     area.append(h('div', { class: 'note small' }, `Επεξεργάζεσαι πρόχειρο από ${seg.from}, κάτω από την ανάγνωσή του στις «Αναγνώσεις μηχανών». Μέχρι να το αποθηκεύσεις, ισχύει αυτό:`),
       contentView(blk, currentValue(blk), latex));
   } else if (seg.mode === 'draft') {
-    area.append(draftEditor(latex ? 'Πρόχειρο (LaTeX):' : 'Πρόχειρο:',
+    area.append(draftEditor('Πρόχειρο:',
       h('details', {}, h('summary', { class: 'small mut' }, 'Τρέχουσα εκδοχή (για σύγκριση)'), contentView(blk, seg.base, latex))));
   } else {
     area.append(contentView(blk, currentValue(blk), latex));
-    const edit = () => { seg.mode = 'draft'; seg.from = null; const raw = currentValue(blk) || (blk.chosen.withheld_latex || blk.chosen.withheld_text || ((blk.candidates || []).find(c => c.latex || c.text) || {})[latex ? 'latex' : 'text'] || ((blk.candidates || []).find(c => c.text) || {}).text || '');
-      seg.base = latex ? stripMathDelims(raw) : raw; seg.draft = seg.base; rerender(); };
+    // the draft starts from what there is, in the draft notation (LaTeX shown inside $$…$$, text as it is); what it
+    // is saved as is then only what the reviewer writes: always text, its marked parts render as formulas
+    const edit = () => { seg.mode = 'draft'; seg.from = null; seg.base = asDraft(...startValue(blk, latex)); seg.draft = seg.base; rerender(); };
     const imageOnly = blk.chosen.type === 'image_only';
     const approve = () => decide('approve');
     if (decided) {
@@ -413,3 +421,15 @@ function glossaryRow(blk, row) {
   return row('gl', 'Γλωσσάριο', value, glossaryToggle(S.page));
 }
 
+/** [value, is it LaTeX] a draft starts from: the content, else a withheld reading, else an engine reading. */
+function startValue(blk, latex) {
+  const ch = blk.chosen || {}, cands = blk.candidates || [];
+  if (ch.type === 'latex' && ch.latex) return [ch.latex, true];
+  if (ch.type === 'text' && ch.text) return [ch.text, false];
+  if (ch.withheld_latex) return [ch.withheld_latex, true];
+  if (ch.withheld_text) return [ch.withheld_text, false];
+  const tex = cands.find(c => c.latex), txt = cands.find(c => c.text);
+  if (latex && tex) return [Array.isArray(tex.latex) ? tex.latex.join(' ') : tex.latex, true];
+  if (txt) return [txt.text, false];
+  return tex ? [tex.latex, true] : ['', false];
+}

@@ -14,6 +14,13 @@ export function stripMathDelims(s) {
   }
   return s || '';
 }
+// THE DRAFT (every correction the reviewer writes) is ALWAYS plain text: the parts the reviewer marks as LaTeX
+// ($…$, \(…\) in the line; $$…$$, \[…\] on their own) render as formulas, the rest stays text — the same
+// reading as the outputs (pipeline.inline). Never a LaTeX-only field: what is LaTeX is what the writer marked.
+export const hasMath = (v) => /\$|\\\(|\\\[/.test(v || '');
+/** A value as draft text: LaTeX content is shown inside $$…$$ (its marks are written, so it renders as before). */
+export const asDraft = (v, isLatex) => (isLatex && (v || '').trim() ? `$$ ${stripMathDelims(v).trim()} $$` : (v || ''));
+
 export function mathBox(latex, display = true) {
   const box = h('div', { class: 'math-view' });
   try { katex.render(stripMathDelims(latex), box, { displayMode: display, throwOnError: true, strict: 'ignore' }); }

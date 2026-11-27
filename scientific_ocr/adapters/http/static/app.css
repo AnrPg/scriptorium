@@ -600,3 +600,5 @@ label.list-item{cursor:pointer}
 .loop-count{display:inline-flex;flex-direction:column;gap:2px;font-size:12px;color:var(--mut);margin:0 6px;min-width:0}
 .loop-count-bar{display:block;height:3px;border-radius:2px;background:var(--line2);overflow:hidden;min-width:90px}
 .loop-count-bar>span{display:block;height:100%;background:var(--ok);transition:width .3s}
+/* the draft notation (ui/math.js draftForm): what the draft is saved as, decided by what the reviewer writes */
+.draft-notation{margin:4px 0 6px}.draft-as{font-weight:600}.draft-as.is-latex{color:var(--acc)}.draft-as.is-text{color:var(--fg)}

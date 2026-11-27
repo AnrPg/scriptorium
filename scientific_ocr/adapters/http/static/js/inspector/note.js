@@ -4,6 +4,7 @@ import { S } from '../core/state.js';
 import { reportWrong } from '../inspector/lineage.js';
 import { contentView, currentValue } from '../inspector/segment.js';
 import { act } from '../ui/feedback.js';
+import { asDraft } from '../ui/math.js';
 
 // ---------------------------------------------------------------- note -> local model -> proposal (never auto-applied)
 export function notePanel(blk, seg, rerender) {
@@ -34,7 +35,7 @@ export function proposalCard(area, blk, seg, rerender, latex) {
     await act(() => api(`${B(S.book.id)}/blocks/${blk.id}/proposal/apply`, { body: { proposal: prop, note: seg.note, model: res.model } }), 'Η πρόταση εφαρμόστηκε');
     S.seg = null; };
   const editFirst = ['replace_text', 'replace_latex'].includes(p.action)
-    ? h('button', { onclick: () => { seg.mode = 'draft'; seg.from = null; seg.base = currentValue(blk); seg.draft = (parse() || p).value; seg.proposal = null; rerender(); } }, 'Επεξεργασία πριν την εφαρμογή') : null;
+    ? h('button', { onclick: () => { seg.mode = 'draft'; seg.from = null; const q = parse() || p; seg.base = asDraft(currentValue(blk), (blk.chosen || {}).type === 'latex'); seg.draft = asDraft(q.value, q.action === 'replace_latex'); seg.proposal = null; rerender(); } }, 'Επεξεργασία πριν την εφαρμογή') : null;
   const reject = () => { seg.mode = 'view'; seg.proposal = null; rerender(); };
   area.append(h('div', { class: 'proposal' },
     h('div', { class: 'small mut' }, `Πρόταση από ${res.model} · ${res.seconds}s · βεβαιότητα: ${({ high: 'υψηλή', medium: 'μέτρια', low: 'χαμηλή' })[p.confidence] || p.confidence}`),
