@@ -80,7 +80,7 @@ def test_marker_primary_waives_disagreements_but_not_lost_text_or_equations():
     eq = blk(3, ['EQUATION_CONFLICT', 'SYMBOL_READING_CONFLICT'], 'x', 'x', kind='math')
     assert profile.review_policy([typo, lost, eq], p) == 1
     assert typo['review'] == 'not_needed' and typo['waived'] == ['SYMBOL_READING_CONFLICT'] and not typo['display_crop']
-    assert lost['review'] == 'required' and 'ENGINE_TEXT_LOSS_SUSPECTED' in lost['reasons']
+    assert lost['review'] == 'recommended' and 'ENGINE_TEXT_LOSS_SUSPECTED' in lost['reasons']   # a warning, never required
     assert eq['review'] == 'required'
     assert profile.review_policy([blk(4, ['SYMBOL_READING_CONFLICT'], 'a', 'b')], profiles.effective('reading')) == 0
 

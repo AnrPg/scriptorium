@@ -178,7 +178,8 @@ REASONS: dict[str, Reason] = {
     'PROFILE_BOUNDARY_CHECK': R('recommended', False, 'body text continues across the edge of content the profile excludes: kept in the output; check the boundary',
                                 'Το κυρίως κείμενο συνεχίζει πέρα από το όριο αυτού που εξαιρεί το προφίλ: κρατήθηκε· έλεγξε το όριο',
                                 stage='profile'),
-    'ENGINE_TEXT_LOSS_SUSPECTED': R('required', True, 'Docling read clearly more words here than the chosen reading: text may be missing',
+    # Docling is only the cross-check and is often wrong: a WARNING (recommended), never a required review (user, 2026-11-27)
+    'ENGINE_TEXT_LOSS_SUSPECTED': R('recommended', True, 'Docling read clearly more words here than the chosen reading: text may be missing',
                                     'Το Docling διάβασε αρκετές λέξεις που λείπουν από το κείμενο: μπορεί να χάθηκε κείμενο',
                                     ('ENGINE_TEXT_LOSS_SUSPECTED', 'warning'), stage='profile'),
     'TEXT_ONLY_LOSS': R('required', True, 'only an image of this content exists; a text-only output would lose it: type its text or leave it out',

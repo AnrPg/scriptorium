@@ -225,7 +225,8 @@ def text_loss(b: dict, owner: dict | None = None) -> tuple[int, int]:
 def review_policy(blocks: list[dict], profile: dict) -> int:
     """'marker_primary': the flags of MARKER_PRIMARY_WAIVES are recorded but not asked about (b['waived']; review
     lowered, no crop beside settled text) — unless Docling read clearly more words than the chosen reading
-    (ENGINE_TEXT_LOSS_SUSPECTED, required). Equations, tables, coverage, empty or partial OCR stay as they are.
+    (ENGINE_TEXT_LOSS_SUSPECTED: a warning only — Docling is the cross-check and often wrong, so it is recommended, never
+    required). Equations, tables, coverage, empty or partial OCR stay as they are.
     Segments with a reviewer decision are untouched. Returns the number of segments no longer asked about."""
     if profile.get('engine_policy') != 'marker_primary':
         return 0
@@ -240,8 +241,7 @@ def review_policy(blocks: list[dict], profile: dict) -> int:
             continue
         missing, total = text_loss(b, by_id.get(b['relations'].get('caption_for')))
         if missing >= LOSS_MIN_CHARS and missing >= LOSS_SHARE * max(total, 1):
-            flag(b, 'ENGINE_TEXT_LOSS_SUSPECTED', missing=missing, of=total)
-            continue
+            flag(b, 'ENGINE_TEXT_LOSS_SUSPECTED', missing=missing, of=total)    # stays among `rest`: a warning
         rest = [r for r in b['reasons'] if r not in waivable and REASONS.get(r)]
         b['waived'] = hit
         level = max((REVIEW_ORDER.index(REASONS[r].review) for r in rest if REASONS[r].review), default=0)
