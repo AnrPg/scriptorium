@@ -26,7 +26,7 @@ from . import projection
 
 # Steps shown to the user, in order. Each writes progress.json via `progress_for(out, kind)`.
 STEPS = {
-    'process': ['prepare', 'extract', 'regions', 'compose', 'models', 'render'],
+    'process': ['prepare', 'extract', 'crossread', 'regions', 'compose', 'models', 'render'],
     'reproject': ['regions', 'compose', 'models', 'render'],
     'pages': ['compose'],
     'regions': ['regions', 'compose'],
@@ -113,6 +113,47 @@ def extract_pages(out: Path, pages: list[int], log: Log, progress=None) -> dict:
     return res
 
 
+def cross_read(out: Path, pages: list[int], log: Log, progress=None) -> int:
+    """Before composition (and so before any review): every box of `pages` that only ONE engine found (Docling
+    only or Marker only) is read by the engine that missed it (pipeline.crossread); ink no engine boxed is not. Idempotent: a region already read with the same box and language is not read again,
+    and the engines' own cache is content-addressed. Returns the number of regions read."""
+    from ..pipeline import crossread
+    with book_lock(out, 'crossread'):
+        lang = (read_json(out / 'book.json', {}) or {}).get('ocr_lang') or config.DEFAULT_OCR_LANG
+        idx_path = out / 'raw' / 'crossread' / 'index.json'
+        idx = read_json(idx_path, {}) or {}
+        todo, recs = [], {}
+        for i, ctx in enumerate(projection.page_contexts(out, pages, log)):
+            if progress:
+                progress('crossread', i, len(pages), page=ctx.page)
+            for t in crossread.targets(ctx):
+                old = idx.get(t['id']) or {}
+                if old.get('read_bbox') == t['read_bbox'] and old.get('lang') == lang and \
+                        all((old.get('engines') or {}).get(e, {}).get('status') == 'OK' for e in t['engines']):
+                    continue
+                todo.append(t)
+                recs[t['id']] = {'engines': {'tesseract': crossread.tesseract(ctx, t)} if 'tesseract' in t['engines'] else {}}
+        by_source = {s: sum(t['source'] == s for t in todo) for s in ('docling', 'marker')}
+        log(f'cross-reading: {len(todo)} boxes found by one engine only {by_source}')
+        if not todo:
+            return 0
+        crops = [t for t in todo if 'marker' in t['engines']]      # one Marker run over all of them
+        if crops:
+            read = extraction.regions_ocr(out, out / 'source' / 'original.pdf',
+                                          [({'id': t['id'], 'page': t['page'], 'bbox': t['read_bbox']}, t['force_block']) for t in crops],
+                                          log, lang, engines_of={t['id']: ('marker',) for t in crops})
+            for t in crops:
+                recs[t['id']] = {**read[t['id']], 'engines': {**recs[t['id']]['engines'], **read[t['id']]['engines']}}
+        for t in todo:
+            idx[t['id']] = {**t, **recs[t['id']], 'lang': lang}
+        atomic_write(idx_path, json.dumps(idx, indent=2, default=str))
+        failed = [(t['id'], e) for t in todo for e, r in recs[t['id']]['engines'].items() if r.get('status') != 'OK']
+        log(f'cross-reading done; failed={failed}')
+        if progress:
+            progress('crossread', len(pages), len(pages))
+        return len(todo)
+
+
 def ocr_regions(out: Path, log: Log, progress=None) -> int:
     """OCR reviewer regions whose box, label or OCR language is new or changed (figure regions need no OCR).
     Serialised per book: a light rebuild and a heavy job may both get here, and must neither OCR the same region
@@ -169,6 +210,7 @@ def process(out: Path, pdf: Path | None = None, pages_spec: str | None = None, l
     progress('prepare')
     meta = prepare_source(pdf or out / 'source' / 'original.pdf', out, pages_spec, log, progress)
     extract_pages(out, meta['requested'], log, progress)
+    cross_read(out, meta['requested'], log, progress)
     ocr_regions(out, log, progress)
     code = projection.build(out, log, progress=progress)
     retry = auto_diligent_pages(out, meta['requested'])
@@ -181,6 +223,7 @@ def process(out: Path, pdf: Path | None = None, pages_spec: str | None = None, l
         careful = progress_for(out, 'process', phase='diligent', phase_pages=retry)
         careful('extract', 0, len(retry))
         extract_pages(out, retry, log, careful)
+        cross_read(out, retry, log, careful)
         code = projection.build(out, log, progress=careful)
     progress('done', 1, 1, code=code)
     return code

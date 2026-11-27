@@ -100,6 +100,15 @@ class EventStore:
             return [{'type': 'undo', 'targets': t}] if t else []
         return self._transact(make, actor)
 
+    def undo_seqs(self, pick, actor='reviewer') -> list[dict]:
+        """A FOCUSED undo: `pick(state)` names the seqs to undo from the folded log (e.g. the last step about the
+        profile's exclusions, not the last step overall). The same compensating event as undo — redo brings it back."""
+        def make(evs):
+            st = fold(evs)
+            t = [s for s in pick(st) if s in st['active']]
+            return [{'type': 'undo', 'targets': t}] if t else []
+        return self._transact(make, actor)
+
     def redo(self, actor='reviewer') -> list[dict]:
         def make(evs):
             t = fold(evs)['redo_targets']

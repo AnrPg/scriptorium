@@ -34,6 +34,10 @@ original scanned PDF
    +--- PDF page rasters and geometry from PyMuPDF
          |
          v
+   cross-reading: a box only ONE engine found is read by the other
+   (Docling-only -> Marker; Marker-only -> Docling's OCR on the crop); ink no engine boxed is left alone
+         |
+         v
    typed region classification + spatial/text matching
          |--- formula: Marker first; UniMERNet on conflict/uncertainty
          |--- molecular drawing: MolScribe graph/SMILES/MOL
@@ -131,6 +135,13 @@ scientific_ocr/
 * Symbol errors are detected by **cross-engine evidence**: tokens Marker and Docling read differently, classified
   (script swap G↔Γ, digit/letter O↔0 in formulas, different numbers); omissions, truncations, diacritics and
   same-script noise are ignored. Script-mix heuristics apply only when no second reading exists.
+* **Cross-reading before review** (`pipeline/crossread.py`, `application/processing.cross_read`, step
+  «Διασταυρούμενη ανάγνωση» of every processing run, after extraction): every region one detector missed is read by
+  the engine that missed it — the same batched crop OCR as reviewer regions, content-addressed, idempotent
+  (`raw/crossread/index.json`). Composition then judges it like any other segment: two agreeing readings make a
+  Docling-only box ordinary content; a disagreement stays a visible excerpt with both readings; a Marker-only box
+  gets Tesseract's reading as cross-engine evidence (symbol/conflict checks). Ink no engine boxed is NOT read again
+  (mostly noise; see «Review load»). Docling is not run on crops: on a crop of one paragraph it detects no layout.
 * Book rules (data, previewed, undoable) never "correct" a glyph that the independent reading confirms.
 * Typeset chemical equations keep Marker LaTeX, are checked by UniMERNet with an arrow/charge-preserving key,
   and always keep their crop; Lewis structures are image-authoritative; MolScribe only sees molecular drawings.

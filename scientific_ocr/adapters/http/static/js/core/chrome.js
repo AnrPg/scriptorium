@@ -2,7 +2,7 @@ import { carefulLabel, carefulPages, renderBook } from '../book/book.js';
 import { B, api } from '../core/api.js';
 import { $, clear, h, isActiveJob, isTyping } from '../core/dom.js';
 import { loadBook, loadPage, navRecord, renderNav, screenTitle } from '../core/nav.js';
-import { S } from '../core/state.js';
+import { S, go } from '../core/state.js';
 import { renderLibrary } from '../library/library.js';
 import { act, dialogOpen, modal, toast } from '../ui/feedback.js';
 import { EMBED } from '../ui/page_overlay.js';
@@ -66,7 +66,8 @@ export async function poll() {
     S.jobs = jobs;
     renderJobsPill(); renderPendingPill();
     for (const j of finished) { const now = jobs.find(x => x.id === j.id); if (now && now.state === 'failed') toast(`Απέτυχε: ${now.label}`, { error: true });
-      else if (now && now.warning === 'integrity') toast(`${now.label}: ολοκληρώθηκε, αλλά ο έλεγχος ακεραιότητας βρήκε κρίσιμο εύρημα (δες «κρίσιμα» στην αρχή του βιβλίου)`, { error: true }); }
+      else if (now && now.warning === 'integrity') toast(`${now.label}: ολοκληρώθηκε, αλλά ο έλεγχος ακεραιότητας βρήκε κρίσιμο εύρημα — πάτα για να το δεις`,
+        { error: true, onclick: () => showCritical(now.book) }); }
     // Every view of the book is derived from its projection: when the book's revision changed (an edit was
     // re-projected — even one that finished before we ever saw its job), reload whatever is on screen.
     let busy = false;
@@ -120,6 +121,8 @@ export function removeJobButton(j, after) {
     try { await api(`/api/jobs/${j.id}/remove`, { body: {} }); } catch (err) { toast(err.message, { error: true }); return; }
     S.jobs = S.jobs.filter(x => x.id !== j.id); if (S.book && S.book.jobs) S.book.jobs = S.book.jobs.filter(x => x.id !== j.id); after && after(); } }, '✕');
 }
+/** The book's «Έλεγχος» tab, scrolled to its critical findings, the ones the last build added highlighted. */
+export function showCritical(bookId) { S.critFocus = bookId; go(`#/b/${encodeURIComponent(bookId)}/review`); }
 export async function showLog(j) {             // the plain-language job report (raw log folded inside)
   const { jobSummaryDialog } = await import('../ui/joblog.js');
   jobSummaryDialog(j);

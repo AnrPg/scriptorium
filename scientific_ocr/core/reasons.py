@@ -48,6 +48,10 @@ REASONS: dict[str, Reason] = {
     # DOCLING found is the opposite case — Marker missed content — and stays 'required'.
     'SINGLE_ENGINE_MARKER': R(None, False, 'only Marker found this region (accepted: primary engine)',
                               'Μόνο το Marker βρήκε την περιοχή — δεκτό (κύρια μηχανή)', stage='layout'),
+    # Cross-reading (pipeline.crossread): a region one engine found is read by the other(s) BEFORE review, so the
+    # reviewer finds every reading ready. Informational: the readings' agreement is what the content checks judge.
+    'CROSS_READ': R(None, False, 'found by one engine only; the other engine read the region automatically before review',
+                    'Την περιοχή τη βρήκε μία μόνο μηχανή· η άλλη τη διάβασε αυτόματα πριν τον έλεγχο', stage='layout'),
     'UNCOVERED_INK_REGION': R('required', True, 'printed content not covered by any engine',
                               'Τυπωμένο περιεχόμενο που δεν κάλυψε καμία μηχανή',
                               ('COVERAGE_UNCOVERED_INK', 'warning'), stage='layout'),

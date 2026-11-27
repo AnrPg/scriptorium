@@ -13,7 +13,7 @@ import json
 import shutil
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -110,6 +110,7 @@ class _Inputs:
     extraction: dict
     regions_index: dict
     human: dict
+    crossread: dict = field(default_factory=dict)      # raw/crossread/index.json (application.processing.cross_read)
 
 
 def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner, progress: Progress | None,
@@ -278,6 +279,7 @@ def _load_inputs(out: Path, log: Log, profile: str | None = None):
         src = read_json_strict(out / 'source' / 'source.json')
         ex = read_json_strict(out / 'raw' / 'extraction_index.json', {})
         regions_index = read_json_strict(out / 'raw' / 'regions' / 'index.json', {})
+        cross = read_json_strict(out / 'raw' / 'crossread' / 'index.json', {})
     except CorruptFile as exc:
         log(f'REQUIRED INPUT UNREADABLE: {exc}. Previous outputs left untouched.')
         return 6
@@ -296,19 +298,41 @@ def _load_inputs(out: Path, log: Log, profile: str | None = None):
     removed = set(human['removed_pages'])           # pages the reviewer left out: raw OCR kept, outputs skip them
     src = {**src, 'pages_processed': [p for p in src['pages_processed'] if p not in removed],
            'pages_removed': sorted(removed)}
-    return _Inputs(src, pdf, ex, regions_index, human)
+    return _Inputs(src, pdf, ex, regions_index, human, cross)
+
+
+def _versions(inp: _Inputs) -> dict:
+    return {e: next((r.get('version') for r in d.values()), None) for e, d in inp.extraction.items()}
+
+
+def _page_context(out: Path, inp: _Inputs, page: int, versions: dict) -> PageContext:
+    src = inp.src
+    ctx = PageContext.load(out, inp.pdf, src['sha256'], page, src['page_dims_pt'][str(page)], inp.extraction, versions,
+                           inp.human['rules'], imaging=pdfio)
+    ctx.quick_ocr = quick_ocr.read
+    ctx.ocr_lang = (read_json(out / 'book.json', {}) or {}).get('ocr_lang') or 'ell,eng'
+    ctx.cross = {k: v for k, v in inp.crossread.items() if v.get('page') == page}
+    return ctx
+
+
+def page_contexts(out: Path, pages: list[int], log: Log):
+    """The page contexts (engine readings aligned, nothing composed) of `pages` that are processed."""
+    inp = _load_inputs(out, log)
+    if isinstance(inp, int):
+        return
+    versions = _versions(inp)
+    for page in pages:
+        if page in inp.src['pages_processed']:
+            yield _page_context(out, inp, page, versions)
 
 
 def _compose_pages(out: Path, inp: _Inputs, progress):
-    ex, src = inp.extraction, inp.src
-    versions = {e: next((r.get('version') for r in d.values()), None) for e, d in ex.items()}
+    src = inp.src
+    versions = _versions(inp)
     blocks, pages, contexts = [], [], {}
-    langs = (read_json(out / 'book.json', {}) or {}).get('ocr_lang') or 'ell,eng'
     for i, page in enumerate(src['pages_processed']):
         progress('compose', i, len(src['pages_processed']), page=page)
-        ctx = PageContext.load(out, inp.pdf, src['sha256'], page, src['page_dims_pt'][str(page)], ex, versions,
-                               inp.human['rules'], imaging=pdfio)
-        ctx.quick_ocr, ctx.ocr_lang = quick_ocr.read, langs
+        ctx = _page_context(out, inp, page, versions)
         contexts[page] = ctx
         seq, info = assemble(ctx, inp.human['regions'], inp.regions_index, set(inp.human['hidden']))
         captions.associate(seq, ctx.docling, ctx.unit)
@@ -550,6 +574,7 @@ def _publish(out: Path, canonical: dict, inp: _Inputs, spec, stale: int, log: Lo
     canonical['findings'] = audit.pre_render(canonical, out)
     md = markdown.markdown(canonical)                 # the reader-facing document (also checked by the audit)
     canonical['findings'] += audit.post_render(canonical, md, out)
+    _mark_first_seen(canonical, out)
     canonical['release_status'] = release_status(blocks, canonical['findings'],
                                                  (canonical.get('profile') or {}).get('pending', 0))
     canonical['assets'] = sorted({b['source_crop']['path'] for b in blocks if b.get('source_crop')})
@@ -579,6 +604,17 @@ def _publish(out: Path, canonical: dict, inp: _Inputs, spec, stale: int, log: Lo
     log(f'built: {counts} release_status={canonical["release_status"]}' + (f' (profile version: {for_profile})' if for_profile else ''))
     integrity = any(f['severity'] == 'critical' and f['type'].startswith('INTEGRITY') for f in canonical['findings'])
     return 5 if integrity else 0
+
+
+def _mark_first_seen(canonical: dict, out: Path):
+    """Each finding keeps the build in which it FIRST appeared (`first_seen` = that build's run.built_utc; finding
+    ids are content-derived, pipeline.audit.finding). A finding new in this build carries this build's time, so the
+    UI can point at what a rebuild just added."""
+    prev = read_json(out / 'canonical.json') or {}
+    seen = {f['id']: f.get('first_seen') for f in prev.get('findings', [])}
+    now = canonical['run']['built_utc']
+    for f in canonical['findings']:
+        f['first_seen'] = seen.get(f['id']) or now
 
 
 def _calibration_outcomes(out: Path) -> list[tuple[str, str]]:
@@ -674,7 +710,7 @@ def _build_page(out: Path, page: int, log: Log, runner: SpecializedRunner) -> in
     if page not in inp.src['pages_processed']:
         return 2
     t0 = time.perf_counter()
-    one = _Inputs({**inp.src, 'pages_processed': [page]}, inp.pdf, inp.extraction, inp.regions_index, inp.human)
+    one = _Inputs({**inp.src, 'pages_processed': [page]}, inp.pdf, inp.extraction, inp.regions_index, inp.human, inp.crossread)
     blocks, pages, contexts, _ = _compose_pages(out, one, lambda *a, **k: None)
     enrich.enrich(out, blocks, runner, True, log)
     _seal_machine_result(blocks)
@@ -682,7 +718,7 @@ def _build_page(out: Path, page: int, log: Log, runner: SpecializedRunner) -> in
     page_merges = [m for m in inp.human['merges'] if int(m['page']) == page]
     ids = {b['id'] for b in blocks} | {merge.merged_id(sha, m) for m in page_merges}
     human = {**inp.human, 'merges': page_merges, 'decisions': [d for d in inp.human['decisions'] if d['block_id'] in ids]}
-    result, _ = _apply_decisions(blocks, pages, contexts, _Inputs(one.src, one.pdf, one.extraction, one.regions_index, human))
+    result, _ = _apply_decisions(blocks, pages, contexts, _Inputs(one.src, one.pdf, one.extraction, one.regions_index, human, one.crossread))
     notation.annotate(blocks)
     captions.finalize(blocks)
     profile.text_policy(blocks, book_profile(inp.human))  # the reviewer sees what the output will say

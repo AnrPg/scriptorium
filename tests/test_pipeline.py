@@ -1679,3 +1679,81 @@ def test_audit_bounds_nested_and_attributed_figures_and_asides():
     codes = lambda md: {f['type'] for f in audit.post_render(c, md, Path('.'), images=False)}
     assert not codes(inside) & {'CAPTION_BLEED', 'INTEGRITY_UNBALANCED_BOUNDARY'}
     assert 'CAPTION_BLEED' in codes(f'<figure>\n![a](x.png)\n</figure>\n\n{cap_text}\n')
+
+
+# ---------------------------------------------------------------- cross-reading (pipeline.crossread)
+def _fake_marker_regions(text):
+    """Fake region OCR (adapters.extraction.regions_ocr): Marker reads `text` in every crop."""
+    def regions_ocr(out, src_pdf, items, log=print, lang=None, engines_of=None):
+        res = {}
+        for r, force in items:
+            d = out / 'raw' / 'regions' / f"fake-{r['id']}"
+            d.mkdir(parents=True, exist_ok=True)
+            bb = [0, 0, r['bbox'][2] - r['bbox'][0], r['bbox'][3] - r['bbox'][1]]
+            (d / 'out.json').write_text(json.dumps({'block_type': 'Document', 'children': [{
+                'id': '/page/0/Page/0', 'block_type': 'Page', 'bbox': bb, 'html': '', 'children': [
+                    {'id': '/page/0/Text/0', 'block_type': force, 'bbox': bb, 'html': f'<p>{text}</p>',
+                     'children': None, 'images': {}}]}]}))
+            assert (engines_of or {}).get(r['id']) == ('marker',)
+            res[r['id']] = {'crop_pdf': 'x', 'crop_sha': 'x', 'engines': {'marker': {
+                'engine': 'marker', 'status': 'OK', 'page': 1, 'version': 'test',
+                'raw_json': str((d / 'out.json').relative_to(out))}}}
+        return res
+    return regions_ocr
+
+
+def _cross_read(run_dir, monkeypatch, marker_text, tesseract_text='Bottom line that no engine extracted at all'):
+    from scientific_ocr.adapters import extraction, quick_ocr
+    from scientific_ocr.application import processing
+    monkeypatch.setattr(extraction, 'regions_ocr', _fake_marker_regions(marker_text))
+    monkeypatch.setattr(quick_ocr, 'read', lambda png, langs: tesseract_text)
+    n = processing.cross_read(run_dir, [1], log=lambda m: None)
+    assert build(run_dir) == 0
+    return n, load(run_dir)[0]
+
+
+def test_a_box_only_docling_found_is_read_by_marker_before_review(run_dir, monkeypatch):
+    n, c = _cross_read(run_dir, monkeypatch, 'Beta paragraph only docling saw')
+    assert n >= 1
+    beta = next(b for b in c['blocks'] if 'Beta' in json.dumps(b['candidates']))
+    assert 'CROSS_READ' in beta['reasons'] and 'SINGLE_ENGINE_DOCLING' not in beta['reasons']
+    assert beta['kind'] == 'paragraph' and beta['chosen'] == {'type': 'text', 'text': 'Beta paragraph only docling saw',
+                                                               'provenance': 'crossread:marker'}
+    assert {x['engine'] for x in beta['candidates']} == {'docling', 'marker'}
+    assert beta['match']['status'] == 'matched'
+    # idempotent: nothing is read again
+    from scientific_ocr.application import processing
+    assert processing.cross_read(run_dir, [1], log=lambda m: None) == 0
+
+
+def test_a_cross_read_that_disagrees_keeps_the_excerpt_with_both_readings(run_dir, monkeypatch):
+    _, c = _cross_read(run_dir, monkeypatch, 'Completely different words entirely here')
+    beta = next(b for b in c['blocks'] if 'Beta' in json.dumps(b['candidates']))
+    assert beta['kind'] == 'excerpt' and beta['review'] == 'required'
+    assert {'CROSS_READ', 'SINGLE_ENGINE_DOCLING'} <= set(beta['reasons'])
+    assert beta['match']['status'] == 'conflict'
+
+
+def test_ink_no_engine_boxed_is_not_cross_read(run_dir, monkeypatch):
+    """Only boxes an ENGINE found are read again: uncovered ink is mostly noise the review-load work keeps quiet."""
+    from scientific_ocr.pipeline import crossread
+    from scientific_ocr.application import projection
+    ctx = next(projection.page_contexts(run_dir, [1], lambda m: None))
+    assert {t['source'] for t in crossread.targets(ctx)} <= {'docling', 'marker'}
+    _, c = _cross_read(run_dir, monkeypatch, 'Bottom line that no engine extracted at all')
+    low = next(b for b in c['blocks'] if 'UNCOVERED_INK_REGION' in b['reasons'])
+    assert 'CROSS_READ' not in low['reasons'] and not any(x['engine'] == 'marker' for x in low['candidates'])
+
+
+def test_a_box_only_marker_found_gets_tesseracts_reading_as_evidence(tmp_path, monkeypatch):
+    from conftest import docling_json
+    dj = docling_json()
+    dj['texts'] = [t for t in dj['texts'] if t['self_ref'] != '#/texts/3']          # Docling misses the caption
+    dj['body']['children'] = [x for x in dj['body']['children'] if x['$ref'] != '#/texts/3']
+    dj['pictures'][0]['captions'] = []
+    out = make_run(tmp_path, docling=dj)
+    _, c = _cross_read(out, monkeypatch, 'unused', tesseract_text='Figure 1. A caption for the figure')
+    cap = next(b for b in c['blocks'] if b['kind'] == 'caption')
+    assert 'CROSS_READ' in cap['reasons'] and 'SINGLE_ENGINE_MARKER' not in cap['reasons']
+    assert cap['match'] == {'status': 'matched', 'shape': 'crossread', 'text_similarity': 1.0}
+    assert any(x['engine'] == 'tesseract' and x['ref'] == 'crossread:tesseract' for x in cap['candidates'])

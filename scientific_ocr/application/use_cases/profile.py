@@ -10,6 +10,9 @@ from ...pipeline import entities
 from .. import build_history
 from .base import ServiceBase, ServiceError, variants_job
 
+ABOUT = 'exclusion'                     # tag of the verdicts given while reviewing the profile's exclusions
+VERDICT_EVENTS = {'entity_confirm', 'entity_assign', 'entity_remove', 'suggestion_dismiss'}
+
 
 class ProfileService(ServiceBase):
     def output_profile(self, book_id: str) -> dict:
@@ -19,14 +22,15 @@ class ProfileService(ServiceBase):
         built = (b.canonical() or {}).get('profile') or {}
         name = ev.get('profile') or profiles.DEFAULT
         st = b.events.state()
+        excluded, suggested, decided = self._live_verdicts(b, st, built)
         return {'current': name, 'overrides': ev.get('overrides') or {},
                 # decisions kept per profile (core.scopes): how many each profile has of its own
                 'decisions': {k: st['scope_counts'].get(k, 0) for k in profiles.PROFILES},
                 'built': built.get('name'), 'awaiting_rebuild': built.get('name', profiles.DEFAULT) != name,
                 'available': [{'name': k, 'el': v['el'], 'en': v['en'], 'settings': profiles.effective(k)}
                               for k, v in profiles.PROFILES.items()],
-                'excluded': built.get('excluded') or [], 'suggested': built.get('suggested') or [],
-                'pending': built.get('pending', 0), 'excluded_segments': built.get('excluded_segments', 0),
+                'excluded': excluded, 'suggested': suggested, 'decided': decided,
+                'pending': sum(1 for e in excluded if not e['confirmed'] and not e['verdict'] and e['members']), 'excluded_segments': built.get('excluded_segments', 0),
                 'pictures_not_reviewed': built.get('pictures_not_reviewed', 0),
                 'text_only_loss': built.get('text_only_loss', 0)}
 
@@ -81,14 +85,98 @@ class ProfileService(ServiceBase):
         self._reproject(b, f'Αποφάσεις από «{profiles.PROFILES[source]["el"]}»')
         return ev
 
+    # ---------------------------------------------------------------- live verdicts and their focused undo
+    # The built summary (canonical 'profile') knows the verdicts the last build saw; the log knows them NOW. A
+    # verdict given (or undone) since the build counts at once: the exclusion leaves (or re-enters) the pending
+    # list, and every verdict on an exclusion is listed with its own «Αναίρεση».
+    def _verdict_steps(self, st: dict, built: dict) -> list[list[dict]]:
+        """The reviewer's live steps about the profile's exclusions, oldest first: each a list of events (a group
+        is one step). An event belongs here when it was given from the exclusions review (`about`) or concerns an
+        exclusion/suggestion the build knows."""
+        keys = {e['key'] for e in (built.get('excluded') or []) + (built.get('suggested') or [])}
+        live = [e for e in st['history'] if e['seq'] in st['applies'] and e['type'] in VERDICT_EVENTS
+                and not str(e.get('actor', '')).startswith('system:')]
+        hit = {e.get('group') or e['seq'] for e in live if e.get('about') == ABOUT or e.get('key') in keys}
+        steps: dict = {}
+        for e in live:
+            g = e.get('group') or e['seq']
+            if g in hit:
+                steps.setdefault(g, []).append(e)
+        return sorted(steps.values(), key=lambda step: step[-1]['seq'])
+
+    @staticmethod
+    def _verdict_of(step: list[dict], e: dict) -> str:
+        if len({x['type'] for x in step}) > 1:           # dismiss/withdraw + the reviewer's entity: new boundaries
+            return 'bounds'
+        return 'confirmed' if e['type'] in ('entity_confirm', 'entity_assign') else 'kept'                                     # «not this»: it stays in the output
+
+    def _live_verdicts(self, b, st: dict, built: dict) -> tuple[list[dict], list[dict], list[dict]]:
+        """(the built exclusions with `confirmed` as it is NOW and their `verdict`, the suggestions not yet judged,
+        the verdicts listed newest first). Pending = neither confirmed nor judged."""
+        latest: dict = {}
+        for step in self._verdict_steps(st, built):
+            for e in step:
+                latest[e['key']] = (step, e)
+        known = {e['key']: e for e in (built.get('excluded') or []) + (built.get('suggested') or [])}
+        ents = {e['key']: e for e in (b.canonical() or {}).get('entities', [])}
+        excursus = {x['id'] for x in st['excursus']}
+        excluded = []
+        for e in built.get('excluded') or []:
+            hit = latest.get(e['key'])
+            if hit:
+                v = self._verdict_of(*hit)
+                excluded.append({**e, 'confirmed': v == 'confirmed', 'verdict': v})
+            elif e.get('confirmed') and e['key'] not in excursus and e['key'] not in st['assigned']:
+                excluded.append({**e, 'confirmed': False, 'verdict': None})   # its confirmation was undone
+            else:
+                excluded.append({**e, 'verdict': None})
+        decided, seen = [], set()
+        for key, (step, e) in sorted(latest.items(), key=lambda kv: -kv[1][1]['seq']):
+            if any(x['seq'] in seen for x in step) and len({x['type'] for x in step}) > 1:
+                continue                                  # a boundary correction is ONE row (its two events)
+            seen |= {x['seq'] for x in step}
+            info = known.get(key) or ents.get(key) or next((known.get(x['key']) or ents.get(x['key']) for x in step
+                                                             if known.get(x['key']) or ents.get(x['key'])), None) or {}
+            decided.append({'key': key, 'verdict': self._verdict_of(step, e), 'seq': e['seq'], 'ts': e.get('ts'),
+                            'type': info.get('type') or e.get('entity_type') or '', 'pages': info.get('pages') or [],
+                            'first': info.get('first') or info.get('label') or '', 'n': info.get('n') or len(info.get('members') or []),
+                            'members': info.get('members') or e.get('members') or []})
+        suggested = [e for e in built.get('suggested') or [] if e['key'] not in latest]
+        return excluded, suggested, decided
+
+    def undo_exclusion(self, book_id: str, key: str | None = None, actor='reviewer') -> dict:
+        """The undo of the exclusions review: the LAST step about the profile's exclusions (key None) — the same as
+        the general undo, only focused — or the latest verdict on exclusion `key` (from a step that judged many
+        at once, only that one; a boundary correction whole). Redo brings it back, like any undo."""
+        b = self._book(book_id)
+        built = (b.canonical() or {}).get('profile') or {}
+        undone_keys: list[str] = []
+
+        def pick(st):
+            steps = self._verdict_steps(st, built)
+            if key is None:
+                step = steps[-1] if steps else []
+                events = step
+            else:
+                step = next((s for s in reversed(steps) if any(e['key'] == key for e in s)), [])
+                events = step if len({e['type'] for e in step}) > 1 else [e for e in step if e['key'] == key]
+            undone_keys[:] = [e['key'] for e in events]
+            return [e['seq'] for e in events]
+
+        out = b.events.undo_seqs(pick, actor)
+        if not out:
+            raise ServiceError('no exclusion verdict to undo')
+        self._after_undo_redo(b, out, 'Αναίρεση απόφασης εξαίρεσης')
+        return {'undone': out[0]['targets'], 'keys': undone_keys}
+
     def confirm_exclusions(self, book_id: str, keys: list[str] | None = None, actor='reviewer') -> dict:
         """Confirm the boundaries of automatic exclusions (all pending ones when keys is None): one undoable step."""
-        built = (self._book(book_id).canonical() or {}).get('profile') or {}
-        pending = [e['key'] for e in built.get('excluded') or [] if not e.get('confirmed') and e.get('members')]
+        pending = [e['key'] for e in self.output_profile(book_id)['excluded']
+                   if not e['confirmed'] and not e['verdict'] and e.get('members')]
         keys = pending if keys is None else [k for k in keys if k in pending]
         if not keys:
             raise ServiceError('nothing to confirm')
-        return self.confirm_entities(book_id, keys, None, actor)
+        return self.confirm_entities(book_id, keys, None, actor, about=ABOUT)
 
     def exclude_suggested(self, book_id: str, keys: list[str], actor='reviewer') -> dict:
         """A suggested exclusion (no independent boundary evidence) accepted by the reviewer: it is verified, so
@@ -98,7 +186,7 @@ class ProfileService(ServiceBase):
         keys = [k for k in keys or [] if k in known]
         if not keys:
             raise ServiceError('unknown suggestion')
-        return self.confirm_entities(book_id, keys, None, actor)
+        return self.confirm_entities(book_id, keys, None, actor, about=ABOUT)
 
     def start_rag_context(self, book_id: str) -> dict:
         """Optional: situating sentences for the RAG chunks by the local model (application.rag_context), as a job."""
@@ -126,14 +214,14 @@ class ProfileService(ServiceBase):
             raise ServiceError(str(exc)) from None
         if members == e['members']:
             raise ServiceError('the boundaries are the same')
-        drop = {'type': 'entity_remove', 'key': key} if e['granularity'] == 'human' \
-            else {'type': 'suggestion_dismiss', 'key': key, 'boundary': True}
+        drop = {'type': 'entity_remove', 'key': key, 'about': ABOUT} if e['granularity'] == 'human' \
+            else {'type': 'suggestion_dismiss', 'key': key, 'boundary': True, 'about': ABOUT}
         evs = self._append(b, drop, {'type': 'entity_assign', 'key': entities.human_key(members), 'members': members,
-                                     'entity_type': e['type']}, actor=actor)      # one step (and inside a batch)
+                                     'entity_type': e['type'], 'about': ABOUT}, actor=actor)      # one step (and inside a batch)
         self._reproject(b, f'Νέα όρια: {len(members)} τμήματα')
         return {'key': evs[1]['key'], 'members': members}
 
     def keep_in_output(self, book_id: str, key: str, actor='reviewer') -> dict:
         """«Not this»: the detection was wrong (not a question, a history note…) — it is dismissed and its segments
         stay in the output. (A right type with wrong boundaries: set_entity_bounds.)"""
-        return self.remove_entity(book_id, key, actor)
+        return self.remove_entity(book_id, key, actor, about=ABOUT)

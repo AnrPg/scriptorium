@@ -1,6 +1,7 @@
 /* Scientific OCR — local review app (no frameworks, no remote assets, no build step).
    Entry point: imports the modules and runs the load-time wiring in its original order. */
 import { doRedo, doUndo, poll, renderJobsPop } from './core/chrome.js';
+import { boundResync } from './inspector/boundloop.js';
 import { $, installOverflowTitles } from './core/dom.js';
 import { EMBED } from './ui/page_overlay.js';     // embedded page mode (?embed=1) before the first render
 import { onKeydown, showHelp } from './core/keyboard.js';
@@ -34,7 +35,7 @@ window.addEventListener('hashchange', render);
 $('#btn-back').onclick = () => navStep(-1);
 $('#btn-fwd').onclick = () => navStep(1);
 
-$('#btn-undo').onclick = doUndo; $('#btn-redo').onclick = doRedo;
+$('#btn-undo').onclick = () => doUndo().then(() => boundResync()); $('#btn-redo').onclick = () => doRedo().then(() => boundResync());
 
 $('#jobs-pill').onclick = () => { const p = $('#jobs-pop'); p.hidden = !p.hidden; if (!p.hidden) renderJobsPop(); };
 document.addEventListener('keydown', onKeydown);

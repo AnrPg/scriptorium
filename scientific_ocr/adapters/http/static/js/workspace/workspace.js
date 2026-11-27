@@ -159,13 +159,26 @@ function splitter(ws) {
 }
 // Small screens: the tools of the view live behind one "⋯" button (a vertical menu) instead of a wall of buttons,
 // so the page keeps the screen. The button is marked while a mode (region, selection) is on, so state stays visible.
+// The toolbar, by what each part is FOR (one row each, never three):
+//   row 1 — the page and how it is shown: ‹ n/N › · state · view switch · display tools (zoom, boxes) · ⋯
+//   row 2 — the review: the loop selector (always first, same place) + what the chosen loop needs, then the editing
+//           tools (region, multi-select, out of output). A typo / exclusion loop's bar takes the whole row and the
+//           editing tools step into ⋯ while it is on.
+// ⋯ holds what is not on show: the rare page actions (careful re-examination) and, on narrow screens, every tool.
+const DISPLAY_TOOLS = ['zoom', 'boxes'], EDIT_TOOLS = ['region', 'select', 'omit'];
 function toolsMenu() {
   const active = S.drawing || S.selectMode || omitState();
+  const shown = new Set([...DISPLAY_TOOLS, ...(specialLoop() ? [] : EDIT_TOOLS)]);
   const d = h('details', { class: 'ws-more' + (active ? ' active' : '') },
-    h('summary', { title: 'Εργαλεία: ζουμ, πλαίσια, περιοχή, επιλογή, εκτός εξόδου, επανεξέταση', 'aria-label': 'Εργαλεία' }, '⋯'),
-    h('div', { class: 'ws-more-menu', role: 'menu' }, toolsFor(S.leftView).map(t => TOOLS[t]())));
+    h('summary', { title: 'Περισσότερα εργαλεία', 'aria-label': 'Περισσότερα εργαλεία' }, '⋯'),
+    h('div', { class: 'ws-more-menu', role: 'menu' }, toolsFor(S.leftView).map(t => {
+      const el = TOOLS[t]();
+      if (shown.has(t)) el.classList.add('in-bar');        // shown in a row on wide screens: only narrow ones list it here
+      return el;
+    })));
   return d;
 }
+const barTools = (names) => toolsFor(S.leftView).filter(t => names.includes(t)).map(t => TOOLS[t]());
 document.addEventListener('pointerdown', (e) => {
   document.querySelectorAll('details.ws-more[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
 }, true);
@@ -183,22 +196,15 @@ export function buildWorkspace() {
       (() => { const txt = processed ? (info.state === 'needs_review' ? `${info.required} για έλεγχο` : STATE_EL[info.state]) : STATE_EL.not_processed;
         const short = processed && info.state === 'needs_review' ? [String(info.required), h('span', { class: 'wide-only' }, ' για έλεγχο')] : [txt];
         return h('span', { class: 'chip page-state st-' + (processed ? info.state : 'not_processed'), title: txt, 'aria-label': txt }, ...short); })(),
-      // the whole-book review loop, always reachable (also with no segment selected): errors and warnings, any page
-      processed ? h('div', { class: 'seg-ctl review-loop' },
-        h('button', { onclick: () => stepReview(-1), title: 'Προηγούμενο προς έλεγχο, σε όλο το βιβλίο (K)', 'aria-label': 'Προηγούμενο προς έλεγχο' }, '↑'),
-        h('button', { class: 'primary', onclick: () => stepReview(1), title: `Επόμενο προς έλεγχο (${LOOP_EL[loopLevel()]}), σε όλο το βιβλίο· αλλάζει σελίδα μόνο του (J)` },
-          h('span', { class: 'wide-only' }, 'Επόμενο για έλεγχο '), '↓', h('kbd', {}, 'J')),
-        loopSelect()) : null,
       h('span', { class: 'spacer' }),
       processed ? h('div', { class: 'seg-ctl view-switch', role: 'tablist' }, VIEWS.map(([k, l, t], i) =>
         h('button', { class: S.leftView === k ? 'on' : '', role: 'tab', 'aria-selected': S.leftView === k ? 'true' : 'false', title: `${l} (${i + 1}) — ${t}`, 'aria-label': l,
           onclick: () => setView(k) }, h('span', { class: 'wide-only' }, l), h('span', { class: 'narrow-only' }, VIEWS[i][3]), h('kbd', {}, String(i + 1))))) : null,
       processed ? h('select', { class: 'view-select', 'aria-label': 'Προβολή', title: 'Προβολή: σάρωση, αποτέλεσμα ή Markdown', onchange: (e) => setView(e.target.value) },
         VIEWS.map(([k, l]) => h('option', { value: k, selected: S.leftView === k }, l))) : null,
+      processed ? h('div', { class: 'ws-actions' }, barTools(DISPLAY_TOOLS)) : null,
       processed ? toolsMenu() : null),
-    processed ? h('div', { class: 'ws-row ws-actions' }, toolsFor(S.leftView).map(t => TOOLS[t]())) : null,
-    boundActive() ? boundBar() : null,
-    typoActive() ? typoBar() : null));
+    processed ? reviewRow() : null));
   const wrap = h('div', { class: 'canvas-wrap', 'data-keep-scroll': 'canvas' }); left.append(wrap);
   if (processed && S.leftView !== 'scan') { outputView(wrap, b, n); renderInspector(right); return; }
   const dims = pg.dims || [600, 800];
@@ -246,7 +252,9 @@ export function buildWorkspace() {
     h('button', { class: 'primary', onclick: (e) => { e.stopPropagation(); act(() => api(`${B(b.id)}/pages/${n}/suggestions/${s.key}/accept`, { body: {} }), 'Συγχώνευση πλαισίων· τρέχει νέο OCR για την περιοχή'); } }, 'Συγχώνευση & νέο OCR'))));
   if (S.draft) drawDraft(canvas, dims, pct);
   canvas.addEventListener('mousedown', (e) => { if (S.drawing && e.button === 0 && e.target.closest('.draft-menu') === null) startDraw(e, canvas, dims); });
-  canvas.addEventListener('click', (e) => { if (!S.drawing && (e.target === canvas.querySelector('img') || e.target === canvas)) deselectBlock(); });
+  canvas.addEventListener('click', (e) => { if (!S.drawing && (e.target === canvas.querySelector('img') || e.target === canvas)) { S.draft = null; deselectBlock(); } });
+  // a click anywhere around the page (outside its picture) also cancels a region not yet applied
+  wrap.addEventListener('mousedown', (e) => { if (S.draft && e.button === 0 && !canvas.contains(e.target)) cancelDraft(); });
   if (!processed) {
     wrap.append(h('div', { class: 'card', style: { position: 'absolute', top: '40px', left: '50%', transform: 'translateX(-50%)', padding: '16px 20px', textAlign: 'center' } },
       h('div', { style: { marginBottom: '8px' } }, 'Αυτή η σελίδα δεν έχει επεξεργαστεί.'),
@@ -267,19 +275,34 @@ export function buildWorkspace() {
 // (inspector/reviewloop.js); typos and the profile's exclusions are loops with their own bar (typoloop.js,
 // boundloop.js). Every one of them centres its item on each step (workspace/reveal.js).
 const LOOP_EL = { required: 'λάθη', all: 'λάθη και προειδοποιήσεις', recommended: 'προειδοποιήσεις' };
+const specialLoop = () => boundActive() || typoActive();
+/** Row 2: ONE loop surface — the selector first, then the chosen loop's controls (errors/warnings: ↑ Επόμενο ↓;
+ *  typos / exclusions: their own bar, which takes the row); the editing tools at the end. */
+function reviewRow() {
+  if (boundActive()) return h('div', { class: 'ws-row ws-review special' }, boundBar(loopSelect()));
+  if (typoActive()) return h('div', { class: 'ws-row ws-review special' }, typoBar(loopSelect()));
+  return h('div', { class: 'ws-row ws-review' },
+    h('div', { class: 'seg-ctl review-loop' }, loopSelect(),
+      h('button', { onclick: () => stepReview(-1), title: 'Προηγούμενο προς έλεγχο, σε όλο το βιβλίο (K)', 'aria-label': 'Προηγούμενο προς έλεγχο' }, '↑'),
+      h('button', { class: 'primary', onclick: () => stepReview(1), title: `Επόμενο προς έλεγχο (${LOOP_EL[loopLevel()]}), σε όλο το βιβλίο· αλλάζει σελίδα μόνο του (J)` },
+        h('span', { class: 'wide-only' }, 'Επόμενο για έλεγχο '), '↓', h('kbd', {}, 'J'))),
+    h('span', { class: 'spacer' }),
+    h('div', { class: 'ws-actions' }, barTools(EDIT_TOOLS)));
+}
 function loopSelect() {
   const cur = S.typo ? 'typos' : S.bound ? 'bound' : loopLevel();
   const sel = h('select', { class: 'loop-level small', 'aria-label': 'Τι διατρέχει ο έλεγχος', title: 'Τι διατρέχει το «Επόμενο για έλεγχο» (J/K)',
     onchange: () => {
       const v = sel.value;
-      if (v === 'typos') return startTypoLoop();
-      if (v === 'bound') return startBoundLoop();
+      // nothing to walk (the loop did not start): the selector shows again what is really walked
+      if (v === 'typos') return startTypoLoop().then(() => { if (!S.typo) renderWorkspace(); });
+      if (v === 'bound') return startBoundLoop().then(() => { if (!S.bound) renderWorkspace(); });
       S.typo = null; S.bound = null;
       setLoopLevel(v); renderWorkspace();
     } },
     h('option', { value: 'required' }, 'Λάθη'), h('option', { value: 'all' }, 'Λάθη + προειδοποιήσεις'),
     h('option', { value: 'recommended' }, 'Προειδοποιήσεις'), h('option', { value: 'typos' }, 'Τυπογραφικά'),
-    S.book.output_profile && S.book.output_profile !== 'reading' ? h('option', { value: 'bound' }, 'Εξαιρέσεις προφίλ') : null);
+    S.book.output_profile && S.book.output_profile !== 'reading' ? h('option', { value: 'bound', title: 'Οι αυτόματες εξαιρέσεις του προφίλ εξόδου: επιβεβαίωση ορίων' }, 'Εξαιρέσεις') : null);
   sel.value = cur;
   return sel;
 }
@@ -297,6 +320,8 @@ export function canvasPoint(e, canvas, dims) {
   const r = canvas.getBoundingClientRect();
   return [Math.max(0, Math.min(dims[0], (e.clientX - r.left) / r.width * dims[0])), Math.max(0, Math.min(dims[1], (e.clientY - r.top) / r.height * dims[1]))];
 }
+/** The drawn (or re-drawn) region not yet applied is dropped; the drawing mode stays on for a new one. */
+export function cancelDraft() { S.draft = null; renderWorkspace(); }
 export function startDraw(e, canvas, dims) {
   e.preventDefault();
   const a = canvasPoint(e, canvas, dims);
@@ -305,7 +330,8 @@ export function startDraw(e, canvas, dims) {
     Object.assign(ghost.style, pctStyle(bb, dims)); ghost.dataset.bb = JSON.stringify(bb); };
   const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up);
     const bb = ghost.dataset.bb && JSON.parse(ghost.dataset.bb); ghost.remove();
-    if (bb && bb[2] - bb[0] > 6 && bb[3] - bb[1] > 6) { S.draft = { bbox: bb, label: { engine: 'marker', name: 'Text' }, replaces: [] }; renderWorkspace(); } };
+    if (bb && bb[2] - bb[0] > 6 && bb[3] - bb[1] > 6) { S.draft = { bbox: bb, label: { engine: 'marker', name: 'Text' }, replaces: [] }; renderWorkspace(); }
+    else if (S.draft) cancelDraft(); };              // a plain click (no drag): the region drawn so far is cancelled
   window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
 }
 export function startResize(e, canvas, blk, corner, dims) {

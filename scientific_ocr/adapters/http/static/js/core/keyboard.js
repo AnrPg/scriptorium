@@ -1,6 +1,6 @@
 import { B } from '../core/api.js';
 import { stepReview } from '../inspector/reviewloop.js';
-import { boundActive, boundDecide, boundEdit, boundEditing, boundSaveEdit, boundSetEdge, boundStep, boundToggleEnd, stopBoundLoop } from '../inspector/boundloop.js';
+import { boundActive, boundDecide, boundEdit, boundEditing, boundSaveEdit, boundSetEdge, boundStep, boundResync, boundToggleEnd, boundUndo, stopBoundLoop } from '../inspector/boundloop.js';
 import { stopTypoLoop, typoActive, typoDecide, typoStep } from '../inspector/typoloop.js';
 import { doRedo, doUndo } from '../core/chrome.js';
 import { $, h, isTyping } from '../core/dom.js';
@@ -22,8 +22,8 @@ export const K = (key, { mod = false, shift = null, alt = false } = {}) => (e) =
 export const inWs = (c) => S.route?.view === 'ws' && !c.inDialog;
 export const free = (c) => inWs(c) && !c.typing;                 // workspace, not typing in a field
 export const SHORTCUTS = [
-  { keys: '⌘Z', label: 'Αναίρεση', group: 'always', match: K('z', { mod: true, shift: false }), when: c => !c.typing && !c.inDialog, run: () => doUndo() },
-  { keys: '⇧⌘Z', label: 'Επανάληψη', group: 'always', match: K('z', { mod: true, shift: true }), when: c => !c.typing && !c.inDialog, run: () => doRedo() },
+  { keys: '⌘Z', label: 'Αναίρεση', group: 'always', match: K('z', { mod: true, shift: false }), when: c => !c.typing && !c.inDialog, run: () => doUndo().then(() => boundResync()) },
+  { keys: '⇧⌘Z', label: 'Επανάληψη', group: 'always', match: K('z', { mod: true, shift: true }), when: c => !c.typing && !c.inDialog, run: () => doRedo().then(() => boundResync()) },
   { keys: 'Alt+← / Alt+→', label: 'Πίσω / εμπρός στη διαδρομή σου (οθόνες που είδες)', group: 'always',
     match: K(['ArrowLeft', 'ArrowRight'], { alt: true }), when: c => !c.typing && !c.inDialog, run: (e) => navStep(e.key === 'ArrowLeft' ? -1 : 1) },
   { keys: '?', label: 'Συντομεύσεις', group: 'always', match: K('?'), when: c => !c.typing && !c.inDialog, run: () => showHelp() },
@@ -38,6 +38,7 @@ export const SHORTCUTS = [
   { keys: '↵', label: 'Όρια εξαίρεσης σωστά → επόμενη', group: 'bound', match: K('Enter'), when: (c, e) => free(c) && boundActive() && !boundEditing() && !S.multi.size && !enterOwnedBy(e), run: () => boundDecide(true) },
   { keys: 'X', label: 'Όχι αυτό (μένει στην έξοδο) → επόμενη', group: 'bound', match: K('x'), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundDecide(false) },
   { keys: 'J / K', label: 'Επόμενη / προηγούμενη εξαίρεση', group: 'bound', match: K(['j', 'k']), when: c => free(c) && boundActive(), run: (e) => boundStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
+  { keys: 'U', label: 'Αναίρεση της τελευταίας απόφασης για εξαίρεση', group: 'bound', match: K(['u', 'θ']), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundUndo() },
   { keys: 'T', label: 'Σελίδα αρχής / τέλους της εξαίρεσης', group: 'bound', match: K('t'), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundToggleEnd() },
   { keys: 'Esc', label: 'Έξοδος από τον έλεγχο ορίων', group: 'bound', match: K('Escape'), when: c => free(c) && boundActive() && !S.sel && !S.multi.size, run: () => stopBoundLoop() },
   // the loop over the spelling proposals (inspector/typoloop.js) owns these keys while it is on

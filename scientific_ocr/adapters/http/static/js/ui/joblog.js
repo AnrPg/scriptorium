@@ -30,7 +30,7 @@ const delta = ([a, b]) => { const d = b - a; return `${a} → ${b} (${d > 0 ? '+
 // A finding type is named by the reason that raises it (core/reasons.py: reason.finding = [type, severity]).
 const FINDING_EL = { REVIEW_REQUIRED: 'Τμήματα για έλεγχο', INTEGRITY_CONTENT_NOT_EXPORTED: 'Περιεχόμενο που λείπει από την έξοδο',
   INTEGRITY_PAGE_MISSING: 'Σελίδα χωρίς περιεχόμενο', ENGINE_FAILED: 'Αποτυχία μηχανής OCR' };
-const findingName = (t) => {
+export const findingName = (t) => {
   if (FINDING_EL[t]) return FINDING_EL[t];
   const r = Object.values((S.meta && S.meta.reasons) || {}).find(x => x.finding && x.finding[0] === t) || R(t);
   return r && r.el && r.el !== t ? r.el : t.toLowerCase().replaceAll('_', ' ');

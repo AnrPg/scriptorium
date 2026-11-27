@@ -1520,3 +1520,13 @@ def test_undo_of_a_built_action_restores_the_kept_build_at_once_and_redo_comes_b
     (out / 'book.json').write_text(json.dumps({**bj, 'ocr_lang': 'eng'}))
     a.undo('run')
     assert (out / 'chapter.md').read_text() == md1 and a.jobs.submitted[-1] == ('reproject', 'light')
+
+
+def test_findings_keep_the_build_they_first_appeared_in(tmp_path):
+    """The UI points a «critical finding» toast at what the rebuild ADDED: a finding carried over from the previous
+    build keeps its first_seen, a new one gets this build's time."""
+    from scientific_ocr.application import projection
+    (tmp_path / 'canonical.json').write_text(json.dumps({'findings': [{'id': 'Fold', 'first_seen': 't1'}]}))
+    c = {'run': {'built_utc': 't2'}, 'findings': [{'id': 'Fold'}, {'id': 'Fnew'}]}
+    projection._mark_first_seen(c, tmp_path)
+    assert [f['first_seen'] for f in c['findings']] == ['t1', 't2']

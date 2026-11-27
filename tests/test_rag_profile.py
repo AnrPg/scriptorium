@@ -272,3 +272,45 @@ def test_a_picture_caption_goes_to_the_end_of_its_section_right_before_the_next_
     assert md[:4] == ['## Ενότητα Α', 'Όπως δείχνει η Εικόνα 1-4, το κύτταρο.', 'Η ενότητα συνεχίζει.',
                       'Λεπτομέρεια. Κι άλλο κείμενο.']
     assert md[4] == 'ΕΙΚΟΝΑ 1-4: Ένα κύτταρο.' and md[5].strip() == '## Ενότητα Β'
+
+
+def test_an_exclusion_verdict_is_undone_on_its_own_even_after_other_actions(tmp_path):
+    """The exclusions review has its own undo: the latest verdict on one exclusion (from «Όλα σωστά», only that
+    one), or the last exclusion step (like Ctrl-Z, focused); later unrelated actions stay. A verdict counts at once
+    (before any rebuild) and a confirmation undone since the build makes the exclusion pending again."""
+    from scientific_ocr.adapters.storage import Library
+    from scientific_ocr.application.services import App, ServiceError
+    from test_application import FakeJobs
+    out = make_run(tmp_path)
+    lib = Library(tmp_path)
+    lib.adopt(out)
+    assert build(out) == 0
+    app = App(lib, FakeJobs())
+    ids = [b['id'] for b in app.page('run', 1)['blocks'] if b.get('flow') != 'furniture']
+    c = json.loads((out / 'canonical.json').read_text())
+    c['entities'] = [{'key': k, 'type': 'question', 'granularity': 'box', 'members': [ids[i]], 'pages': [1],
+                      'verified': k == 'D'} for i, k in enumerate('ABCD')]
+    c['profile'] = {'name': 'rag', 'suggested': [],
+                    'excluded': [{'key': k, 'type': 'question', 'members': [ids[i]], 'pages': [1], 'n': 1,
+                                  'confirmed': k == 'D'} for i, k in enumerate('ABCD')]}
+    (out / 'canonical.json').write_text(json.dumps(c))
+    pending = lambda: sorted(e['key'] for e in app.output_profile('run')['excluded'] if not e['confirmed'] and not e['verdict'])
+    assert pending() == ['A', 'B', 'C', 'D']                        # D's confirmation is not in the log
+    with pytest.raises(ServiceError):
+        app.undo_exclusion('run')                                   # nothing judged yet
+    EventStore(out).append({'type': 'entity_confirm', 'key': 'D', 'entity_type': 'question'})   # the one the build saw
+    assert pending() == ['A', 'B', 'C'] and app.output_profile('run')['pending'] == 3
+    app.confirm_exclusions('run')                                   # «Όλα σωστά»: one step
+    assert pending() == [] and len(app.output_profile('run')['decided']) == 4
+    EventStore(out).append({'type': 'block_hide', 'block_id': ids[-1]})       # an unrelated later action
+    r = app.undo_exclusion('run', 'B')
+    assert r['keys'] == ['B'] and pending() == ['B']
+    assert ids[-1] in EventStore(out).state()['hidden']            # the later action stays
+    app.keep_in_output('run', 'B')                                  # «not this»
+    assert pending() == [] and next(d for d in app.output_profile('run')['decided'] if d['key'] == 'B')['verdict'] == 'kept'
+    assert app.undo_exclusion('run')['keys'] == ['B']               # the last exclusion step
+    assert sorted(app.undo_exclusion('run')['keys']) == ['A', 'C'] and pending() == ['A', 'B', 'C']
+    app.redo('run')                                                 # an ordinary undo: redo brings it back
+    assert pending() == ['B']
+    app.undo_exclusion('run', 'D')                                  # confirmed when built, undone since -> pending
+    assert pending() == ['B', 'D']

@@ -36,6 +36,7 @@ class PageContext:
     imaging: object = None                               # ports.PageImaging (injected by the application)
     quick_ocr: object = None                             # ports.QuickOcr (injected; None = no OCR evidence)
     ocr_lang: str = 'ell,eng'
+    cross: dict = field(default_factory=dict)            # block id -> cross-reading record (pipeline.crossread)
     _crop_zoom: float | None = None                      # zoom crops of this page are rendered at (cached)
 
     @classmethod

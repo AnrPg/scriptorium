@@ -130,6 +130,8 @@ details>div{padding:0 10px 10px} .cand{border-top:1px dashed var(--line);padding
 /* toasts, dialog, drop */
 .toasts{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:50}
 .toast{background:#1c1c1e;color:#fff;border-radius:8px;padding:10px 14px;display:flex;gap:14px;align-items:center;box-shadow:var(--sh);font-size:13px}
+.toast.link{cursor:pointer} .toast.link:hover{filter:brightness(1.1)}
+.list-item.new-finding{background:var(--bad-weak);box-shadow:inset 3px 0 0 var(--bad)}
 .toast button{background:transparent;color:#9ec1ff;border:0;padding:0;font-weight:600} .toast.err{background:var(--bad)}
 dialog{border:1px solid var(--line);border-radius:12px;box-shadow:var(--sh);padding:20px;width:min(520px,92vw)}
 dialog::backdrop{background:rgba(0,0,0,.25)} dialog .row.end{justify-content:flex-end;margin-top:16px}
@@ -458,7 +460,7 @@ button.view-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
 .ws-tools .review-loop{flex:0 0 auto;align-items:stretch;height:34px}
 .review-loop button{display:inline-flex;gap:6px;align-items:center;white-space:nowrap;padding:0 10px;min-height:0;height:100%}
 .review-loop .primary kbd{background:rgba(255,255,255,.2);color:inherit;border-color:transparent}
-.review-loop select.loop-level{width:auto;max-width:240px;height:100%;border:0;border-left:1px solid var(--line2);border-radius:0;
+.review-loop select.loop-level{width:auto;max-width:240px;height:100%;border:0;border-right:1px solid var(--line2);border-radius:0;
   padding:0 26px 0 10px;font-size:13px;color:var(--fg);background-color:var(--panel);cursor:pointer;white-space:nowrap}
 
 .row.end button.busy{cursor:progress;opacity:.75}.row.end button.busy::after{content:"…"}
@@ -490,3 +492,48 @@ details.section>summary{font-size:15px;padding:12px 2px}
 details.section>div{padding:0 0 14px}
 label.list-item{cursor:pointer}
 .typo-bar{flex-wrap:wrap;row-gap:6px}.typo-bar .typo-ctx{min-width:0;max-width:42ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.typo-bar .typo-fix{width:170px;flex:none}
+/* the loop selector inside a special loop's bar (typos / exclusions): the bar is the one loop surface */
+.bound-bar select.loop-level{width:auto;max-width:220px;flex:none;height:30px;padding:0 26px 0 10px;font-size:13px;font-weight:600;
+  border:1px solid #d8c6fb;border-radius:6px;background-color:rgba(255,255,255,.7);color:var(--fg);cursor:pointer}
+@media (prefers-color-scheme: dark){.bound-bar select.loop-level{border-color:#5b3fa3;background-color:rgba(0,0,0,.25)}}
+/* toolbar by purpose (workspace.js buildWorkspace): row 1 page + view, row 2 review loop + editing tools */
+.ws-tools .ws-actions{display:flex;gap:6px;flex:none;align-items:center}
+.ws-tools .ws-actions>*{flex:none;min-width:0}
+.ws-tools .ws-actions>button{height:34px;padding:0 10px;white-space:nowrap}
+.ws-tools .ws-more{display:block}
+.ws-review{flex-wrap:nowrap}
+.ws-review.special>.bound-bar{flex:1 1 auto;min-width:0}
+.ws-review.special>.bound-bar{flex-wrap:nowrap;gap:6px;padding:4px 6px}
+.ws-review.special>.bound-bar>*{flex:none}
+.ws-review.special>.bound-bar .typo-ctx{flex:1 1 auto;min-width:40px;max-width:none}
+.ws-review.special>.bound-bar .bound-type{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-review.special>.bound-bar .typo-fix{width:130px}
+.ws-review.special>.bound-bar button{white-space:nowrap}
+/* the toolbar adapts to the width of the PAGE PANE (also when the side panel is dragged), never to three rows:
+   first the key hints go, then the tools step into ⋯ (in-bar items are listed there only then) */
+.ws-tools{container-type:inline-size;container-name:wstools}
+.ws-more-menu .in-bar{display:none}
+@container wstools (max-width:940px){
+  .ws-tools kbd{display:none}
+  .ws-tools select.loop-level{max-width:170px}
+  .ws-review.special>.bound-bar .typo-fix{width:110px}
+}
+@container wstools (max-width:780px){
+  .ws-tools .ws-actions{display:none}
+  .ws-more-menu .in-bar{display:flex}
+  .ws-tools select.loop-level{max-width:150px}
+  .ws-review.special>.bound-bar{gap:4px}
+  .ws-review.special>.bound-bar button{padding:0 8px}
+  .ws-review.special>.bound-bar .ctx-side{display:none}           /* the word itself stays (also marked on the page) */
+  .ws-review.special>.bound-bar .typo-ctx{flex:0 1 auto}
+  .ws-review.special>.bound-bar .typo-strong{font-size:0;width:9px;height:9px;padding:0;border-radius:50%;background:currentColor}
+  .ws-review.special>.bound-bar .typo-fix{width:100px}
+}
+@container wstools (max-width:620px){
+  .ws-review.special>.bound-bar{flex-wrap:wrap}
+}
+/* drawing a region (R): the page's boxes are inert — no hover, no selection, no tag; the first press starts the
+   region wherever it is, also on top of a box (workspace.js startDraw) */
+.canvas.drawing .ws-box:not(.draft){pointer-events:none;opacity:.55}
+.canvas.drawing .ws-box:not(.draft) .tag{display:none}
+.canvas.drawing .ws-box.draft{pointer-events:none}

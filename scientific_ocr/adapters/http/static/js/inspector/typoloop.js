@@ -65,22 +65,23 @@ export function typoDecide(fix) {
 }
 
 /** The bar above the page while the loop is on. */
-export function typoBar() {
+export function typoBar(lead = null) {   // lead: the loop selector (workspace), first in the bar
   const s = S.typo, t = typoCurrent();
   const left = s.items.length - s.done.size;
   const listId = 'typo-cands';
   const why = (v) => { const c = t.candidates.find(x => x.text === v); return c ? c.why.map(w => WHY_EL[w] || w).join(', ') : (v.trim() ? 'δική σου' : ''); };
-  const ev = h('span', { class: 'small mut' }, why(s.text || ''));
+  const ev = { set textContent(v) { input.title = v ? `Ένδειξη: ${v}` : ''; } };   // the evidence: the field's tooltip
   const input = h('input', { type: 'text', class: 'small typo-fix', list: listId, value: s.text || '', spellcheck: 'false', lang: 'el',
     'aria-label': `Διόρθωση για «${t.word}»`,
     oninput: (e) => { s.text = e.target.value; ev.textContent = why(s.text); },
+    title: why(s.text || '') ? `Ένδειξη: ${why(s.text || '')}` : '',
     onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); typoDecide(true); } else if (e.key === 'Escape') e.target.blur(); } });
   return h('div', { class: 'ws-row bound-bar typo-bar', role: 'region', 'aria-label': 'Έλεγχος τυπογραφικών' },
-    h('b', {}, `Τυπογραφικό ${s.i + 1} / ${s.items.length}`), h('span', { class: 'small mut' }, `(${left} απομένουν · σελ. ${t.page})`),
-    t.strength === 'strong' ? h('span', { class: 'chip rv-approved', title: 'Δύο ανεξάρτητες ενδείξεις' }, 'ισχυρή') : null,
-    h('span', { class: 'small typo-ctx' }, h('span', { class: 'mut' }, '…' + t.before + ' '), h('b', { class: 'kpi-bad' }, t.word), h('span', { class: 'mut' }, ' ' + t.after + '…')),
-    h('span', {}, '→'), input, h('datalist', { id: listId }, t.candidates.map(c => h('option', { value: c.text }, c.why.map(w => WHY_EL[w] || w).join(', ')))), ev,
-    h('span', { class: 'spacer' }),
+      lead,
+    h('b', { class: 'nowrap', title: `Τυπογραφικό ${s.i + 1} από ${s.items.length} · ${left} απομένουν · σελ. ${t.page}` }, `${s.i + 1} / ${s.items.length}`),
+    t.strength === 'strong' ? h('span', { class: 'chip rv-approved typo-strong', title: 'Ισχυρή: δύο ανεξάρτητες ενδείξεις' }, 'ισχυρή') : null,
+    h('span', { class: 'small typo-ctx', title: `…${t.before} ${t.word} ${t.after}…` }, h('span', { class: 'mut ctx-side' }, '…' + t.before + ' '), h('b', { class: 'kpi-bad' }, t.word), h('span', { class: 'mut ctx-side' }, ' ' + t.after + '…')),
+    h('span', {}, '→'), input, h('datalist', { id: listId }, t.candidates.map(c => h('option', { value: c.text }, c.why.map(w => WHY_EL[w] || w).join(', ')))),
     h('button', { class: 'small', onclick: () => typoStep(-1), title: 'Προηγούμενο (K)' }, '↑', h('kbd', {}, 'K')),
     h('button', { class: 'small ghost', onclick: () => typoDecide(false), title: 'Η λέξη είναι σωστή όπως είναι· δεν ξαναπροτείνεται (X)' }, 'Σωστό ως έχει', h('kbd', {}, 'X')),
     h('button', { class: 'small primary', onclick: () => typoDecide(true), title: 'Διόρθωση της λέξης (↵)' }, 'Διόρθωση', h('kbd', {}, '↵')),

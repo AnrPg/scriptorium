@@ -35,7 +35,8 @@ class EntityService(ServiceBase):
         return {'entities': out, 'stats': c.get('entity_stats') or {}, 'model_stats': self._model_stats(b, c, model)}
 
     # ---------------------------------------------------------------- verdicts on detected entities
-    def confirm_entities(self, book_id: str, keys: list[str], etype: str | None = None, actor='reviewer') -> dict:
+    def confirm_entities(self, book_id: str, keys: list[str], etype: str | None = None, actor='reviewer',
+                         about: str | None = None) -> dict:
         """Verify entities or CHANGE their category — any number of times, verified or not (the latest verdict
         wins): a detected entity gets entity_confirm (type, corrected type or only the family); the reviewer's
         own entity is re-assigned with the new type. One undoable step for the whole selection."""
@@ -52,6 +53,8 @@ class EntityService(ServiceBase):
                 evs.append({'type': 'entity_assign', 'key': k, 'members': e['members'], 'entity_type': etype or e['type']})
             else:
                 evs.append({'type': 'entity_confirm', 'key': k, 'entity_type': etype or e['type']})
+        if about:                                       # where the verdict was given (the focused undo finds it)
+            evs = [{**ev, 'about': about} for ev in evs]
         b.events.append(*evs, actor=actor)
         self._reproject(b, f'Κατηγορία {len(keys)} οντοτήτων')
         return {'confirmed': len(evs)}
@@ -79,13 +82,14 @@ class EntityService(ServiceBase):
         self._reproject(b, 'Κατηγορία τμήματος')
         return ev
 
-    def remove_entity(self, book_id: str, key: str, actor='reviewer') -> dict:
+    def remove_entity(self, book_id: str, key: str, actor='reviewer', about: str | None = None) -> dict:
         """Withdraw the reviewer's own entity, or reject a detected one (remembered; counts as a wrong outcome)."""
         b = self._book(book_id)
+        tag = {'about': about} if about else {}
         if key in b.events.state()['assigned']:
-            ev = b.events.append({'type': 'entity_remove', 'key': key}, actor=actor)[0]
+            ev = b.events.append({'type': 'entity_remove', 'key': key, **tag}, actor=actor)[0]
         elif any(e['key'] == key for e in (b.canonical() or {}).get('entities', [])):
-            ev = b.events.append({'type': 'suggestion_dismiss', 'key': key}, actor=actor)[0]
+            ev = b.events.append({'type': 'suggestion_dismiss', 'key': key, **tag}, actor=actor)[0]
         else:
             raise ServiceError('unknown entity')
         self._reproject(b, 'Αφαίρεση κατηγορίας')

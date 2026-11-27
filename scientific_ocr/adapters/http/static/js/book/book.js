@@ -52,9 +52,9 @@ export const carefulLabel = (n) => `Προσεκτική επανεξέταση 
 // Tabs that show book-wide inference (hierarchy, groups, entities, classes): they need the banked actions applied.
 const GATED_TABS = { structure: 'Η «Δομή»', quality: 'Ο «Μαζικός έλεγχος»' };
 export function progressCard(b) {
-  const p = b.progress || {}, j = b.job, steps = p.steps || ['prepare', 'extract', 'regions', 'compose', 'models', 'render'];
+  const p = b.progress || {}, j = b.job, steps = p.steps || ['prepare', 'extract', 'crossread', 'regions', 'compose', 'models', 'render'];
   const cur = steps.indexOf(p.step);
-  const detail = p.step === 'extract' ? `σελ. ${p.page} · ${p.engine} (${(p.index || 0) + 1}/${p.total})` : p.step === 'regions' ? `σελ. ${p.page} (${(p.index || 0) + 1}/${p.total})`
+  const detail = p.step === 'extract' ? `σελ. ${p.page} · ${p.engine} (${(p.index || 0) + 1}/${p.total})` : (p.step === 'regions' || p.step === 'crossread') ? `σελ. ${p.page} (${(p.index || 0) + 1}/${p.total})`
     : p.step === 'compose' ? `σελ. ${p.page}` : '';
   const careful = carefulPages(b);
   const overall = steps.length ? Math.round(100 * (Math.max(cur, 0) + (p.total ? (p.index || 0) / p.total : 0)) / steps.length) : 0;

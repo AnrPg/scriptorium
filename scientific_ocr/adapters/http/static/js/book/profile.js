@@ -96,10 +96,11 @@ export async function profileReviewCard(body) {
   const b = S.book;
   if ((b.output_profile || 'reading') === 'reading') return;
   const st = await api(`${B(b.id)}/profile`);
-  const pending = st.excluded.filter(e => !e.confirmed && e.n), sugg = st.suggested || [];
-  if (!pending.length && !sugg.length) return;
+  const pending = st.excluded.filter(e => !e.confirmed && !e.verdict && e.n), sugg = st.suggested || [], decided = st.decided || [];
+  if (!pending.length && !sugg.length && !decided.length) return;
   const card = h('div', { class: 'card', style: { padding: '12px' } });
-  body.append(section(pending.length ? `Εξαιρέσεις του προφίλ: επιβεβαίωσε τα όρια (${pending.length})` : `Προτάσεις εξαίρεσης του προφίλ (${sugg.length})`, card));
+  body.append(section(pending.length ? `Εξαιρέσεις του προφίλ: επιβεβαίωσε τα όρια (${pending.length})`
+    : sugg.length ? `Προτάσεις εξαίρεσης του προφίλ (${sugg.length})` : `Εξαιρέσεις του προφίλ: κρίθηκαν όλες (${decided.length})`, card));
   // a click on the row (not on its buttons) shows the exclusion's first segment selected on its page, in an overlay
   const peek = (e) => (ev) => { if (!ev.target.closest('button, a, input, select')) openPage((e.pages || [1])[0], (e.members || [])[0]); };
   const view = (e) => h('button', { class: 'small ghost', title: 'Άνοιγμα στη σελίδα με τα όρια σχεδιασμένα (και συνέχεια με J/K)',
@@ -129,4 +130,24 @@ export async function profileReviewCard(body) {
         view(e),
         h('button', { class: 'small', onclick: () => act(() => api(`${B(b.id)}/profile/exclude`, { body: { keys: [e.key] } }), 'Εξαιρέθηκε').then(refresh) }, 'Εξαίρεσε')))));
   }
+  if (decided.length) card.append(decidedList(decided));
+}
+
+// Every verdict on an exclusion stays reachable: listed newest first, each with its own «Αναίρεση» (POST /profile/undo
+// {key}: only that verdict, even when «Όλα σωστά» judged many at once and even after other actions), plus the undo
+// of the last one — the general undo, focused on the exclusions. Undone = back in the list above.
+const VERDICT_EL = { confirmed: 'Σωστά όρια', kept: 'Όχι αυτό · μένει στην έξοδο', bounds: 'Νέα όρια' };
+function decidedList(decided) {
+  const b = S.book;
+  const undo = (key) => act(() => api(`${B(b.id)}/profile/undo`, { body: key ? { key } : {} }), 'Αναιρέθηκε· η εξαίρεση ξαναμπήκε στη λίστα', false).then(refresh);
+  return h('details', { open: decided.length <= 5 || null },
+    h('summary', {}, `Κρίθηκαν (${decided.length}) — αναιρούνται`),
+    h('div', { class: 'row', style: { margin: '6px 0' } }, h('span', { class: 'grow small mut' }, 'Η πιο πρόσφατη πρώτη.'),
+      h('button', { class: 'small', title: 'Αναίρεση της τελευταίας απόφασης για εξαίρεση, ακόμη κι αν έκανες άλλα μετά', onclick: () => undo(null) }, '↶ Αναίρεση τελευταίας')),
+    decided.map(d => h('div', { class: 'list-item', style: { alignItems: 'flex-start' } },
+      h('span', { class: 'chip ent' }, d.type ? typeName(d.type) : 'οντότητα'), h('span', { class: 'small mut', style: { width: '70px', flex: 'none' } }, pagesOf(d)),
+      h('div', { class: 'grow small' }, h('div', {}, h('b', {}, VERDICT_EL[d.verdict] || d.verdict)),
+        d.first ? h('div', { class: 'mut' }, (d.first || '').replace(/[*#]/g, '').slice(0, 110)) : null),
+      (d.members || []).length ? h('button', { class: 'small ghost', title: 'Άνοιγμα στη σελίδα', onclick: () => go(`#/b/${b.id}/p/${(d.pages || [])[0] || +(d.members[0].match(/^p(\d+)_/) || [])[1] || 1}/${d.members[0]}`) }, 'Δες') : null,
+      h('button', { class: 'small', title: 'Αναίρεση αυτής της απόφασης (μόνο αυτής)', onclick: () => undo(d.key) }, '↶ Αναίρεση'))));
 }

@@ -9,6 +9,7 @@ import { act, modal, openDialog, toast } from '../ui/feedback.js';
 import { ensureFresh } from '../ui/rebuild.js';
 import { excursusDialog } from '../inspector/excursus.js';
 import { profileReviewCard } from '../book/profile.js';
+import { findingName } from '../ui/joblog.js';
 
 // ---------------------------------------------------------------- export wizard
 // Steps: 1 format · 2 content (exclusions) · 3 move to the end of each unit · 4 separators, preview, download.
@@ -240,6 +241,7 @@ export function tabPages(body) {
 }
 
 export async function tabReview(body) {
+  criticalFindings(body);
   await profileReviewCard(body);
   const box = h('div'), n = S.book.required + S.book.recommended;
   body.append(section(`Τμήματα προς έλεγχο (${n})`, box));
@@ -255,6 +257,34 @@ export async function tabReview(body) {
       h('span', { class: 'dot ' + it.review }), h('span', { class: 'small mut', style: { width: '52px' } }, `σελ. ${it.page}`),
       it.critical ? h('span', { class: 'chip rv-required' }, 'κρίσιμο') : null, h('div', { class: 'grow' }, h('div', {}, KIND_EL[it.kind] || it.kind),
         h('div', { class: 'small mut' }, it.reasons.map(r => R(r).el).join(' · '))), '›'));
+  }
+}
+
+/** «Κρίσιμα ευρήματα»: the audit's critical findings (integrity, lost content, engine failures). Those first
+ *  seen in the latest build (finding.first_seen = run.built_utc, application/projection._mark_first_seen) are
+ *  marked «νέο»; arriving from the toast of that build (S.critFocus) opens the list and scrolls to them. */
+function criticalFindings(body) {
+  const b = S.book, list = b.critical || [];
+  if (!list.length) return;
+  const isNew = f => b.built && f.first_seen === b.built;
+  const fresh = list.filter(isNew).length;
+  const ordered = [...list].sort((x, y) => isNew(y) - isNew(x) || (x.page || 0) - (y.page || 0));
+  const card = h('div', { class: 'card' }), focus = S.critFocus === b.id;
+  S.critFocus = null;
+  for (const f of ordered) {
+    const blk = (f.block_ids || [])[0], target = f.page ? `#/b/${b.id}/p/${f.page}${blk ? '/' + blk : ''}` : null;
+    card.append(h('div', { class: 'list-item' + (isNew(f) ? ' new-finding' : ''), style: target ? null : { cursor: 'default' },
+      onclick: target ? () => go(target) : null },
+      h('span', { class: 'dot required' }), h('span', { class: 'small mut', style: { width: '52px' } }, f.page ? `σελ. ${f.page}` : 'βιβλίο'),
+      isNew(f) ? h('span', { class: 'chip rv-required' }, 'νέο') : null,
+      h('div', { class: 'grow' }, h('div', {}, findingName(f.type)), h('div', { class: 'small mut' }, f.reason)), target ? '›' : null));
+  }
+  const sec = section(`Κρίσιμα ευρήματα (${list.length}${fresh ? ` · ${fresh} νέα` : ''})`,
+    h('p', { class: 'small mut' }, 'Ο έλεγχος ακεραιότητας της τελευταίας ενημέρωσης του βιβλίου. «Νέο» = εμφανίστηκε σε αυτήν.'), card);
+  body.append(sec);
+  if (focus) {
+    sec.open = true; sec.dataset.remembered = '1';      // opened for this visit, whatever was remembered
+    requestAnimationFrame(() => (card.querySelector('.new-finding') || sec).scrollIntoView({ block: 'center', behavior: 'smooth' }));
   }
 }
 

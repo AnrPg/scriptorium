@@ -19,6 +19,8 @@ def content_source(b: dict) -> str:
         return 'source image'
     if prov.startswith('region:'):
         return 'marker (region re-OCR)'
+    if prov.startswith('crossread:'):                  # read by the engine that missed the box (pipeline.crossread)
+        return prov.split(':', 1)[1].split(' ', 1)[0] + ' (cross-read)'
     return prov.split(':', 1)[0] or 'unknown'
 
 

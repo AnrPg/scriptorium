@@ -5,7 +5,9 @@ import { S } from '../core/state.js';
 
 // ------------------------------------------------------------------ feedback
 export function toast(msg, opts = {}) {
-  const t = h('div', { class: 'toast' + (opts.error ? ' err' : '') }, msg,
+  // opts.onclick: the whole toast is a link to what it reports (e.g. the findings it mentions)
+  const t = h('div', { class: 'toast' + (opts.error ? ' err' : '') + (opts.onclick ? ' link' : ''),
+    onclick: opts.onclick ? () => { t.remove(); opts.onclick(); } : null }, msg,
     opts.undo ? h('button', { onclick: async () => { t.remove(); await doUndo(); } }, 'Αναίρεση') : null);
   $('#toasts').append(t);
   setTimeout(() => t.remove(), opts.error ? 8000 : 6000);

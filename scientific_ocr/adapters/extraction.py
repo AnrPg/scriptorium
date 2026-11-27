@@ -194,8 +194,10 @@ def _region_crop(out: Path, src_pdf: Path, region: dict) -> tuple[Path, str]:
     return final_pdf, sha
 
 
-def regions_ocr(out: Path, src_pdf: Path, items: list[tuple[dict, str]], log=print, lang: str | None = None) -> dict:
-    """OCR several reviewer regions [(region, force_block)] with both engines: {region id: record}.
+def regions_ocr(out: Path, src_pdf: Path, items: list[tuple[dict, str]], log=print, lang: str | None = None,
+                engines_of: dict | None = None) -> dict:
+    """OCR several regions [(region, force_block)] with both engines (`engines_of`: region id -> the engines that
+    read it, default both): {region id: record}.
 
     An engine run costs mostly its START (loading its models: Marker ~20 s, Docling ~6 s, whatever it reads), so
     the regions are read TOGETHER — one engine run over a PDF with one page per region — instead of one run per
@@ -209,10 +211,15 @@ def regions_ocr(out: Path, src_pdf: Path, items: list[tuple[dict, str]], log=pri
     force = {r['id']: fb for r, fb in items}
     raw_root = out / 'raw'
 
+    wants = lambda rid, engine: engine in (engines_of or {}).get(rid, ('marker', 'docling'))
+    used = [e for e in ('marker', 'docling') if any(wants(r['id'], e) for r, _ in items)]
+
     def engine_runs(engine):
         version = engine_version(engine)
         res, groups = {}, {}
         for r, _ in items:
+            if not wants(r['id'], engine):
+                continue
             pdf, sha = crops[r['id']]
             extra = ['--force_layout_block', force[r['id']]] if engine == 'marker' else None
             sub = f'regions/{engine}-{sha[:16]}'
@@ -250,10 +257,11 @@ def regions_ocr(out: Path, src_pdf: Path, items: list[tuple[dict, str]], log=pri
 
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {e: pool.submit(engine_runs, e) for e in ('marker', 'docling')}
+        futures = {e: pool.submit(engine_runs, e) for e in used}
         per_engine = {e: f.result() for e, f in futures.items()}
     return {r['id']: {'crop_pdf': str(crops[r['id']][0].relative_to(out)), 'crop_sha': crops[r['id']][1],
-                      'engines': {e: per_engine[e][r['id']] for e in per_engine}} for r, _ in items}
+                      'engines': {e: per_engine[e][r['id']] for e in per_engine if r['id'] in per_engine[e]}}
+            for r, _ in items}
 
 
 # Marker's OCR (surya) runs a llama-server it spawns DETACHED and stops only via atexit in the spawning

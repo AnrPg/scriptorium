@@ -502,6 +502,10 @@ class Handler(BaseHTTPRequestHandler):
     def output_profile_confirm(self, bid):
         self._json(200, self.app.confirm_exclusions(bid, self._body().get('keys'), self._actor()))
 
+    @route('POST', r'/api/books/([\w.-]+)/profile/undo')
+    def output_profile_undo(self, bid):
+        self._json(200, self.app.undo_exclusion(bid, self._body().get('key'), self._actor()))
+
     @route('POST', r'/api/books/([\w.-]+)/profile/exclude')
     def output_profile_exclude(self, bid):
         self._json(200, self.app.exclude_suggested(bid, self._body().get('keys') or [], self._actor()))

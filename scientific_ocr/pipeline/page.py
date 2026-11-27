@@ -196,11 +196,77 @@ def _set_text(ctx: PageContext, blk: dict, text: str, provenance: str, second_te
         flag(blk, 'BOOK_RULE_APPLIED')
 
 
+# ---------------------------------------------------------------- segment ids (shared with pipeline.crossread)
+def marker_id(ctx: PageContext, eb: dict) -> str:
+    return block_id(ctx.doc_sha, ctx.page, eb['ref'] + json.dumps([round(v) for v in eb['bbox']]))
+
+
+def docling_id(ctx: PageContext, d: dict) -> str:
+    return block_id(ctx.doc_sha, ctx.page, d['ref'] + json.dumps([round(v) for v in d['bbox']]))
+
+
+def uncovered_id(ctx: PageContext, reg: dict) -> str:
+    return block_id(ctx.doc_sha, ctx.page, 'uncovered' + json.dumps([round(v) for v in reg['bbox']]))
+
+
+def docling_only_blocks(ctx: PageContext):
+    """Docling boxes Marker missed (no Marker box in their component), minus labels inside figures and specks."""
+    dref = ctx.docling_by_ref()
+    for comp in ctx.alignment['components']:
+        if comp['marker']:
+            continue
+        for r in comp['docling']:
+            d = dref[r]
+            inside_figure = any(geo.covered_by(d['bbox'], fb) > 0.8 for fb in ctx.picture_boxes if fb != d['bbox'])
+            if (inside_figure and d['kind'] != 'figure') or geo.area(d['bbox']) < 150 * ctx.unit ** 2:
+                continue                       # figure labels are attached to the figure; specks ignored
+            yield d
+
+
+def cross_readings(ctx: PageContext, bid: str) -> dict | None:
+    """What the OTHER engines read in a segment only one engine found (pipeline.crossread), read before review:
+    {engine: {text, latex, status, candidate}}, or None when it was not cross-read."""
+    x = ctx.cross.get(bid)
+    if not x or not x.get('engines'):
+        return None
+    height = x['read_bbox'][3] - x['read_bbox'][1]
+    out = {}
+    for eng, rec in x['engines'].items():
+        r = _reading(ctx, eng, rec, height)
+        r['candidate'] = {'engine': eng, 'version': rec.get('version'), 'ref': f'crossread:{eng}', 'status': rec.get('status'),
+                          'raw_file': rec.get('raw_json'), 'text': r['text'], 'latex': r['latex'],
+                          'bbox': x['read_bbox'], 'confidence': None}
+        out[eng] = r
+    return out
+
+
+def _reading(ctx: PageContext, eng: str, rec: dict, height: float) -> dict:
+    """An engine's reading of a cropped region (one page of a region run): text (figures left out) and LaTeX."""
+    if eng == 'tesseract':                            # read directly (pipeline.crossread.tesseract)
+        return {'text': rec.get('text') or '', 'latex': [], 'status': rec.get('status')}
+    texts, latex = [], []
+    if rec.get('status') == 'OK':
+        try:
+            raw = json.loads((ctx.out / rec['raw_json']).read_text())
+            pno = rec.get('page', 1)                      # regions read together: one page each
+            blocks = engine_json.marker_blocks(raw, pno) if eng == 'marker' else engine_json.docling_blocks(raw, pno, height)
+        except (OSError, ValueError, KeyError, TypeError):
+            return {'text': '', 'latex': [], 'status': 'RAW_UNPARSEABLE'}
+        for b in sorted(blocks, key=lambda b: b['order']):
+            if b['text'] and b['kind'] != 'figure':
+                texts.append(b['text'])
+            latex += b['latex']
+    return {'text': '\n'.join(texts), 'latex': latex, 'status': rec.get('status')}
+
+
+AGREE = 0.6                    # the alignment's own threshold for «matched» (pipeline.align)
+
+
 def _from_marker(ctx: PageContext, eb: dict) -> dict:
     comp = ctx.component(eb['ref'])
     dref = ctx.docling_by_ref()
     dcs = [dref[r] for r in comp['docling']]
-    bid = block_id(ctx.doc_sha, ctx.page, eb['ref'] + json.dumps([round(v) for v in eb['bbox']]))
+    bid = marker_id(ctx, eb)
     # Conservative geometry: union with matched Docling boxes (engines under-report extents); the engine's
     # own box is kept for column-aware placement.
     geom = eb['bbox']
@@ -227,6 +293,17 @@ def _from_marker(ctx: PageContext, eb: dict) -> dict:
         _as_empty(blk, eb['role'])
     else:
         ev = _marker_evidence(ctx, eb, comp, dcs)
+        x = cross_readings(ctx, bid) if comp['status'] == 'single_engine' else None
+        if x and 'tesseract' in x:                     # Docling missed the box: Tesseract's reading of the same pixels
+            dl = x['tesseract']
+            blk['candidates'].append(dl['candidate'])
+            if plain_text(dl['text']):
+                sim = similarity(eb['text'], dl['text'])
+                agreement = 'matched' if sim >= AGREE else 'conflict'
+                blk['match'] = {'status': agreement, 'shape': 'crossread', 'text_similarity': sim}
+                ev = Evidence(kind=ev.kind, latex=ev.latex, agreement=agreement, similarity=sim, second_text=dl['text'],
+                              inside_figure=ev.inside_figure, density_ratio=ev.density_ratio)
+            flag(blk, 'CROSS_READ')
         _set_text(ctx, blk, eb['text'], eb['ref'], ev.second_text)
         run_text_checks(blk, ev)
     return blk
@@ -278,27 +355,50 @@ def _as_empty(blk, role):
 
 
 def _docling_only(ctx: PageContext):
-    for comp in ctx.alignment['components']:
-        if comp['marker']:
-            continue
-        dref = ctx.docling_by_ref()
-        for r in comp['docling']:
-            d = dref[r]
-            inside_figure = any(geo.covered_by(d['bbox'], fb) > 0.8 for fb in ctx.picture_boxes if fb != d['bbox'])
-            if (inside_figure and d['kind'] != 'figure') or geo.area(d['bbox']) < 150 * ctx.unit ** 2:
-                continue                       # figure labels are attached to the figure; specks ignored
-            bid = block_id(ctx.doc_sha, ctx.page, r + json.dumps([round(v) for v in d['bbox']]))
-            blk = new_block(bid, ctx.page, 'excerpt', d['bbox'], source='docling', role=d['role'],
-                            engine_label=f"docling:{d['label']}", original_kind=d['kind'], candidates=[ctx.candidate(d)],
-                            match={'status': 'single_engine', 'shape': '0:1', 'text_similarity': None})
-            blk['source_crop'] = ctx.crop(bid, d['bbox'], pad=14)
-            blk['machine_hash'] = content_hash(blk['chosen'])
-            flag(blk, 'SINGLE_ENGINE_DOCLING')
+    for d in docling_only_blocks(ctx):
+        bid = docling_id(ctx, d)
+        blk = new_block(bid, ctx.page, 'excerpt', d['bbox'], source='docling', role=d['role'],
+                        engine_label=f"docling:{d['label']}", original_kind=d['kind'], candidates=[ctx.candidate(d)],
+                        match={'status': 'single_engine', 'shape': '0:1', 'text_similarity': None})
+        blk['source_crop'] = ctx.crop(bid, d['bbox'], pad=14)
+        blk['machine_hash'] = content_hash(blk['chosen'])
+        x = cross_readings(ctx, bid)
+        if x and 'marker' in x and _docling_only_read(ctx, blk, d, x['marker']):
             yield blk
+            continue
+        flag(blk, 'SINGLE_ENGINE_DOCLING')
+        yield blk
+
+
+def _docling_only_read(ctx: PageContext, blk: dict, d: dict, mk: dict) -> bool:
+    """A box only Docling found, read by Marker too (pipeline.crossread). It becomes content like any other segment
+    when the two independent readings agree (an equation: when Marker read its LaTeX; equations are always
+    reviewed); otherwise it stays a visible excerpt with both readings offered (False: still SINGLE_ENGINE_DOCLING)."""
+    blk['candidates'].append(mk['candidate'])
+    flag(blk, 'CROSS_READ')
+    if d['kind'] == 'math' and mk['latex']:
+        blk.pop('original_kind', None)
+        latex = ' '.join(mk['latex'])
+        _as_equation(blk, latex, 'crossread:marker', chemical=chem.is_equation(latex))
+        blk['match'] = {'status': 'single_engine', 'shape': 'crossread', 'text_similarity': None}
+        return True
+    if d['kind'] not in ('paragraph', 'heading', 'caption') or not plain_text(mk['text']) or not plain_text(d['text']):
+        return False
+    sim = similarity(mk['text'], d['text'])
+    blk['match'] = {'status': 'matched' if sim >= AGREE else 'conflict', 'shape': 'crossread', 'text_similarity': sim}
+    if sim < AGREE:
+        return False
+    blk['kind'] = d['kind']
+    blk.pop('original_kind', None)
+    blk['display_crop'] = False
+    _set_text(ctx, blk, mk['text'], 'crossread:marker', d['text'])
+    run_text_checks(blk, Evidence(kind=d['kind'], latex=mk['latex'], agreement='matched', similarity=sim,
+                                  second_text=d['text']))
+    return True
 
 
 def _uncovered(ctx, reg) -> dict:
-    bid = block_id(ctx.doc_sha, ctx.page, 'uncovered' + json.dumps([round(v) for v in reg['bbox']]))
+    bid = uncovered_id(ctx, reg)
     blk = new_block(bid, ctx.page, 'excerpt', reg['bbox'], source='coverage', original_kind='unknown',
                     ink_cells=reg['ink_cells'], ink_band={k: reg[k] for k in ('band', 'band_y') if k in reg},
                     ink_text=reg.get('ink_text'))
@@ -379,17 +479,9 @@ def _region_texts(ctx: PageContext, ocr: dict) -> dict | None:
     out, cands = {}, []
     for eng in ('marker', 'docling'):
         rec = engines.get(eng, {})
-        texts, latex = [], []
-        if rec.get('status') == 'OK':
-            raw = json.loads((ctx.out / rec['raw_json']).read_text())
-            pno = rec.get('page', 1)                      # regions read together: one page each
-            blocks = engine_json.marker_blocks(raw, pno) if eng == 'marker' else \
-                engine_json.docling_blocks(raw, pno, ocr['height'])
-            for b in sorted(blocks, key=lambda b: b['order']):
-                if b['text'] and b['kind'] != 'figure':
-                    texts.append(b['text'])
-                latex += b['latex']
-        out[eng] = {'text': '\n'.join(texts), 'latex': latex}
+        r = _reading(ctx, eng, rec, ocr['height'])
+        out[eng] = {'text': r['text'], 'latex': r['latex']}
+        latex = r['latex']
         cands.append({'engine': eng, 'version': rec.get('version'), 'ref': f'region:{eng}', 'status': rec.get('status'),
                       'raw_file': rec.get('raw_json'), 'text': out[eng]['text'], 'latex': latex,
                       'bbox': None, 'confidence': None})

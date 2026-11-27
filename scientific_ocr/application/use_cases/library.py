@@ -76,7 +76,8 @@ class LibraryService(ServiceBase):
                 'excursus_suggestions': c.get('excursus_suggestions', []), 'document_structure': c.get('document_structure') or {'fixes': [], 'issues': []},
                 'ref_targets': [{'id': t['id'], 'label': t['label'], 'page': t['page']}
                                 for t in references.targets(c.get('blocks', []))] if c else [],
-                'critical': [f for f in c.get('findings', []) if f['severity'] == 'critical']}
+                'critical': [f for f in c.get('findings', []) if f['severity'] == 'critical'],
+                'built': (c.get('run') or {}).get('built_utc')}
 
     def history(self, book_id: str) -> list[dict]:
         st = self._book(book_id).events.state()
