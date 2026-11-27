@@ -16,6 +16,7 @@ from ..core.geometry import covered_by
 from ..core.model import CAPTIONABLE_KINDS, EQUATION_KINDS, MAX_HEADING_LEVEL, content_hash
 from ..core.reasons import flag
 from ..core.symbols import strip_math_delimiters
+from . import tables
 
 
 class Stale(Exception):
@@ -161,9 +162,10 @@ def _v_flow(blk, p, find):
 
 
 def _set_table_layout(b, d, ctx):
-    """How a table is read (pipeline.tables): 'rows' / 'cols' = a list of its cells by rows / by columns, 'table'
-    = a table, 'auto' = the automatic hint."""
+    """How a table is read (pipeline.tables): 'rows' / 'cols' = a list by rows / by columns — with `key` (the key
+    column / row) a list with levels, without it a flat list of the cells; 'table' = a table, 'auto' = the hint."""
     b['table_layout'] = None if d['layout'] == 'auto' else d['layout']
+    b['table_key'] = d.get('key') if d['layout'] in ('rows', 'cols') else None
 
 
 def _v_table_layout(blk, p, find):
@@ -171,7 +173,18 @@ def _v_table_layout(blk, p, find):
         raise CommandError('layout must be rows, cols, table or auto')
     if blk.get('kind') != 'table':
         raise CommandError('only a table can be read as a list')
-    return {'layout': p['layout']}
+    key = p.get('key')
+    if key is None or p['layout'] not in ('rows', 'cols'):
+        return {'layout': p['layout']}
+    if not isinstance(key, int) or isinstance(key, bool) or key < 0:
+        raise CommandError('key must be a column / row number (0-based)')
+    ch = blk.get('chosen') or {}
+    eng = None if ch.get('type') == 'text' else _table_reading(blk)
+    html = ch.get('text') if eng is None else next(c['text'] for c in blk['candidates'] if c['engine'] == eng)
+    ax = tables.axes(html or '')
+    if ax is None or key >= len(ax[p['layout']]):
+        raise CommandError(f'the table has no {"column" if p["layout"] == "rows" else "row"} {key + 1}')
+    return {'layout': p['layout'], 'key': key}
 
 
 def _table_reading(blk) -> str | None:

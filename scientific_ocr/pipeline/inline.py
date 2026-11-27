@@ -28,3 +28,18 @@ def inline_html(text: str) -> str:
     return ''.join(out)
 
 
+
+
+def list_html(lst: dict, fmt=inline_html) -> str:
+    """A table read as a list (pipeline.tables.as_list) as HTML: the key's header, then one <li> per cell, or per
+    item with its 'header: value' pairs nested under it."""
+    lead = (f'<div class="pv-text pv-list-label">{fmt(lst["title"])}</div>' if lst.get('title') else '') + \
+        (f'<div class="pv-text pv-list-label">{fmt(lst["label"])}:</div>' if lst.get('label') else '')
+    lis = []
+    for it in lst['items']:
+        if isinstance(it, str):
+            lis.append(f'<li>{fmt(it)}</li>')
+        else:
+            sub = ''.join(f'<li><span class="pv-k">{fmt(k)}:</span> {fmt(v)}</li>' for k, v in it['fields'])
+            lis.append(f'<li>{fmt(it["key"])}:' + (f'<ul class="pv-kv">{sub}</ul>' if sub else '') + '</li>')
+    return f'{lead}<ul class="pv-text pv-items">{"".join(lis)}</ul>'

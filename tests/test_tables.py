@@ -160,3 +160,71 @@ def test_page_output_lists_every_kind_of_automatic_exclusion():
     c = {'source': {'sha256': 'abc'}, 'blocks': blocks, 'groups': [], 'entities': [], 'excursus': []}
     html = html_preview.page_html(c, 1, lambda p: p)
     assert 'page_number · bottom: t1' in html and 'background_fill: t2' in html and 'duplicate_reading: t3' in html
+
+
+# a real table read as a list WITH LEVELS: the reviewer picks the key column (per row) / key row (per column)
+ELEMENTS = ('<table><tr><th>Στοιχείο</th><th>Μάζα</th><th>Φορτίο</th></tr>'
+            '<tr><td>πρωτόνιο</td><td>1</td><td>+1</td></tr>'
+            '<tr><td>νετρόνιο</td><td>1</td><td></td></tr>'
+            '<tr><td>ηλεκτρόνιο</td><td>1/1836</td><td>−1</td></tr></table>')
+
+
+def _keyed(layout, key, html=ELEMENTS):
+    b = _table(html, ink=False)
+    ev = overlay.decision_event('set_table_layout', b, {'layout': layout, 'key': key}, lambda i: None)
+    overlay.COMMANDS['set_table_layout'](b, ev, None)
+    return b
+
+
+def test_per_row_the_key_column_names_each_item_and_the_other_columns_are_its_keys():
+    b = _keyed('rows', 0)
+    lst = tables.as_list(b, ELEMENTS)
+    assert lst['label'] == 'Στοιχείο'
+    assert lst['items'][0] == {'key': 'πρωτόνιο', 'fields': [['Μάζα', '1'], ['Φορτίο', '+1']]}
+    assert lst['items'][1] == {'key': 'νετρόνιο', 'fields': [['Μάζα', '1']]}          # an empty value says nothing
+    assert tables.markdown(lst).startswith('Στοιχείο:\n- πρωτόνιο:\n  Μάζα: 1\n  Φορτίο: +1\n- νετρόνιο:')
+    b2 = _keyed('rows', 2)                                                               # any column can be the key
+    assert tables.as_list(b2, ELEMENTS)['items'][0] == {'key': '+1', 'fields': [['Στοιχείο', 'πρωτόνιο'], ['Μάζα', '1']]}
+
+
+def test_per_column_the_key_row_names_each_item_and_the_header_column_labels_the_values():
+    lst = tables.as_list(_keyed('cols', 0), ELEMENTS)
+    assert lst['label'] == 'Στοιχείο'
+    assert lst['items'][0] == {'key': 'Μάζα', 'fields': [['πρωτόνιο', '1'], ['νετρόνιο', '1'], ['ηλεκτρόνιο', '1/1836']]}
+    assert tables.axes(ELEMENTS) == {'rows': ['Στοιχείο', 'Μάζα', 'Φορτίο'], 'cols': ['Στοιχείο', 'πρωτόνιο', 'νετρόνιο', 'ηλεκτρόνιο']}
+
+
+def test_spanned_headers_are_repeated_and_every_piece_reaches_the_outputs():
+    html = ('<table><tr><th rowspan="2">Ισότοπο</th><th colspan="2">Πυρήνας</th></tr><tr><th>Z</th><th>N</th></tr>'
+            '<tr><td>¹²C</td><td>6</td><td>6</td></tr><tr><td>¹⁴C</td><td>6</td><td>8</td></tr></table>')
+    lst = tables.as_list(_keyed('rows', 0, html), html)
+    assert lst['label'] == 'Ισότοπο' and lst['items'][1] == {'key': '¹⁴C', 'fields': [['Πυρήνας / Z', '6'], ['Πυρήνας / N', '8']]}
+    b = _keyed('rows', 0)
+    c = {'source': {'sha256': 'abc'}, 'blocks': [b], 'groups': [], 'entities': [], 'excursus': []}
+    md = rag.markdown(c, profiles.effective('rag'))
+    assert '- ηλεκτρόνιο:\n  Μάζα: 1/1836\n  Φορτίο: −1' in md and '|' not in md
+    assert '<ul class="pv-kv">' in rag.html(c, profiles.effective('rag'))
+
+
+def test_the_key_is_validated_and_a_key_lost_by_a_correction_falls_back_to_the_flat_list():
+    b = _table(ELEMENTS, ink=False)
+    with pytest.raises(overlay.CommandError):
+        overlay.decision_event('set_table_layout', b, {'layout': 'rows', 'key': 3}, None)
+    b = _keyed('rows', 2)
+    small = '<table><tr><td>α</td><td>β</td></tr><tr><td>γ</td><td>δ</td></tr></table>'
+    assert tables.as_list(b, small)['items'] == ['α', 'β', 'γ', 'δ']                    # nothing lost
+    overlay.COMMANDS['set_table_layout'](b, {'layout': 'table'}, None)
+    assert b['table_key'] is None and tables.as_list(b, ELEMENTS) is None
+
+
+def test_a_title_row_across_the_table_is_the_lists_title_not_a_key():
+    html = ('<table><tr><th colspan="2">ΠΙΝΑΚΑΣ 6-2 Ένζυμα</th></tr><tr><th>Ένζυμο</th><th>Αντίδραση</th></tr>'
+            '<tr><td>λιπάση</td><td>υδρόλυση λιπών</td></tr><tr><td>αμυλάση</td><td>υδρόλυση αμύλου</td></tr></table>')
+    lst = tables.as_list(_keyed('rows', 0, html), html)
+    assert lst['title'] == 'ΠΙΝΑΚΑΣ 6-2 Ένζυμα' and lst['label'] == 'Ένζυμο'
+    assert lst['items'][0] == {'key': 'λιπάση', 'fields': [['Αντίδραση', 'υδρόλυση λιπών']]}
+    assert tables.markdown(lst).startswith('ΠΙΝΑΚΑΣ 6-2 Ένζυμα\nΈνζυμο:\n- λιπάση:')
+    per_col = tables.as_list(_keyed('cols', 0, html), html)
+    assert per_col['title'] == 'ΠΙΝΑΚΑΣ 6-2 Ένζυμα' and per_col['items'] == [
+        {'key': 'Αντίδραση', 'fields': [['λιπάση', 'υδρόλυση λιπών'], ['αμυλάση', 'υδρόλυση αμύλου']]}]
+    assert tables.axes(html)['cols'] == ['Ένζυμο', 'λιπάση', 'αμυλάση']

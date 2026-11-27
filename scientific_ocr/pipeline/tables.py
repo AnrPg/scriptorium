@@ -4,8 +4,21 @@ A grid of terms is not a table: its rows relate nothing, and a Markdown/pipe tab
 reader (RAG). Such a table is rendered as a list, one item per cell, read BY COLUMNS (down each column, then the
 next one — how a printed term list reads) or BY ROWS.
 
+A REAL table read as a list (the reviewer's choice) is its interpretation as a list WITH LEVELS: per row, the
+reviewer picks the KEY column — every row is one item named by its cell in that column, and the other columns
+become the item's keys (their header cells) with the row's cells as values; per column, symmetrically, the KEY
+row names each column and the header column labels the values:
+    ΠΙΝΑΚΑΣ 2-1 Σωματίδια      <- a header row that is one cell across the width: the title, not a key
+    Στοιχείο:                  <- the key column's own header (never dropped)
+    - Υδρογόνο:
+      Μάζα: 1
+      Φορτίο: 0
+Headers: the leading rows (columns) whose cells are all <th>, else the first row (column). Spanned cells are
+repeated over the cells they cover (said once per item). Empty values are left out; an empty key reads '—'.
+
 Layout of a table segment (core: reviewer first, then the automatic hint):
   table_layout   the reviewer's decision (overlay `set_table_layout`): 'rows' | 'cols' | 'table' (keep the grid)
+  table_key      with 'rows' / 'cols': the key column / row (0-based); None = a flat list of the cells (term grid)
   table_list     the automatic HINT (annotate): {'order', 'evidence', 'sorted'} — applied only when the cells LOOK
                  like terms (no header row, short cells, no numbers) AND independent evidence agrees: the segment is
                  a key-terms/glossary entity, or its cells are in alphabetical order down the columns (or rows).
@@ -44,13 +57,18 @@ class Grid(HTMLParser):
     def __init__(self):
         super().__init__()
         self.rows, self.row, self.cell, self.spans = [], None, None, False
+        self.span_of: dict[tuple[int, int], tuple[int, int]] = {}     # (row, cell index) -> (rowspan, colspan)
+        self._span = (1, 1)
 
     def handle_starttag(self, tag, attrs):
         if tag == 'tr':
             self.row = []
         elif tag in ('td', 'th') and self.row is not None:
             self.cell = []
-            if any(k in ('colspan', 'rowspan') and v not in (None, '1') for k, v in attrs):
+            a = dict(attrs)
+            num = lambda v: int(v) if (v or '').strip().isdigit() and int(v) > 0 else 1
+            self._span = (num(a.get('rowspan')), num(a.get('colspan')))
+            if self._span != (1, 1):
                 self.spans = True
         elif tag == 'br' and self.cell is not None:
             self.cell.append(' ')
@@ -64,6 +82,8 @@ class Grid(HTMLParser):
             self.cell.append('$' if tag == 'math' else f'</{tag}>')
             return
         if tag in ('td', 'th') and self.row is not None and self.cell is not None:
+            if self._span != (1, 1):
+                self.span_of[(len(self.rows), len(self.row))] = self._span
             self.row.append((' '.join(''.join(self.cell).split()), tag == 'th'))
             self.cell = None
         elif tag == 'tr' and self.row is not None:
@@ -327,6 +347,114 @@ def annotate(blocks: list[dict]) -> int:
     return n
 
 
+# ---------------------------------------------------------------- a real table as a list with levels
+def matrix(g: Grid) -> list[list[tuple[str, bool]]]:
+    """The grid as a dense rectangle: a spanned cell repeated over every cell it covers; missing cells empty."""
+    out: dict[tuple[int, int], tuple[str, bool]] = {}
+    for r, row in enumerate(g.rows):
+        c = 0
+        for i, cell in enumerate(row):
+            while (r, c) in out:
+                c += 1
+            rs, cs = g.span_of.get((r, i), (1, 1))
+            for dr in range(rs):
+                for dc in range(cs):
+                    out.setdefault((r + dr, c + dc), cell)
+            c += cs
+    h = max((r for r, _ in out), default=-1) + 1
+    w = max((c for _, c in out), default=-1) + 1
+    return [[out.get((r, c), ('', False)) for c in range(w)] for r in range(h)]
+
+
+def _heads(m: list[list[tuple[str, bool]]]) -> int:
+    """How many leading rows of `m` are headers: all <th>, else the first one."""
+    n = 0
+    while n < len(m) - 1 and all(th for _, th in m[n]) and any(t for t, _ in m[n]):
+        n += 1
+    return max(n, 1)
+
+
+def _labels(m: list[list[tuple[str, bool]]]) -> list[str]:
+    """Each column's label: its header cells (spans said once), else its number."""
+    nh = _heads(m)
+    return [' / '.join(dict.fromkeys(m[r][c][0] for r in range(nh) if m[r][c][0])) or str(c + 1) for c in range(len(m[0]))]
+
+
+def _oriented(html: str, order: str) -> tuple[list[list[tuple[str, bool]]], str | None] | None:
+    """(the grid as rows of the list, the table's title). Leading rows that are ONE cell across the whole width
+    («ΠΙΝΑΚΑΣ 12-2 …») are the title: never a key, a key row or a value."""
+    g = grid(html)
+    m = matrix(g) if g else []
+    titles = []
+    while len(m) > 1 and len(m[0]) > 1 and len({t for t, _ in m[0]}) == 1 and m[0][0][0]:
+        titles.append(m.pop(0)[0][0])
+    if order == 'cols':
+        m = [list(x) for x in zip(*m)]                     # per column = per row of the transposed grid
+    return (m, ' / '.join(titles) or None) if m and m[0] else None
+
+
+def axes(html: str) -> dict | None:
+    """What the reviewer picks the key from: {'rows': label of each column (the key column of a per-row list),
+    'cols': label of each row (the key row of a per-column list)}."""
+    r, c = _oriented(html, 'rows'), _oriented(html, 'cols')
+    return {'rows': _labels(r[0]), 'cols': _labels(c[0])} if r and c else None
+
+
+def keyed(html: str, order: str, key: int) -> dict | None:
+    """The table as a list with levels (module doc): {'label': the key's header, 'items': [{'key', 'fields':
+    [[header, value], …]}]}; None when the key is not in the grid."""
+    o = _oriented(html, order)
+    if not o or not 0 <= key < len(o[0][0]):
+        return None
+    m, title = o
+    nh, head = _heads(m), _labels(m)
+    items = []
+    for r in range(nh, len(m)):
+        fields, seen = [], set()
+        for c, (t, _) in enumerate(m[r]):
+            if c == key or not t or (head[c], t) in seen:  # a spanned cell is said once per item
+                continue
+            seen.add((head[c], t))
+            fields.append([head[c], t])
+        if fields or m[r][key][0]:
+            items.append({'key': m[r][key][0] or '—', 'fields': fields})
+    label = ' / '.join(dict.fromkeys(m[r][key][0] for r in range(nh) if m[r][key][0])) or None
+    return {'title': title, 'label': label, 'items': items} if items else None
+
+
+def texts(lst: dict) -> list[str]:
+    """Every piece of text of a list (the export must contain each one)."""
+    out = [lst[k] for k in ('title', 'label') if lst.get(k)]
+    for it in lst['items']:
+        out += [it] if isinstance(it, str) else [it['key']] + [x for kv in it['fields'] for x in kv]
+    return [t for t in out if t and t != '—']
+
+
+def clean_list(lst: dict, fmt) -> dict | None:
+    """The list with every text passed through `fmt` (e.g. to plain text); pieces left empty are dropped."""
+    items = []
+    for it in lst['items']:
+        if isinstance(it, str):
+            items += [x] if (x := fmt(it)) else []
+        else:
+            k, fields = fmt(it['key']), [[fmt(a), v] for a, b in it['fields'] if (v := fmt(b))]
+            if fields or k:
+                items.append({'key': k or '—', 'fields': fields})
+    return {**lst, **{k: fmt(lst[k]) for k in ('title', 'label') if lst.get(k)}, 'items': items} if items else None
+
+
+def markdown(lst: dict) -> str:
+    """A list as Markdown: '- cell' per item, or '- key:' with indented 'header: value' lines per item."""
+    out = ([lst['title']] if lst.get('title') else []) + ([f'{lst["label"]}:'] if lst.get('label') else [])
+    for it in lst['items']:
+        if isinstance(it, str):
+            out.append(f'- {it}')
+        else:
+            out.append(f'- {it["key"]}:')
+            out += [f'  {k}: {v}' for k, v in it['fields']]
+    return '\n'.join(out)
+
+
 def layout(block: dict) -> str | None:
     """'rows' | 'cols' when the segment is rendered as a list, None when as a table."""
     over = block.get('table_layout')
@@ -338,9 +466,21 @@ def layout(block: dict) -> str | None:
     return None if hint.get('candidate') else hint.get('order')
 
 
-def as_list(block: dict, text: str) -> list[str] | None:
-    """The segment's text as list items when its layout is a list (else None)."""
+def key(block: dict) -> int | None:
+    """The key column / row of a list with levels: the reviewer's (only with their own rows/cols layout)."""
+    k = block.get('table_key')
+    return k if isinstance(k, int) and block.get('table_layout') in LAYOUTS else None
+
+
+def as_list(block: dict, text: str) -> dict | None:
+    """The segment's text as a list when its layout is a list (else None): {'order', 'key', 'label', 'items'} —
+    items are cell texts (flat list) or {'key', 'fields'} (a list with levels). A key no longer in the grid (the
+    text was corrected since) falls back to the flat list: never content lost."""
     order = layout(block)
     if not order or (block.get('chosen') or {}).get('type') != 'text':
         return None
-    return items(block, text, order) or None
+    k = key(block)
+    if k is not None and (lst := keyed(text, order, k)):
+        return {'order': order, 'key': k, **lst}
+    its = items(block, text, order)
+    return {'order': order, 'key': None, 'title': None, 'label': None, 'items': its} if its else None

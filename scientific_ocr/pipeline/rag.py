@@ -169,11 +169,12 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
             body = n.get('body') if t == 'figure' else None
             if body and 'latex' in body:
                 out.append({'t': 'equation', 'text': f'$$ {body["latex"].strip()} $$', 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': labels})
-            elif body and body.get('items'):                  # a term grid read as a list (pipeline.tables)
-                its = [x for x in (clean(i, strip)[0] for i in body['items']) if x]
-                if its:
-                    out.append({'t': 'list', 'text': '\n'.join(f'- {x}' for x in its), 'pages': pages(n), 'ids': ids(n),
-                                'terms': [x for x in its if len(x.split()) <= MAX_TERM_WORDS], 'labels': labels})
+            elif body and body.get('items'):                  # a table read as a list (pipeline.tables)
+                lst = tables.clean_list(body['list'], lambda s: clean(s, strip)[0])
+                if lst:
+                    flat = [x for x in lst['items'] if isinstance(x, str)]
+                    out.append({'t': 'list', 'text': tables.markdown(lst), 'list': lst, 'pages': pages(n), 'ids': ids(n),
+                                'terms': [x for x in flat if len(x.split()) <= MAX_TERM_WORDS], 'labels': labels})
             elif body and body.get('text'):
                 kind = 'table' if n.get('kind') == 'table' else 'text'
                 txt = table_text(body['text']) if kind == 'table' else clean(body['text'], strip)[0]
@@ -200,7 +201,7 @@ def html(c: dict, profile: dict, pages: set | None = None) -> str:
     rows), each element carrying the segment it comes from (data-seg: click selects, loops show it)."""
     from html import escape
 
-    from .inline import inline_html
+    from .inline import inline_html, list_html
     out = []
     for u in units(c, profile, pages):
         seg = (u.get('ids') or [''])[0]
@@ -216,6 +217,8 @@ def html(c: dict, profile: dict, pages: set | None = None) -> str:
             out.append(f'<div{a}><div class="pv-math">{escape(text)}</div></div>')
         elif t == 'table' and text.startswith('|'):
             out.append(f'<div{a}><pre class="pv-text pv-rag-table">{escape(text)}</pre></div>')
+        elif t == 'list' and u.get('list'):
+            out.append(f'<div{a}>{list_html(u["list"])}</div>')
         elif all(x.startswith('- ') for x in lines if x.strip()) and any(x.strip() for x in lines):
             items = ''.join(f'<li>{inline_html(x[2:])}</li>' for x in lines if x.strip())
             out.append(f'<div{a}><ul class="pv-text pv-items">{items}</ul></div>')

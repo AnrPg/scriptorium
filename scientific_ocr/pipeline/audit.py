@@ -163,9 +163,9 @@ def post_render(c: dict, md: str, out: Path, images: bool = True) -> list[dict]:
         if b.get('flow') == 'furniture' or not in_reader_output(b) or (cap_of is not None and not in_reader_output(cap_of)):
             continue                                       # the reviewer (or the output profile) left it out: not a loss
         ch = b['chosen']
-        items = tables.as_list(b, chosen_text(b)) if ch['type'] == 'text' and b['kind'] == 'table' else None
-        if items:                                          # a term grid read as a list: EVERY item must be there
-            lost = [t for t in items if (sn := _norm(t).strip()) and sn not in flat]
+        lst = tables.as_list(b, chosen_text(b)) if ch['type'] == 'text' and b['kind'] == 'table' else None
+        if lst:                                            # a table read as a list: EVERY piece must be there
+            lost = [t for t in tables.texts(lst) if (sn := _norm(t).strip()) and sn not in flat]
             if lost:
                 F.append(finding('INTEGRITY_CONTENT_NOT_EXPORTED', 'critical', b['page'], [b['id']],
                                  f'list items not in the export: {lost[:3]!r}', 'fix renderer'))

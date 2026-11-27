@@ -272,8 +272,8 @@ def _node(b, by_id) -> dict | None:
             body = {'latex': ch['latex']}
         elif ch['type'] == 'text' and b['kind'] != 'caption':
             body = {'text': chosen_text(b)}
-            if b['kind'] == 'table' and (items := tables.as_list(b, body['text'])):
-                body = {'text': '\n'.join(f'- {t}' for t in items), 'items': items}   # a term grid read as a list
+            if b['kind'] == 'table' and (lst := tables.as_list(b, body['text'])):   # a table read as a list
+                body = {'text': tables.markdown(lst), 'items': lst['items'], 'list': lst}
         cap_blocks = caps if b['kind'] != 'caption' else [b]
         return {'t': 'figure', 'kind': 'table' if b['kind'] == 'table' else 'figure',
                 'image': None if body or b['kind'] == 'caption' else _image(b), 'body': body,

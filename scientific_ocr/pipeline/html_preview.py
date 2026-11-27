@@ -15,7 +15,7 @@ from html import escape
 from ..core.model import in_output
 from ..core.vocabulary import EXCURSUS_TYPES
 from . import reading
-from .inline import HEADING_MARKS, inline_html
+from .inline import HEADING_MARKS, inline_html, list_html
 from .markdown import markdown
 
 STATUS_EL = {'required': 'απαιτείται έλεγχος', 'recommended': 'συνιστάται έλεγχος', 'approved': 'εγκρίθηκε',
@@ -73,8 +73,7 @@ def body_html(c: dict, asset_url, reviewer: bool = False, pages: set | None = No
             body = _img(n['image'], asset_url, lab[n['kind']]) if n['image'] else ''
             if n['body']:
                 body += (f'<div class="pv-math">$${escape(n["body"]["latex"])}$$</div>' if 'latex' in n['body']
-                         else '<ul class="pv-text pv-items">' + ''.join(f'<li>{inline_html(t)}</li>' for t in n['body']['items'])
-                         + '</ul>' if n['body'].get('items')
+                         else list_html(n['body']['list']) if n['body'].get('items')
                          else f'<div class="pv-text">{inline_html(n["body"]["text"])}</div>')
             body += ''.join(_img(p, asset_url, lab[n['kind']]) for p in n.get('caption_images') or [])
             caps = ''.join(f'<figcaption class="pv-cap pv-cap-{escape(cp["role"])}">{inline_html(cp["text"])}</figcaption>'
