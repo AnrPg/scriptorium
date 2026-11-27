@@ -3,6 +3,7 @@ import { refresh } from '../core/chrome.js';
 import { h } from '../core/dom.js';
 import { S, go } from '../core/state.js';
 import { actLater, toast } from '../ui/feedback.js';
+import { loopCount } from '../ui/loopcount.js';
 import { reveal } from '../workspace/reveal.js';
 import { selectBlock } from '../workspace/workspace.js';
 
@@ -78,7 +79,8 @@ export function typoBar(lead = null) {   // lead: the loop selector (workspace),
     onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); typoDecide(true); } else if (e.key === 'Escape') e.target.blur(); } });
   return h('div', { class: 'ws-row bound-bar typo-bar', role: 'region', 'aria-label': 'Έλεγχος τυπογραφικών' },
       lead,
-    h('b', { class: 'nowrap', title: `Τυπογραφικό ${s.i + 1} από ${s.items.length} · ${left} απομένουν · σελ. ${t.page}` }, `${s.i + 1} / ${s.items.length}`),
+    h('b', { class: 'nowrap', title: `Τυπογραφικό ${s.i + 1} από ${s.items.length} · σελ. ${t.page}` }, `${s.i + 1} / ${s.items.length}`),
+    loopCount(left, s.items.length, 'τυπογραφικά'),
     t.strength === 'strong' ? h('span', { class: 'chip rv-approved typo-strong', title: 'Ισχυρή: δύο ανεξάρτητες ενδείξεις' }, 'ισχυρή') : null,
     h('span', { class: 'small typo-ctx', title: `…${t.before} ${t.word} ${t.after}…` }, h('span', { class: 'mut ctx-side' }, '…' + t.before + ' '), h('b', { class: 'kpi-bad' }, t.word), h('span', { class: 'mut ctx-side' }, ' ' + t.after + '…')),
     h('span', {}, '→'), input, h('datalist', { id: listId }, t.candidates.map(c => h('option', { value: c.text }, c.why.map(w => WHY_EL[w] || w).join(', ')))),

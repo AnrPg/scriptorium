@@ -596,3 +596,7 @@ label.list-item{cursor:pointer}
 .health-log{font-family:ui-monospace,Menlo,monospace;overflow-wrap:anywhere}
 .health-item .bad{color:var(--bad)}
 .gloss-note{align-items:center;gap:8px;margin:6px 0;padding:6px 10px;border:1px solid var(--line2);border-left:3px solid var(--acc);border-radius:6px;background:var(--soft3)}
+/* how much of a loop is left (ui/loopcount.js): text + thin progress bar */
+.loop-count{display:inline-flex;flex-direction:column;gap:2px;font-size:12px;color:var(--mut);margin:0 6px;min-width:0}
+.loop-count-bar{display:block;height:3px;border-radius:2px;background:var(--line2);overflow:hidden;min-width:90px}
+.loop-count-bar>span{display:block;height:100%;background:var(--ok);transition:width .3s}

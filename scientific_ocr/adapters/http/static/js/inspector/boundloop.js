@@ -4,6 +4,7 @@ import { h } from '../core/dom.js';
 import { S, go } from '../core/state.js';
 import { entName } from '../book/entities.js';
 import { actLater, inFlight, toast } from '../ui/feedback.js';
+import { loopCount } from '../ui/loopcount.js';
 import { reveal } from '../workspace/reveal.js';
 import { renderWorkspace } from '../workspace/workspace.js';
 
@@ -168,7 +169,8 @@ export function boundBar(lead = null) {   // lead: the loop selector (workspace)
   }
   return h('div', { class: 'ws-row bound-bar', role: 'region', 'aria-label': 'Έλεγχος ορίων εξαιρέσεων' },
       lead,
-    h('b', { class: 'nowrap', title: `Εξαίρεση ${b.i + 1} από ${b.items.length} · ${left} απομένουν` }, `${b.i + 1} / ${b.items.length}`),
+    h('b', { class: 'nowrap', title: `Εξαίρεση ${b.i + 1} από ${b.items.length}` }, `${b.i + 1} / ${b.items.length}`),
+    loopCount(left, b.items.length, 'εξαιρέσεις'),
     h('span', { class: 'chip ent bound-type' }, typeName(e.type)),
     h('span', { class: 'small nowrap', title: p0 === p1 ? `σελ. ${p0} · ${e.n} τμήματα` : `αρχή σελ. ${p0} → τέλος σελ. ${p1} · ${e.n} τμήματα` },
       p0 === p1 ? `σελ. ${p0} · ${e.n} τμ.` : `σελ. ${p0}→${p1} · ${e.n} τμ.`),

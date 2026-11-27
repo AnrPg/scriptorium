@@ -68,6 +68,12 @@ export async function stepReview(dir = 1, from = null) {
   else go(`#/b/${S.book.id}/p/${t.page}/${t.id}`);
 }
 
+/** How much of the whole-book loop is left: {left: no verdict yet, total: in the loop at this level}. */
+export async function loopProgress() {
+  const all = await bookQueue(), done = decidedNow();
+  return { left: all.filter(x => !done.has(x.id)).length, total: all.length };
+}
+
 /** "k / N" for the segment panel: its place in the whole-book loop (null if it is not in the loop). */
 export async function loopPosition(blockId) {
   const q = await loop(blockId);

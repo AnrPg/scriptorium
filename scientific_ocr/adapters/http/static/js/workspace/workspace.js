@@ -1,6 +1,7 @@
 import { B, api } from '../core/api.js';
 import { refresh } from '../core/chrome.js';
-import { loopLevel, setLoopLevel, stepReview } from '../inspector/reviewloop.js';
+import { loopLevel, loopProgress, setLoopLevel, stepReview } from '../inspector/reviewloop.js';
+import { loopCountLater } from '../ui/loopcount.js';
 import { $, clear, h, keepScroll, pctStyle } from '../core/dom.js';
 import { NAV, navSave } from '../core/nav.js';
 import { R, S, continuable, go, kindLabel, outOfOutput, parseRoute, profileHidden } from '../core/state.js';
@@ -309,6 +310,7 @@ function reviewRow() {
       h('button', { onclick: () => stepReview(-1), title: 'Προηγούμενο προς έλεγχο, σε όλο το βιβλίο (K)', 'aria-label': 'Προηγούμενο προς έλεγχο' }, '↑'),
       h('button', { class: 'primary', onclick: () => stepReview(1), title: `Επόμενο προς έλεγχο (${LOOP_EL[loopLevel()]}), σε όλο το βιβλίο· αλλάζει σελίδα μόνο του (J)` },
         h('span', { class: 'wide-only' }, 'Επόμενο για έλεγχο '), '↓', h('kbd', {}, 'J'))),
+    loopCountLater(loopProgress(), LOOP_EL[loopLevel()]),
     h('span', { class: 'spacer' }),
     h('div', { class: 'ws-actions' }, barTools(EDIT_TOOLS)));
 }
