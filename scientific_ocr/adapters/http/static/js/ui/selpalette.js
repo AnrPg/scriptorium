@@ -1,7 +1,8 @@
 // Floating palette of the SELECTION's actions (every property of the segment card applied to all selected
 // segments, inspector/multiprops.js). It appears at the cursor as soon as two or more segments are selected and
 // moves with the cursor like a tooltip; moving the pointer TOWARDS it parks it so it can be used (it follows again
-// once the pointer goes well away). It can also be pinned where it is, or dragged by its header.
+// once the pointer goes well away). It can also be pinned where it is, or dragged by its header. A click outside
+// it that is not on a segment closes it unless pinned (like × : it opens again with the next selection).
 // Positioning (viewport flip/shift) by Floating UI (vendored: static/vendor/floating-ui, window.FloatingUIDOM).
 import { h } from '../core/dom.js';
 import { S, parseRoute } from '../core/state.js';
@@ -65,6 +66,12 @@ function build() {
   el.append(head, body);
   document.body.append(el);
   document.addEventListener('pointermove', onMove, { passive: true });
+  // a click anywhere else closes it (side panel, empty page area, a menu…) — except on a segment, which changes
+  // the selection (a new selection opens it again), and inside its own dropdowns/dialogs
+  document.addEventListener('pointerdown', (e) => {
+    if (el.hidden || pinned || el.contains(e.target) || e.target.closest?.('[data-seg], .dd, dialog')) return;
+    hiddenFor = selKey(); el.hidden = true;
+  }, true);
   window.addEventListener('resize', place);
   window.addEventListener('hashchange', () => { if (parseRoute().view !== 'ws') el.hidden = true; });
 }
