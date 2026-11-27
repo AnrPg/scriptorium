@@ -16,8 +16,18 @@ import { VIEWS, clearSelection, omitTargets, renderWorkspace, selectBlock, setVi
 // ------------------------------------------------------------------ keyboard: only what the current state allows
 // One declarative table drives the handler AND the help: each shortcut names its key, exact modifiers, when it is
 // available (current state) and what it does. Single-letter keys never fire with ⌘/Ctrl/Alt held.
+// Letters are matched by the PHYSICAL key when the layout gives a non-Latin letter: with the Greek layout on, J
+// (ξ), L (λ), F (φ), ⌘Z (ζ)… do what they do in English. A Latin layout (AZERTY, Dvorak…) keeps its own letters.
+export function keyOf(e) {
+  const k = e.key || '';
+  if (k.length !== 1) return k;                               // Enter, Escape, ArrowUp…
+  const lower = k.toLowerCase();
+  if (/[a-z]/.test(lower) || !/\p{L}/u.test(k)) return lower; // a Latin letter, a digit or punctuation: as typed
+  const phys = /^Key([A-Z])$/.exec(e.code || '');
+  return phys ? phys[1].toLowerCase() : lower;               // another script's letter: the key it sits on
+}
 export const K = (key, { mod = false, shift = null, alt = false } = {}) => (e) =>
-  (Array.isArray(key) ? key : [key]).includes(e.key.length === 1 ? e.key.toLowerCase() : e.key)
+  (Array.isArray(key) ? key : [key]).includes(keyOf(e))
   && (e.metaKey || e.ctrlKey) === mod && e.altKey === alt && (shift === null || e.shiftKey === shift);
 export const inWs = (c) => S.route?.view === 'ws' && !c.inDialog;
 export const free = (c) => inWs(c) && !c.typing;                 // workspace, not typing in a field
@@ -31,26 +41,26 @@ export const SHORTCUTS = [
     match: K(['ArrowUp', 'ArrowDown'], { alt: true }), when: c => free(c) && S.sel && !S.multi.size, run: (e) => moveBySteps(S.sel, e.key === 'ArrowUp' ? -1 : 1) },
   // the loop over the output profile's exclusions (inspector/boundloop.js) owns these keys while it is on
   // correcting an exclusion's boundaries (right kind, wrong limits): D (Δ) starts, [ ] set them, ↵ saves, Esc cancels
-  { keys: 'D', label: 'Διόρθωση ορίων της εξαίρεσης', group: 'bound', match: K(['d', 'δ']), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundEdit() },
+  { keys: 'D', label: 'Διόρθωση ορίων της εξαίρεσης', group: 'bound', match: K('d'), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundEdit() },
   { keys: '[ / ]', label: 'Το επιλεγμένο τμήμα γίνεται η ΑΡΧΗ / το ΤΕΛΟΣ', group: 'bound', match: K(['[', ']']), when: c => free(c) && boundEditing(), run: (e) => boundSetEdge(e.key === '[' ? 'first' : 'last') },
   { keys: '↵', label: 'Αποθήκευση νέων ορίων → επόμενη', group: 'bound', match: K('Enter'), when: (c, e) => free(c) && boundEditing() && !enterOwnedBy(e), run: () => boundSaveEdit() },
   { keys: 'Esc', label: 'Ακύρωση διόρθωσης ορίων', group: 'bound', match: K('Escape'), when: c => free(c) && boundEditing() && !S.multi.size, run: () => boundEdit() },
   { keys: '↵', label: 'Όρια εξαίρεσης σωστά → επόμενη', group: 'bound', match: K('Enter'), when: (c, e) => free(c) && boundActive() && !boundEditing() && !S.multi.size && !enterOwnedBy(e), run: () => boundDecide(true) },
   { keys: 'X', label: 'Όχι αυτό (μένει στην έξοδο) → επόμενη', group: 'bound', match: K('x'), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundDecide(false) },
-  { keys: 'J / K', label: 'Επόμενη / προηγούμενη εξαίρεση', group: 'bound', match: K(['j', 'k']), when: c => free(c) && boundActive(), run: (e) => boundStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
-  { keys: 'U', label: 'Αναίρεση της τελευταίας απόφασης για εξαίρεση', group: 'bound', match: K(['u', 'θ']), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundUndo() },
+  { keys: 'J / K', label: 'Επόμενη / προηγούμενη εξαίρεση', group: 'bound', match: K(['j', 'k']), when: c => free(c) && boundActive(), run: (e) => boundStep(keyOf(e) === 'j' ? 1 : -1) },
+  { keys: 'U', label: 'Αναίρεση της τελευταίας απόφασης για εξαίρεση', group: 'bound', match: K('u'), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundUndo() },
   { keys: 'T', label: 'Σελίδα αρχής / τέλους της εξαίρεσης', group: 'bound', match: K('t'), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundToggleEnd() },
   { keys: 'Esc', label: 'Έξοδος από τον έλεγχο ορίων', group: 'bound', match: K('Escape'), when: c => free(c) && boundActive() && !S.sel && !S.multi.size, run: () => stopBoundLoop() },
   // the loop over the spelling proposals (inspector/typoloop.js) owns these keys while it is on
   { keys: '↵', label: 'Διόρθωση της λέξης → επόμενο τυπογραφικό', group: 'typo', match: K('Enter'), when: (c, e) => free(c) && typoActive() && !S.multi.size && !enterOwnedBy(e), run: () => typoDecide(true) },
   { keys: 'X', label: 'Σωστό ως έχει → επόμενο τυπογραφικό', group: 'typo', match: K('x'), when: c => free(c) && typoActive(), run: () => typoDecide(false) },
-  { keys: 'J / K', label: 'Επόμενο / προηγούμενο τυπογραφικό', group: 'typo', match: K(['j', 'k']), when: c => free(c) && typoActive(), run: (e) => typoStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
+  { keys: 'J / K', label: 'Επόμενο / προηγούμενο τυπογραφικό', group: 'typo', match: K(['j', 'k']), when: c => free(c) && typoActive(), run: (e) => typoStep(keyOf(e) === 'j' ? 1 : -1) },
   { keys: 'Esc', label: 'Έξοδος από τον έλεγχο τυπογραφικών', group: 'typo', match: K('Escape'), when: c => free(c) && typoActive() && !S.multi.size, run: () => stopTypoLoop() },
   { keys: '⌘↵', label: 'Αποθήκευση της διόρθωσής μου', group: 'segment', match: K('Enter', { mod: true }), when: c => inWs(c) && c.A.save, run: (e, c) => c.A.save() },
   { keys: 'Esc', label: 'Πίσω / καθαρισμός επιλογής / ακύρωση / απόρριψη πρόχειρου', group: 'segment', match: K('Escape'), when: inWs, run: (e, c) => escapeKey(e, c) },
   { keys: '1 / 2 / 3', label: 'Σάρωση / Αποτέλεσμα / Markdown σελίδας', group: 'page', match: K(['1', '2', '3']), when: c => free(c) && S.page?.info?.state, run: (e) => setView(VIEWS[+e.key - 1][0]) },
   { keys: 'O', label: 'Εκτός εξόδου / ξανά στην έξοδο (το επιλεγμένο ή τα επιλεγμένα· μένουν στο βιβλίο)', group: 'multi', match: K('o'), when: c => free(c) && toolOn('omit') && omitTargets().length > 0, run: () => toggleOmit() },
-  { keys: 'F', label: 'Συνέχεια της προηγούμενης παραγράφου (το επιλεγμένο ή τα επιλεγμένα κείμενα· ξανά: αυτόματα)', group: 'multi', match: K(['f', 'φ']), when: c => free(c) && omitTargets().length > 0, run: () => toggleContinuation() },
+  { keys: 'F', label: 'Συνέχεια της προηγούμενης παραγράφου (το επιλεγμένο ή τα επιλεγμένα κείμενα· ξανά: αυτόματα)', group: 'multi', match: K('f'), when: c => free(c) && omitTargets().length > 0, run: () => toggleContinuation() },
   { keys: '⌫', label: 'Αφαίρεση λάθος τμήματος (το επιλεγμένο ή τα επιλεγμένα· ⌘Z για αναίρεση)', group: 'multi', match: K(['Delete', 'Backspace']), when: c => free(c) && toolOn('omit') && omitTargets().length > 0, run: () => removeSegments() },
   { keys: 'S', label: 'Λειτουργία επιλογής (κλικ = προσθήκη/αφαίρεση) — στη Σάρωση', group: 'multi', match: K('s'), when: c => free(c) && toolOn('select'), run: () => toggleSelectMode() },
   { keys: '↵', label: 'Ομαδοποίηση/συγχώνευση των επιλεγμένων →', group: 'multi', match: K('Enter'), when: (c, e) => free(c) && S.multi.size >= 2 && !S.multiOpen && !enterOwnedBy(e), run: () => openMultiPanel() },
@@ -64,7 +74,7 @@ export const SHORTCUTS = [
   { keys: 'W', label: 'Είναι λάθος — νέο OCR', group: 'segment', match: K('w'), when: c => free(c) && c.A.wrong, run: (e, c) => c.A.wrong() },
   { keys: 'N', label: 'Σημείωση (μοντέλο)', group: 'segment', match: K('n'), when: c => free(c) && c.A.note, run: (e, c) => c.A.note() },
   { keys: 'L', label: 'Ετικέτα & δομή', group: 'segment', match: K('l'), when: c => free(c) && c.A.label, run: (e, c) => c.A.label() },
-  { keys: 'J / K', label: 'Επόμενο / προηγούμενο προς έλεγχο (σε όλο το βιβλίο, χωρίς αλλαγή σελίδας με το χέρι)', group: 'page', match: K(['j', 'k']), when: free, run: (e) => queueStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
+  { keys: 'J / K', label: 'Επόμενο / προηγούμενο προς έλεγχο (σε όλο το βιβλίο, χωρίς αλλαγή σελίδας με το χέρι)', group: 'page', match: K(['j', 'k']), when: free, run: (e) => queueStep(keyOf(e) === 'j' ? 1 : -1) },
   { keys: '← / → · PgUp / PgDn', label: 'Προηγούμενη / επόμενη σελίδα (σελίδες στη σειρά, χωρίς τον έλεγχο)', group: 'page', match: K(['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown']), when: free, run: (e) => pageStep(['ArrowLeft', 'PageUp'].includes(e.key) ? -1 : 1) },
   { keys: 'R', label: 'Σχεδίαση περιοχής (Σάρωση)', group: 'page', match: K('r'), when: c => free(c) && toolOn('region'), run: () => toggleDraw() },
   { keys: 'B', label: 'Εμφάνιση πλαισίων (Σάρωση)', group: 'page', match: K('b'), when: c => free(c) && toolOn('boxes'), run: () => { S.showBoxes = !S.showBoxes; renderWorkspace(); } },
@@ -104,7 +114,7 @@ export function onKeydown(e) {
 }
 export function showHelp() {
   const c = { inDialog: false, typing: false, A: S.segActions || {} };
-  modal('Συντομεύσεις', h('div', {}, SHORTCUT_GROUPS.map(([g, title]) => [h('h3', {}, title),
+  modal('Συντομεύσεις', h('div', {}, h('p', { class: 'small mut' }, 'Με ελληνικό πληκτρολόγιο λειτουργούν τα ίδια πλήκτρα: ξ = J, κ = K, λ = L, φ = F, ⌘ζ = ⌘Z κ.ο.κ.'), SHORTCUT_GROUPS.map(([g, title]) => [h('h3', {}, title),
     h('table', { class: 'kbd-table' }, SHORTCUTS.filter(x => x.group === g).map(x => { const ok = !!x.when(c);
       return h('tr', { class: ok ? '' : 'off' }, h('td', {}, h('kbd', {}, x.keys)), h('td', {}, x.label + (ok ? '' : ' — όχι τώρα'))); }))])),
     [{ label: 'Κλείσιμο' }]);
