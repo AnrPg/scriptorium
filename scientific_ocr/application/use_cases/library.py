@@ -74,7 +74,7 @@ class LibraryService(ServiceBase):
                 'stale': (c.get('human') or {}).get('stale', []), 'sections': c.get('sections', []),
                 'groups': c.get('groups', []), 'excursus': c.get('excursus', []), 'excursus_marked': st['excursus'],
                 'excursus_suggestions': c.get('excursus_suggestions', []), 'document_structure': c.get('document_structure') or {'fixes': [], 'issues': []},
-                'ref_targets': [{'id': t['id'], 'label': t['label'], 'page': t['page']}
+                'ref_targets': [{'id': t['id'], 'label': t['label'], 'page': t['page'], 'kind': t['kind']}
                                 for t in references.targets(c.get('blocks', []))] if c else [],
                 'critical': [f for f in c.get('findings', []) if f['severity'] == 'critical'],
                 'built': (c.get('run') or {}).get('built_utc')}

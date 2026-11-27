@@ -146,7 +146,7 @@ def _dims(b: Book, page: int):
 def _block_view(x: dict) -> dict:
     keep = ('id', 'page', 'kind', 'original_kind', 'role', 'source', 'region_id', 'reading_order', 'review', 'reasons',
             'human_notes', 'heading_level', 'heading_level_source', 'section_path', 'flow', 'engine_label',
-            'lineage', 'content_source', 'caption_role', 'caption_label', 'caption_role_source', 'references',
+            'lineage', 'content_source', 'caption_role', 'caption_label', 'caption_role_source', 'references', 'references_dismissed',
             'merge_id', 'merged_from', 'groups', 'entities', 'excluded', 'omitted', 'profile_omitted', 'kept', 'text_norm', 'notation',
             'chosen', 'display_crop', 'rule_corrections', 'evidence', 'decisions', 'figure_text_candidates', 'relations',
             'match', 'flow_override', 'continues_override', 'excursus', 'table_layout', 'table_key', 'table_list')

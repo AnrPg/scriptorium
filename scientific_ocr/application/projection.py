@@ -647,7 +647,7 @@ def _calibration_books(out: Path) -> list[dict]:
 # build it was made from (base = run.built_utc).
 BOOK_WIDE_FIELDS = ('role', 'excluded', 'heading_level', 'heading_level_source', 'heading_style', 'heading_hints',
                     'heading_evidence', 'heading_shift', 'section_path', 'running_head', 'engine_rank',
-                    'style_of_numbered', 'human_style', 'model', 'typography_rel', 'flow', 'entities', 'references',
+                    'style_of_numbered', 'human_style', 'model', 'typography_rel', 'flow', 'entities', 'references', 'references_dismissed',
                     'box_head', 'groups', 'review_triage', 'excursus', 'profile_omitted')
 BOOK_WIDE_REASONS = ('EXCLUDED_AS_PAGE_FURNITURE', 'ENGINE_FURNITURE_IN_BODY', 'CAPTION_CONTINUATION',
                      'CAPTION_ACROSS_PAGES', 'HEADING_NUMBER_DUPLICATE', 'HEADING_NUMBER_OUT_OF_ORDER',

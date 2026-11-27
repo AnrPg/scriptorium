@@ -52,7 +52,7 @@ def targets(blocks: list[dict]) -> list[dict]:
             m = MENTION.match(label)
             if m:
                 out.append({'id': b['id'], 'label': label, 'stem': _stem(m.group(1)), 'num': _num(m.group(2)),
-                            'page': b['page']})
+                            'page': b['page'], 'kind': b['kind']})
     return out
 
 
@@ -63,6 +63,7 @@ def annotate(blocks: list[dict], overrides: dict | None = None) -> dict:
     stats = {'resolved': 0, 'ambiguous': 0, 'unresolved': 0}
     for b in blocks:
         b.pop('references', None)
+        b.pop('references_dismissed', None)
         b['relations'].pop('refers_to', None)
     stems = {t['stem'] for t in tg}                                # the book's own label vocabulary
     for b in blocks:
@@ -86,17 +87,20 @@ def annotate(blocks: list[dict], overrides: dict | None = None) -> dict:
             key = f'{b["id"]}#{n}'
             ref = {'n': n, 'text': m.group(0), 'label': f'{m.group(1)} {m.group(2)}', 'panel': m.group(3),
                    'start': m.start(), 'end': m.end()}
+            if len(hits) > 1:
+                ref['candidates'] = [t['id'] for t in hits]                # kept after a decision: it can be changed
             if overrides and key in overrides:
                 tgt = overrides[key]
                 ref.update(target=tgt, status='resolved' if tgt else 'not_a_reference', source='human')
             elif len(hits) == 1:
                 ref.update(target=hits[0]['id'], status='resolved', source='auto')
             elif hits:
-                ref.update(target=None, candidates=[t['id'] for t in hits], status='ambiguous', source='auto')
+                ref.update(target=None, status='ambiguous', source='auto')
                 flag(b, 'REFERENCE_AMBIGUOUS', text=m.group(0))
             else:
                 ref.update(target=None, status='unresolved', source='auto')
             if ref['status'] == 'not_a_reference':
+                b.setdefault('references_dismissed', []).append(ref)       # shown to the reviewer (can be undone)
                 continue
             stats[ref['status']] = stats.get(ref['status'], 0) + 1
             refs.append(ref)

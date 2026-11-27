@@ -11,6 +11,7 @@ import { captionPanel } from '../inspector/captions.js';
 import { excursusEditor, excursusValue } from '../inspector/excursus.js';
 import { loopPosition, stepReview } from '../inspector/reviewloop.js';
 import { historyPanel } from '../inspector/history.js';
+import { referencePanel, referenceSummary } from '../inspector/references.js';
 import { queueNeighbours, renderInspector } from '../inspector/inspector.js';
 import { engChip, lineageDialog, nextPageWithWork, reportWrong, sourceLabel } from '../inspector/lineage.js';
 import { groupsPanel } from '../inspector/multi.js';
@@ -132,6 +133,7 @@ export function segmentPanel(body, blk) {
         c.before !== undefined ? h('div', { class: 'conflict-ctx' }, '…' + c.before + ' ', h('mark', { class: 'conflict' + (c.critical ? ' crit' : '') }, c.primary), ' ' + c.after + '…')
           : h('div', { class: 'mut' }, `…${c.context}…`)))));
       if (ev && ev.note) body.append(h('div', { class: 'note' }, '«' + ev.note + '»'));
+      if (r === 'REFERENCE_AMBIGUOUS') { const p = referencePanel(blk, decide, { only: 'ambiguous' }); if (p) body.append(h('div', { class: 'ref-box' }, p)); }
       if (r === 'DECISION_STALE' && ev) body.append(h('div', { class: 'note small' }, STALE_WHY[ev.why] || ev.why || '',
         ' Η απόφαση μένει στο ιστορικό· μια νέα απόφαση εδώ την αντικαθιστά.'));
     }
@@ -349,6 +351,7 @@ function propertiesCard(blk, book, decide, seg, rerender) {
     captionish ? row('cap', 'Λεζάντα', h('span', { class: 'prop-line' + (mayBeCaption ? ' mut' : '') }, blk.kind === 'caption' ? (owner ? `ανήκει σε ${kindLabel(owner)}` : 'χωρίς σχήμα')
         : mayBeCaption ? 'όχι — μήπως είναι;' : `${(blk.relations?.captions || []).length} λεζάντα(ες)`),
       act1('cap', mayBeCaption ? 'Σύνδεση ▾' : 'Αλλαγή ▾'), () => unwrap(captionPanel(blk))) : null,
+    referenceSummary(blk) ? row('ref', 'Παραπομπές', h('span', { class: 'prop-line' }, referenceSummary(blk)), act1('ref', 'Αλλαγή ▾'), () => referencePanel(blk, decide)) : null,
     flowRow(),
     tableRow(),
     blk.flow !== 'furniture' ? row('exc', 'Παρέκβαση', excursusValue(blk), act1('exc', 'Επιλογές ▾'), () => excursusEditor(blk)) : null,

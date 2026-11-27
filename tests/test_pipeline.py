@@ -1028,6 +1028,21 @@ def test_cross_references_resolve_by_word_stem_and_number():
     assert 'references' not in cap and fig['relations']['referenced_by'] == ['p'] and res['resolved'] == 1
     references.annotate([fig, cap, para], overrides={'p#0': None})          # the reviewer: not a reference
     assert 'Σχήματος 4.9' not in [r['label'] for r in para.get('references', [])]
+    assert [r['label'] for r in para['references_dismissed']] == ['Σχήματος 4.9']   # shown, so it can be undone
+    # two elements carry 4.9 (a figure continued on the next page): ambiguous, a flag only -- the paragraph stays
+    # a paragraph; the reviewer's pick resolves it and the candidates stay so the pick can be changed
+    fig2 = blk('g', 'figure', '', rel={'captions': ['d']}, page=2)
+    cap2 = blk('d', 'caption', 'ΣΧΗΜΑ 4.9 (συνέχεια)', caption_label='ΣΧΗΜΑ 4.9', rel={'caption_for': 'g'}, page=2)
+    para = blk('p', 'paragraph', 'Όπως φαίνεται στο Σχήματος 4.9, η έλικα…', reasons=[], review='not_needed')
+    references.annotate([fig, cap, fig2, cap2, para])
+    r = para['references'][0]
+    assert (r['status'], r['candidates']) == ('ambiguous', ['f', 'g']) and para['reasons'] == ['REFERENCE_AMBIGUOUS']
+    assert para['kind'] == 'paragraph' and para['review'] == 'recommended' and not para.get('display_crop')
+    para = blk('p', 'paragraph', 'Όπως φαίνεται στο Σχήματος 4.9, η έλικα…', reasons=[], review='not_needed')
+    references.annotate([fig, cap, fig2, cap2, para], overrides={'p#0': 'g'})
+    r = para['references'][0]
+    assert (r['status'], r['target'], r['source'], r['candidates']) == ('resolved', 'g', 'human', ['f', 'g'])
+    assert para['reasons'] == [] and fig2['relations']['referenced_by'] == ['p']
 
 
 # ---------------------------------------------------------------- typography, coverage, hierarchy hints

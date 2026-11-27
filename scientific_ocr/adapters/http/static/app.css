@@ -583,3 +583,8 @@ label.list-item{cursor:pointer}
 .prop-choice-opts{display:flex;flex-wrap:wrap;gap:6px}
 .sel-palette .prop-edit .actions{display:flex;flex-wrap:wrap;gap:6px}
 .sel-palette .prop-edit button.ghost{border-color:var(--line2);background:var(--panel)}
+/* cross-references of a segment (inspector/references.js) */
+.ref-box{background:var(--soft);border-radius:6px;padding:6px 8px;margin:6px 0}
+.ref-list{display:flex;flex-direction:column;gap:10px}
+.ref-item{display:flex;flex-direction:column;gap:4px}
+.ref-cand{gap:2px}
