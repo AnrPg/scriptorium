@@ -25,7 +25,7 @@ Use **Marker's LaTeX preferentially** for mathematics and physics. Docling contr
 2. Conserve all detected elements; if uncertain, preserve cropped excerpt visibly.
 3. Semantic associations + inferred reading order form the LLM view; source-page bboxes remain in canonical JSON.
 4. Do not collapse or concatenate captions with body text. Wrap every figure/caption in explicit boundaries.
-5. Do not auto-accept scientific symbols, coefficients, charges, superscripts, isotope numbers, reactant/product directions, equilibrium arrows, rates, units, stereochemistry, or lone pairs solely from OCR consensus.
+5. Do not auto-accept scientific symbols, coefficients, charges, superscripts, isotope numbers, reactant/product directions, equilibrium arrows, rates, units, stereochemistry, or lone pairs solely from OCR consensus. Exception decided by the user (2026-11-25): a book's `engine_policy: marker_primary` (default of the RAG output profile, switchable per book) accepts Marker's reading of symbols/notation without review — spelling proposals are the safety net; equations, tables and any sign of lost text are always reviewed.
 6. No blanket `confidence > threshold = correct`. Validate on manually labeled Greek scientific pages and keep critical conflicts reviewable.
 7. Never say a 500-page document is fully verified unless it actually has the required human/source validation; use statuses `DRAFT`, `REVIEW_REQUIRED`, `LLM_READY_WITH_EXCERPTS`, `VERIFIED`.
 

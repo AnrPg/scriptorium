@@ -143,6 +143,73 @@ PAGE / BLOCK / FIGURE (captions inside) / EXCERPT pairs with stable ids, `flow=m
 `within=` for inserts that interrupt a paragraph, and `TEXT_CONTINUES` / `TEXT_RESUMES` at the exact cut and
 resume points of a paragraph split by a figure or a page break. All of it is generated from canonical JSON.
 
+### Output profiles — «RAG» (core/profiles.py, pipeline/profile.py, pipeline/rag.py)
+A book is prepared FOR something, chosen once (Ρυθμίσεις → Προφίλ εξόδου; event `output_profile`, undoable).
+**Decisions per profile** (core/scopes.py). Every reviewer decision belongs to the profile it was taken under
+and the outputs follow the decisions of the profile in force (an export refuses a book built under another
+profile). Changing the profile asks: *carry* the current decisions over, or keep the profiles *separate*; nothing is
+undone either way — switching back brings that profile's decisions back. «Αντιγραφή αποφάσεων από …» carries
+another profile's decisions later (event `profile_copy`, undoable; on the same segment the later decision wins).
+Book-level events (pages, page OCR profile, the profile choice, undo/redo) are global. History from before scopes
+projects unchanged (its switches carried everything). A content decision carried from another profile is asked
+again where the new output would lose it (TEXT_ONLY_LOSS); «Εγκρίνω ως έχει» confirms it.
+`reading` is the book as it is. `rag` prepares text for a retrieval pipeline used by a **text-only** LLM agent:
+* **Content.** Questions/exercises/problems and their solutions (hard distractors: they look like user queries but
+  hold no answer), contents, index, front matter, objectives, history/biography and «Το ήξερες;» leave the output;
+  a question with a linked answer stays with it. Pictures do not travel; their captions become paragraphs placed
+  after the first paragraph that cites the figure; trailing credit notes are dropped.
+* **Safety.** Only boundaries with independent evidence are excluded automatically (a box, an engine element, a
+  collective section closing its chapter); a heading's subtree alone is only *suggested* (a margin label set as a
+  heading owns the body text after it). A member that body text continues into/out of is kept
+  (PROFILE_BOUNDARY_CHECK). Each automatic exclusion waits for one boundary confirmation («Έλεγχος» tab; status
+  REVIEW_REQUIRED until then). The reviewer's «Στην έξοδο» always wins. «Έλεγχος ορίων ▶» loops over them on
+  their pages, members drawn hatched with ΑΡΧΗ/ΤΕΛΟΣ (↵ σωστό · X όχι αυτό · J/K · T αρχή/τέλος · Esc).
+* **Review.** Excluded content is not drawn on the page, not listed, not queued, not in bulk review; it is listed
+  under «Κρυμμένα από την έξοδο — προφίλ». Picture fidelity flags are not asked (PROFILE_NOT_RELEVANT). Content
+  that exists only as an image but is not a picture (table, paragraph, uncovered region) is asked again
+  (TEXT_ONLY_LOSS) when it was decided before the profile was chosen.
+* **Export** (`rag_markdown`, `rag_chunks`, `rag_zip`): minimal Markdown (headings to depth 3, deeper titles and
+  box labels lead their paragraph; lists, Markdown tables or `Header: value` rows; `$…$`; no HTML, images or
+  emphasis; NFC, hyphen repair) and structure-aligned chunks (~220 words, max 380, sentence-safe splits, tiny tails
+  merged) prefixed with their heading path, with pages, content types, figure labels and key terms (the book's bold
+  terms). `manifest.json` states what the text does not contain. The export refuses while required review remains.
+  Optional: `python -m scientific_ocr rag-context --book …` adds one situating sentence per chunk from the local
+  model, in a separate `context` field (contextual retrieval), cached by chunk id.
+Evidence: hard distractors (Cuconasu et al. EMNLP 2025; arXiv 2605.10828), structure-aligned chunks with real heading
+paths (arXiv 2610.10170), fixed ~200-word size competitive vs semantic chunking (Qu et al. 2025), markup cost
+(HtmlRAG WWW 2025 vs PixelRAG 2026; He et al. NAACL 2025), Markdown tables (arXiv 2402.12869), OCR semantic noise
+dominates (OHRBench ICCV 2025), contextual retrieval (Anthropic 2024; Merola & Singh 2025).
+
+### Review load (pipeline/fills.py, pipeline/profile.review_policy, entities.banners)
+Measured on the reviewer's own decisions (Alberts: 2,484 actions, ~10 h) and turned into generic rules:
+* **Background fills.** Uncovered-ink regions that are a solid band (title bars, shaded headers) with text read on
+  the band are background, not lost content (`background_fill`); a band nobody read text on stays for review.
+* **Ink that reads as nothing.** Every uncovered-ink region is OCR'd on its own (Tesseract, exact box, cached
+  with the coverage): no word of >= 3 letters / < 4 letters («2-2», dashes), or — with the book's dictionaries —
+  mostly invented strings → `no_text_ink`; real words stay for review with the OCR text as a one-click candidate.
+  An earlier «approve the image» never keeps a fill/fragment as content (it confirms the image, not that it is text).
+* **Empty fragments / duplicate readings.** No letter or digit in any reading and inside a picture, a sliver at the
+  scan edge or tiny (`empty_fragment`); text fully contained in a larger box covering it (`duplicate_reading`).
+  Both are excluded like furniture: evidence + crop kept, listed, restorable. Never a fallback page or a region.
+* **Boxes from title bars.** A labelled title on a background bar («ΕΡΩΤΗΣΗ 1-2») opens a box whose column is the
+  bar's width; members are the contiguous blocks below inside it plus their continuations.
+* **Collective sections** («ΕΡΩΤΗΣΕΙΣ») are corroborated by >= 2 numbered items inside them and end with the last.
+* **Engine policy** `marker_primary` (RAG default, per-book switch): Marker/Docling disagreements about how text
+  reads are recorded but not asked (`waived`); a much longer Docling reading (possible lost text) is asked
+  (ENGINE_TEXT_LOSS_SUSPECTED); equations and tables always are.
+* Caption continuations never take a body sentence (lowercase start after a closed caption); box labels do not
+  break the course text's continuation; acronyms/numbers/brackets continue an open sentence.
+
+### Spelling proposals (pipeline/spelling.py, adapters/lexicon.py)
+OCR word errors are proposed, never applied: a suspect word (unknown to the Hunspell dictionaries of the book's
+languages and rare in the book, or mixing lookalike letters of two scripts) gets candidates with their evidence —
+lexicon, the other engine's reading at the same place (difflib word alignment), the book's own vocabulary, an
+accent-only or script-only variant. Two independent kinds = «ισχυρή». Capitals (no accents) and word endings
+(inflection) are not errors. «Μαζικός έλεγχος → Ορθογραφία» applies the chosen ones as replace_text decisions (one
+undo). Dictionaries: `python -m scientific_ocr install-dictionaries` (LibreOffice el_GR/en_US, pinned sha256, into
+~/.cache/scientific-textbook-ocr/dictionaries; package `spylls==0.1.7` in the docling venv). Without them only the
+book and engine evidence remain.
+
 ### Reviewer notes → proposals (local vision-language model)
 A note in plain language ("the arrow is an equilibrium ⇌", "this is the page header", "in the whole book Brønsted
 is spelled Brönsted") is sent with the segment image to a local model served by llama.cpp (`adapters/local_llm.py`,
