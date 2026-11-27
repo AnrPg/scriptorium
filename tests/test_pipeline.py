@@ -1757,3 +1757,18 @@ def test_a_box_only_marker_found_gets_tesseracts_reading_as_evidence(tmp_path, m
     assert 'CROSS_READ' in cap['reasons'] and 'SINGLE_ENGINE_MARKER' not in cap['reasons']
     assert cap['match'] == {'status': 'matched', 'shape': 'crossread', 'text_similarity': 1.0}
     assert any(x['engine'] == 'tesseract' and x['ref'] == 'crossread:tesseract' for x in cap['candidates'])
+
+
+def test_a_title_opening_with_a_table_label_is_the_tables_caption_never_a_chapter_heading():
+    from scientific_ocr.pipeline import captions
+    def blk(i, kind, text, bb):
+        return {'id': i, 'page': 1, 'kind': kind, 'chosen': {'type': 'text', 'text': text}, 'relations': {}, 'reasons': [],
+                'review': 'none', 'geometry': {'bbox': bb}}
+    page = [blk('f', 'figure', '', [50, 40, 550, 200]),
+            blk('h', 'heading', '## ΠΙΝΑΚΑΣ 16-4 Μερικές απαντήσεις της φωσφολιπάσης C', [50, 300, 550, 320]),
+            blk('t', 'table', '<table><tr><td>a</td></tr></table>', [50, 325, 550, 500]),
+            blk('k', 'heading', 'ΚΕΦΑΛΑΙΟ 16 Κυτταρική επικοινωνία', [50, 505, 550, 520])]
+    page[0]['kind'] = 'figure'
+    captions.associate(page)
+    assert page[1]['kind'] == 'caption' and page[1]['relations']['caption_for'] == 't'    # the table, not the figure
+    assert page[3]['kind'] == 'heading'                                                     # a chapter title stays one

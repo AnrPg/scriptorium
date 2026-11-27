@@ -117,7 +117,7 @@ def test_clean_strips_markup_keeps_math_collects_bold_terms():
 def test_tables_become_markdown_or_rows():
     assert rag.table_text('<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>') == '| A | B |\n|---|---|\n| 1 | 2 |'
     assert rag.table_text('<table><tr><td>1655</td><td>Hooke</td></tr></table>') == '- 1655: Hooke'
-    assert rag.table_text('<table><tr><th>A</th><th>B</th></tr><tr><td colspan="2">x</td></tr></table>') == '- A: x'
+    assert rag.table_text('<table><tr><th>A</th><th>B</th></tr><tr><td colspan="2">x</td></tr></table>') == '- A / B: x'   # said once, under both columns
 
 
 def _canon(blocks, **extra):
@@ -314,3 +314,41 @@ def test_an_exclusion_verdict_is_undone_on_its_own_even_after_other_actions(tmp_
     assert pending() == ['B']
     app.undo_exclusion('run', 'D')                                  # confirmed when built, undone since -> pending
     assert pending() == ['B', 'D']
+
+
+# ---------------------------------------------------------------- nothing the RAG arranges may get lost
+def _c(blocks):
+    return {'source': {'sha256': 'abc'}, 'blocks': blocks, 'groups': [], 'entities': [], 'excursus': []}
+
+
+def test_a_deep_title_before_a_table_or_at_the_end_is_kept_and_the_audit_checks_the_rag_output():
+    from scientific_ocr.pipeline import audit
+    deep = _b(1, 'heading', 'Πίνακας ενζύμων', heading_level=5)
+    tbl = _b(2, 'table', '<table><tr><th>Ένζυμο</th><th>Ρόλος</th></tr><tr><td>λιπάση</td><td>υδρόλυση</td></tr></table>')
+    last = _b(3, 'heading', 'Τελευταίος υπότιτλος', heading_level=5)
+    for b in (deep, tbl, last):
+        b['flow'] = 'main'
+    c = _c([deep, tbl, last])
+    md = rag.markdown(c, RAG)
+    assert 'Πίνακας ενζύμων\n| Ένζυμο | Ρόλος |' in md and 'Τελευταίος υπότιτλος' in md
+    assert audit.rag_export(c, RAG, md) == []
+    lost = audit.rag_export(c, RAG, md.replace('Τελευταίος υπότιτλος', ''))
+    assert [f['block_ids'] for f in lost] == [['p1_3']] and lost[0]['type'] == 'INTEGRITY_CONTENT_NOT_EXPORTED'
+
+
+def test_a_table_with_a_title_row_and_spanned_headers_keeps_every_cell():
+    html = ('<table><tr><th colspan="3">ΠΙΝΑΚΑΣ 13-1 Ένζυμα</th></tr><tr><th>Ένζυμο</th><th colspan="2">Ρόλος</th></tr>'
+            '<tr><th></th><th>γενικός</th><th>στη γλυκόλυση</th></tr>'
+            '<tr><td>Κινάση</td><td>φωσφορυλίωση</td><td>βήματα 1 και 3</td></tr></table>')
+    t = rag.table_text(html)
+    assert t.startswith('ΠΙΝΑΚΑΣ 13-1 Ένζυμα\n| Ένζυμο | Ρόλος / γενικός | Ρόλος / στη γλυκόλυση |')
+    assert '| Κινάση | φωσφορυλίωση | βήματα 1 και 3 |' in t
+
+
+def test_a_tables_caption_keeps_its_printed_place_above_or_below_the_table():
+    for above in (True, False):
+        cap = _b(1 if above else 3, 'caption', 'ΠΙΝΑΚΑΣ 16-4 Μερικές απαντήσεις')
+        tbl = _b(2, 'table', '<table><tr><th>Μόριο</th><th>Στόχος</th></tr><tr><td>βαζοπρεσσίνη</td><td>ήπαρ</td></tr></table>')
+        cap['relations']['caption_for'], tbl['relations']['captions'] = tbl['id'], [cap['id']]
+        md = rag.markdown(_c([cap, tbl] if above else [tbl, cap]), RAG)
+        assert (md.index('ΠΙΝΑΚΑΣ 16-4') < md.index('| Μόριο')) == above
