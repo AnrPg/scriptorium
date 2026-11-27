@@ -65,16 +65,23 @@ def in_reader_output(b: dict) -> bool:
     An omitted segment ('omitted', decision set_output include=False) is real book content kept in the model —
     hierarchy, entities, review history, JSON exports (flagged) — that the reviewer chose to leave out of the text.
     It is not the same as hiding a box (block_hide: the box itself is wrong and leaves the page model)."""
-    return in_output(b) and not b.get('omitted')
+    return in_output(b) and not b.get('omitted') and not profile_omitted(b)
 
 
-def release_status(blocks: list[dict], findings: list[dict]) -> str:
+def profile_omitted(b: dict) -> bool:
+    """Left out by the book's OUTPUT PROFILE (pipeline.profile, e.g. questions in a RAG book) and not kept back by
+    the reviewer (decision set_output include=True). Like an omission, the segment stays in the model."""
+    return bool(b.get('profile_omitted')) and not b.get('kept')
+
+
+def release_status(blocks: list[dict], findings: list[dict], pending_exclusions: int = 0) -> str:
+    """pending_exclusions: automatic exclusions of the output profile whose boundary is not yet confirmed."""
     blocks = [b for b in blocks if in_reader_output(b)]          # omitted content needs no review for release
     if any(f['severity'] == 'critical' and (f['type'].startswith('INTEGRITY') or f['type'] == 'ENGINE_FAILED')
            for f in findings):
         return 'DRAFT'
     states = Counter(b['review'] for b in blocks)
-    if states.get('required') or states.get('unresolved'):
+    if states.get('required') or states.get('unresolved') or pending_exclusions:
         return 'REVIEW_REQUIRED'
     if blocks and all(b['review'] in ('approved', 'image_only') for b in blocks):
         return 'VERIFIED'

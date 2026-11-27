@@ -18,7 +18,7 @@ class Reason:
     en: str
     el: str
     finding: tuple[str, str] | None = None   # (finding type, severity) emitted by the audit
-    stage: str = 'content'             # 'layout' | 'content' | 'notation' | 'chemistry' | 'human'
+    stage: str = 'content'             # 'layout' | 'content' | 'notation' | 'chemistry' | 'human' | 'profile'
 
 
 R = Reason
@@ -26,6 +26,14 @@ REASONS: dict[str, Reason] = {
     # ---- layout / coverage (page-structure stage)
     'EXCLUDED_AS_PAGE_FURNITURE': R(None, False, 'page furniture (running head/foot, page number): excluded from outputs',
                                     'Στοιχείο σελίδας (κεφαλίδα/υποσέλιδο/αριθμός): εξαιρείται από την έξοδο', stage='layout'),
+    'BACKGROUND_FILL': R(None, False, 'solid background of a title that was read (a bar or shaded header): not content',
+                         'Φόντο τίτλου που διαβάστηκε (μπάρα/σκίαση): δεν είναι περιεχόμενο', stage='layout'),
+    'EMPTY_FRAGMENT': R(None, False, 'empty fragment (no letter or digit read) inside a picture, at the scan edge or tiny: not content',
+                        'Κενό κομμάτι (χωρίς γράμμα/ψηφίο) μέσα σε εικόνα, στην άκρη ή πολύ μικρό: δεν είναι περιεχόμενο', stage='layout'),
+    'NO_TEXT_INK': R(None, False, 'uncovered ink whose own OCR reads no words (digits, dashes, stray letters): not content',
+                     'Μελάνι χωρίς κείμενο: το OCR της περιοχής δεν βρίσκει λέξεις (αριθμοί, παύλες, σκόρπια γράμματα)', stage='layout'),
+    'DUPLICATE_READING': R(None, False, 'its text is already read by the larger box that covers it',
+                           'Το κείμενό του υπάρχει ήδη στο μεγαλύτερο πλαίσιο που το καλύπτει', stage='layout'),
     'ENGINE_FURNITURE_IN_BODY': R(None, False, 'labelled header/footer by an engine but inside the text frame: kept as text',
                                   'Η μηχανή το είπε κεφαλίδα, αλλά είναι μέσα στο κείμενο: κρατήθηκε ως κείμενο', stage='layout'),
     'EMPTY_OCR_TEXT': R('required', True, 'region detected but no text produced',
@@ -74,6 +82,8 @@ REASONS: dict[str, Reason] = {
                                     'Δομή πίνακα μη επαληθευμένη', stage='content'),
     'CAPTION_CONTINUATION': R(None, False, 'paragraph joined to the caption above it (continuation)',
                               'Συνέχεια λεζάντας: ενώθηκε με τη λεζάντα από πάνω', stage='layout'),
+    'FIGURE_TITLE_NOT_CAPTION': R(None, False, "a picture's title or printed label (capitals / a few words, no number): not its caption",
+                                  'Τίτλος ή ετικέτα της εικόνας (κεφαλαία / λίγες λέξεις χωρίς αριθμό): όχι λεζάντα', stage='layout'),
     'CAPTION_ASSOCIATION_INFERRED': R('recommended', False, 'caption-figure link inferred from geometry',
                                       'Η σύνδεση λεζάντας–σχήματος συμπεράνθηκε από τη θέση', stage='content'),
     'CAPTION_ENGINES_DISAGREE': R('required', False, 'Marker and Docling attach this caption to different figures',
@@ -158,6 +168,18 @@ REASONS: dict[str, Reason] = {
                            'Χαμηλότερη προτεραιότητα: η επισήμανση αποδείχθηκε αβλαβής στα ελεγμένα δείγματα', stage='human'),
     'ACCEPTED_BY_SAMPLING': R(None, False, 'accepted statistically: its class passed a sampling audit',
                               'Έγινε δεκτό στατιστικά: η κατηγορία του πέρασε δειγματοληπτικό έλεγχο', stage='human'),
+    # ---- output profile (pipeline.profile)
+    'PROFILE_NOT_RELEVANT': R(None, False, 'not asked: the output profile drops pictures, so their fidelity does not reach the output',
+                              'Δεν ζητείται έλεγχος: το προφίλ εξόδου δεν κρατά εικόνες', stage='profile'),
+    'PROFILE_BOUNDARY_CHECK': R('recommended', False, 'body text continues across the edge of content the profile excludes: kept in the output; check the boundary',
+                                'Το κυρίως κείμενο συνεχίζει πέρα από το όριο αυτού που εξαιρεί το προφίλ: κρατήθηκε· έλεγξε το όριο',
+                                stage='profile'),
+    'ENGINE_TEXT_LOSS_SUSPECTED': R('required', True, 'Docling read clearly more words here than the chosen reading: text may be missing',
+                                    'Το Docling διάβασε αρκετές λέξεις που λείπουν από το κείμενο: μπορεί να χάθηκε κείμενο',
+                                    ('ENGINE_TEXT_LOSS_SUSPECTED', 'warning'), stage='profile'),
+    'TEXT_ONLY_LOSS': R('required', True, 'only an image of this content exists; a text-only output would lose it: type its text or leave it out',
+                        'Υπάρχει μόνο εικόνα αυτού του περιεχομένου· η έξοδος μόνο-κειμένου θα το έχανε: γράψε το κείμενο ή βγάλ\' το εκτός',
+                        ('TEXT_ONLY_LOSS', 'warning'), stage='profile'),
     'DECISION_STALE': R('required', True, 'a review decision no longer matches this block; review again',
                         'Η απόφασή σου δεν εφαρμόστηκε: άλλαξε το αποτέλεσμα που είχες κρίνει· αποφάσισε ξανά',
                         ('DECISION_STALE', 'warning'), stage='human'),

@@ -1,10 +1,13 @@
 """Vocabulary of human input (event sourcing): which events can be undone and which decisions set or confirm
 a segment's content. Domain policy, shared by the event store, the command overlay and the services."""
+from .profiles import PROFILES
+from .profiles import errors as profile_errors
+from .scopes import CARRY
 
 UNDOABLE = {'decision', 'rule_add', 'rule_remove', 'region_add', 'region_remove', 'block_hide', 'block_show',
             'page_profile', 'merge_add', 'merge_remove', 'group_add', 'group_remove', 'suggestion_dismiss',
             'class_accept', 'entity_confirm', 'entity_assign', 'entity_remove', 'page_remove', 'page_restore',
-            'excursus_set', 'excursus_remove'}
+            'excursus_set', 'excursus_remove', 'output_profile', 'profile_copy'}
 # Decisions about a segment's CONTENT. "Value" actions set the content; `approve` only confirms the current
 # version; `revert` returns the segment to the machine result.
 VALUE_ACTIONS = {'approve_candidate', 'replace_text', 'replace_latex', 'mark_image_only', 'mark_unreadable', 'revert'}
@@ -26,6 +29,9 @@ EVENT_FIELDS = {
     'entity_assign': {'key', 'members', 'entity_type'}, 'entity_remove': {'key'},
     'page_remove': {'pages'}, 'page_restore': {'pages'},
     'excursus_set': {'excursus'}, 'excursus_remove': {'excursus_id'},
+    'output_profile': {'profile'},          # the book's output profile (core.profiles) + optional 'overrides',
+                                            # 'carry' (core.scopes: copy | separate) when the profile changes
+    'profile_copy': {'from', 'to'},         # carry the decisions of profile `from` (up to `upto`) into `to`
     'undo': {'targets'}, 'redo': {'targets'},
 }
 # Required fields of a decision per action (one of a tuple-set suffices).
@@ -34,6 +40,7 @@ DECISION_FIELDS = {
     'move_after_block': ({'after'}, {'before'}), 'associate_caption': {'figure_id'}, 'link_reference': {'n'},
     'set_caption_role': {'role'}, 'set_heading_level': {'level'}, 'set_output': {'include'},
     'set_flow': {'flow'}, 'set_continuation': {'continues'}, 'associate_group_caption': {'group_id'},
+    'set_table_layout': {'layout'},
 }
 
 
@@ -43,6 +50,14 @@ def event_errors(ev: dict) -> list[str]:
     if t not in EVENT_FIELDS:
         return [f'unknown event type {t!r}']
     errs = [f'{t}: missing {f}' for f in sorted(EVENT_FIELDS[t] - set(ev))]
+    if t == 'output_profile' and not errs:
+        errs += profile_errors(ev['profile'], ev.get('overrides'))
+        if 'carry' in ev and ev['carry'] not in CARRY:
+            errs.append(f"output_profile: carry must be one of {list(CARRY)}")
+    if t == 'profile_copy' and not errs:
+        errs += [f'profile_copy: unknown profile {p!r}' for p in (ev['from'], ev['to']) if p not in PROFILES]
+        if ev['from'] == ev['to']:
+            errs.append('profile_copy: from and to are the same profile')
     if t == 'decision' and not errs:
         need = DECISION_FIELDS.get(ev['action'])
         if isinstance(need, tuple):
@@ -60,7 +75,7 @@ def event_errors(ev: dict) -> list[str]:
 # acceptance, page removal…) and waits for a full rebuild. Unknown kinds are book-wide (the safe default).
 PAGE_LOCAL_ACTIONS = {'approve', 'approve_candidate', 'replace_text', 'replace_latex', 'mark_image_only',
                       'mark_unreadable', 'revert', 'report_wrong', 'set_output', 'move_after_block',
-                      'associate_caption', 'detach_caption', 'set_caption_role'}
+                      'associate_caption', 'detach_caption', 'set_caption_role', 'set_table_layout'}
 PAGE_LOCAL_EVENTS = {'region_add', 'region_remove', 'block_hide', 'block_show', 'merge_add', 'merge_remove'}
 
 

@@ -68,6 +68,8 @@ TYPES = {
     'footnote': ('insert', 'Υποσημείωση', 'Footnote'),
     'sidenote': ('aside', 'Σημείωση περιθωρίου (χωρίς ετικέτα)', 'Margin note (unlabelled)'),
     'toc': ('frame', 'Πίνακας περιεχομένων', 'Table of contents'),
+    'index': ('frame', 'Ευρετήριο', 'Index'),
+    'front_matter': ('frame', 'Εισαγωγικές σελίδες (copyright, συντελεστές)', 'Front matter (copyright, credits)'),
 }
 PLACEMENTS = {'inline': ('μέσα στο κείμενο', 'in the text'), 'margin': ('στο περιθώριο', 'in the margin'),
               'end_of_chapter': ('στο τέλος κεφαλαίου', 'at the end of the chapter')}

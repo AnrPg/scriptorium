@@ -16,6 +16,9 @@ commands in pipeline.overlay (decision_event), which validate the reviewer's req
   entity_remove {key}                          withdraws an entity_assign
   page_remove   {pages}  pages left out of the book (raw OCR kept; page_restore {pages} brings them back)
   class_accept  {reason, n, errors, upper, threshold, sample: [{block_id, ok}]}
+  profile_copy  {from, to, upto}  the decisions of output profile `from` up to seq `upto` also apply in `to`
+Scopes (core.scopes): every reviewer event is stamped with the output profile in force (`scope`); the fold returns
+only what applies in the current profile, and undo steps only through those. Global events: core.scopes.GLOBAL.
 """
 from __future__ import annotations
 
@@ -26,6 +29,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..core import scopes
 from ..core.decisions import UNDOABLE, event_errors
 
 _locks: dict[str, threading.Lock] = {}
@@ -72,6 +76,8 @@ class EventStore:
             events = make(evs)
             if not events:
                 return []
+            # every reviewer event belongs to the output profile in force (core.scopes)
+            events = scopes.stamp(events, fold(evs)['scope'])
             bad = [e for ev in events for e in event_errors(ev)]
             if bad:
                 raise EventError('; '.join(bad))
@@ -124,8 +130,16 @@ def fold(evs: list[dict]) -> dict:
             for t in redo_stack.pop():
                 active[t] = True
     live = [by_seq[s] for s, on in active.items() if on]
+    # only what applies in the output profile in force (its own decisions + what was carried into it: core.scopes)
+    # A profile switch never undoes anything: other profiles' events stay active (kept apart) and apply again
+    # when their profile is back in force.
+    counts = scopes.summary(live)
+    not_undone = {e['seq'] for e in live}
+    live, current, scope_of = scopes.visible(live)
+    live = [{**ev, 'scope': scope_of[ev['seq']]} if ev['seq'] in scope_of and 'scope' not in ev else ev for ev in live]
     rules, regions, profiles, hidden, merges, groups, dismissed, accepts = {}, {}, {}, set(), {}, {}, set(), {}
     entities, assigned, removed, excursus = {}, {}, set(), {}
+    output_profile = None
     for ev in live:
         t = ev['type']
         if t == 'rule_add':
@@ -168,6 +182,8 @@ def fold(evs: list[dict]) -> dict:
             excursus[ev['excursus']['id']] = ev['excursus']
         elif t == 'excursus_remove':
             excursus.pop(ev['excursus_id'], None)
+        elif t == 'output_profile':                     # the last one in force wins
+            output_profile = {'profile': ev['profile'], 'overrides': ev.get('overrides') or {}, 'seq': ev['seq']}
     # The reviewer's undo steps through the reviewer's own actions: events written by the system itself (e.g. the
     # automatic careful re-examination after processing) are never the target of Ctrl-Z.
     undo_targets = []
@@ -180,6 +196,7 @@ def fold(evs: list[dict]) -> dict:
             'regions': list(regions.values()), 'profiles': profiles, 'hidden': sorted(hidden),
             'merges': list(merges.values()), 'groups': list(groups.values()), 'dismissed': sorted(dismissed),
             'accepts': list(accepts.values()), 'entities': entities, 'assigned': assigned,
-            'removed_pages': sorted(removed), 'excursus': list(excursus.values()),
+            'removed_pages': sorted(removed), 'excursus': list(excursus.values()), 'output_profile': output_profile,
             'undo_targets': undo_targets, 'redo_targets': redo_stack[-1] if redo_stack else [],
-            'history': evs, 'active': {s for s, on in active.items() if on}}
+            'history': evs, 'active': not_undone, 'applies': {e['seq'] for e in live},
+            'scope': current, 'scope_counts': counts, 'scope_of': scope_of}

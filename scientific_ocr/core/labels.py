@@ -7,8 +7,9 @@ import re
 NUMBERED_HEADING = re.compile(r'^\s*\**\s*(\d+(?:[.\-]\d+)*)[.)]?\s+\S')
 # "<word> <number>" at the start: "ΠΑΡΑΔΕΙΓΜΑ 4.3", "Exercise 2-1" (group 1 = the label)
 LABELLED = re.compile(r'^\W*([^\W\d_]+\s+\d+(?:[.\-–]\d+)*)\b', re.U)
-# caption labels: "ΕΙΚΟΝΑ 5-4", "Fig. 2.1a", "ΣΧΗΜΑ 4.9" (group 1 = the label)
-CAPTION_LABEL = re.compile(r'^\W*([^\W\d_]{2,}\.?\s+\d+(?:[.\-–]\d+)*[A-Za-zΑ-Ωα-ω]?)\b\W*')
+# caption labels: "ΕΙΚΟΝΑ 5-4", "Fig. 2.1a", "ΣΧΗΜΑ 4.9", "ΕΙΚΟΝΑ Ε5-7" / "Figure A-3" (a lettered series: boxes,
+# appendices — one capital letter before the number) (group 1 = the label)
+CAPTION_LABEL = re.compile(r'^\W*([^\W\d_]{2,}\.?\s+(?:[A-ZΑ-Ω]-?)?\d+(?:[.\-–]\d+)*[A-Za-zΑ-Ωα-ω]?)\b\W*')
 
 
 def label_prefix(text: str) -> str | None:
