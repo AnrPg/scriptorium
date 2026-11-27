@@ -85,7 +85,8 @@ export function excursusEditor(blk) {
 }
 export const excursusValue = (blk) => {
   const x = excursusOf(blk), st = pendingStart();
-  if (x) return h('span', { class: 'chip exc', title: `${placementName(x.placement)} · σ. ${(x.pages || []).join(', ')}` }, `⧉ ${excName(x)}`.slice(0, 40));
+  if (x) return h('span', {}, h('span', { class: 'chip exc', title: `${placementName(x.placement)} · σ. ${(x.pages || []).join(', ')}` }, `⧉ ${excName(x)}`.slice(0, 40)),
+    x.source === 'entity' ? h('span', { class: 'mut small' }, ' αυτόματα, από την κατηγορία') : null);
   return h('span', { class: 'mut' }, st ? `όχι · σήμανση σε εξέλιξη από σ. ${st.page}` : 'όχι');
 };
 
@@ -129,6 +130,7 @@ export function excursusCard() {
       Object.entries(S.meta.excursus_placements || {}).map(([k, v]) => h('button', { class: 'small ghost', onclick: () => act(() => api(`${B(book.id)}/excursus/place-type`, { body: { type: t, placement: k } }), `${excTypeName(t)}: ${v}`) }, v))))) : null,
     list.map(x => h('div', { class: 'list-item' + (x.broken ? ' bad' : '') },
       h('span', { class: 'chip exc' }, '⧉'), h('span', { class: 'grow' }, h('b', {}, excName(x)), ` · σ. ${x.pages.length ? x.pages[0] + (x.pages.length > 1 ? '–' + x.pages[x.pages.length - 1] : '') : '?'} · ${x.members.length} τμήματα`,
+        x.source === 'entity' ? h('span', { class: 'mut', title: 'Από την κατηγορία του τμήματος (ιστορική αναδρομή / βιογραφία). «Αλλαγή…» την κάνει δική σου· «Αφαίρεση» την απορρίπτει.' }, ' · αυτόματα, από την κατηγορία') : null,
         x.broken ? h('span', { class: 'badge-bad' }, ' τα άκρα δεν βρέθηκαν') : null),
       h('span', { class: 'small mut' }, placementName(x.placement)),
       h('button', { class: 'small ghost', onclick: () => openAt(x.first_id || x.first, x.pages[0] || 1) }, 'Άνοιγμα'),
