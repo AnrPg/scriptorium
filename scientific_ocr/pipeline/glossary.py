@@ -59,6 +59,16 @@ def lead_terms(text: str) -> list[str]:
     return [t for m in _LEAD.finditer(text or '') if (t := _term(m.group('a') or m.group('b') or m.group('c'), m.group('rest')))]
 
 
+_PLAIN_LEAD = re.compile(r'^((?:[^\W\d_A-ZΑ-ΩΆ-Ώ][^\s,.;:·]*\s+)(?:[^\s,.;:·]+\s+){0,4}?)(?=[A-ZΑ-ΩΆ-Ώ][a-zα-ωά-ώ])', re.U)
+
+
+def plain_term(text: str) -> str | None:
+    """On a glossary page, an entry whose reading lost its styling («οργανοειδές Τρισδιάστατη μικρογραφία…»): a
+    lowercase term of a few words, no punctuation, then the definition opening with a capital. Fallback only."""
+    m = _PLAIN_LEAD.match(strip_emphasis(text or '').strip())
+    return ' '.join(m.group(1).split()) if m else None
+
+
 def _fold(s: str) -> str:
     s = unicodedata.normalize('NFD', s.lower())
     return ''.join(ch for ch in s if not unicodedata.combining(ch))
@@ -120,7 +130,9 @@ def annotate(blocks: list[dict], marked: dict | None = None, pages: list[int] | 
             if b['kind'] in ('heading', *BODY_KINDS) and not b.get('role') and _letter(source(b)):
                 b['glossary_letter'] = True               # «Α», «Γ / C / G»: a divider, whatever the engine called it
             elif b['id'] in terms:                        # an entry, or the rest of one (continued from a column)
-                b['glossary'] = {'terms': terms[b['id']]}
+                t = terms[b['id']] or ([x] if not (b.get('relations') or {}).get('continues_from')
+                                       and (x := plain_term(source(b))) else [])
+                b['glossary'] = {'terms': t}
     return {'label': _label([heads[p] for p in pages if p in heads]), 'pages': pages,
             'evidence': {str(p): evidence.get(p, 'known') for p in pages},
             'marked': {str(p): v for p, v in sorted(marked.items())}}

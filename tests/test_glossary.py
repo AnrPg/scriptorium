@@ -85,3 +85,14 @@ def test_rag_writes_each_entry_with_bold_term_one_chunk_each_and_loses_nothing()
     assert all(x['types'] == ['definition'] and x['breadcrumb'] == ['ΛΕΞΙΚΟ ΕΠΙΣΤΗΜΟΝΙΚΩΝ ΟΡΩΝ', 'Γ / C / G'] for x in ch)
     c['glossary']['entries'] = glossary.entries(c)
     assert [e['term'] for e in c['glossary']['entries']][:2] == ['αδελφή χρωματίδα', 'ADP']
+
+
+def test_an_entry_whose_reading_lost_its_bold_is_still_an_entry_on_a_glossary_page():
+    """A reading approved from an engine without styling («οργανοειδές Τρισδιάστατη…») is not glued to the previous
+    definition; text continuing a definition (lowercase, punctuation, no capital soon) is not taken for a term."""
+    assert glossary.plain_term('οργανοειδές Τρισδιάστατη μικρογραφία ιστών.') == 'οργανοειδές'
+    assert glossary.plain_term('αρπαχτικά πρωτόζωα, π.χ. το Amoeba proteus.') is None
+    assert glossary.plain_term('ρο. Περιλαμβάνει το δίκτυο.') is None
+    blocks = _glossary_page() + [_b(10, 10, 'paragraph', 'οργανοειδές Τρισδιάστατη μικρογραφία.')]
+    glossary.annotate(blocks)
+    assert blocks[-1]['glossary']['terms'] == ['οργανοειδές']
