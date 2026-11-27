@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import re
 
+from ...core import profiles
 from ...core.vocabulary import FAMILIES, PLACEMENTS, TYPES, valid_entity_type
-from ...pipeline import markdown
+from ...pipeline import markdown, rag
 from .. import exports
 from .base import PROFILES, ServiceBase, ServiceError, _now  # noqa: F401
 
@@ -20,8 +21,27 @@ class ExportService(ServiceBase):
             raise ServiceError(f'format must be one of {sorted(exports.EXPORTERS)}')
         if style not in markdown.STYLES:
             raise ServiceError(f'style must be one of {sorted(markdown.STYLES)}')
+        # an export follows the decisions of the profile IN FORCE (core.scopes): never a projection built under another
+        built, current = (c.get('profile') or {}).get('name') or profiles.DEFAULT, b.events.state()['scope']
+        if built != current:
+            raise ServiceError(f'το βιβλίο χτίστηκε για το προφίλ «{profiles.PROFILES[built]["el"]}», ενώ ισχύει το '
+                               f'«{profiles.PROFILES[current]["el"]}»: κάνε «Ενημέρωση βιβλίου» και ξαναδοκίμασε.')
+        if fmt in exports.RAG_FORMATS:
+            _rag_gate(c)
         data, ctype, ext = exports.export(b.dir, c, fmt, style, _export_options(options))
         return data, ctype, (re.sub(r'[^\w.-]+', '_', b.settings()['title'])[:60] or b.id) + ext
+
+
+def _rag_gate(c: dict) -> None:
+    """The RAG profile's 'review_first' policy: no RAG export while text the reviewer must check reaches it."""
+    if exports.rag_settings(c).get('unsettled') != 'review_first':
+        return
+    left = rag.unsettled(c)
+    if left:
+        pages = sorted({x['page'] for x in left})
+        shown = ', '.join(map(str, pages[:8])) + (' …' if len(pages) > 8 else '')
+        raise ServiceError(f'{len(left)} τμήματα χρειάζονται έλεγχο πριν την εξαγωγή RAG (σελ. {shown}). '
+                           'Άνοιξε τον έλεγχο («Μόνο απαιτούμενα») και ξαναδοκίμασε.')
 
 
 def _entity_types() -> dict:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ...adapters import os_picker
 from ...adapters import pdf as pdfio
-from ...core import joblog
+from ...core import joblog, profiles
 from ...core.decisions import VALUE_DECISIONS
 from ...core.reasons import as_table
 from ...core.vocabulary import EXCURSUS_PLACEMENTS, EXCURSUS_TYPES, GROUP_TYPES
@@ -68,6 +68,7 @@ class LibraryService(ServiceBase):
         c = b.canonical() or {}
         return {**b.summary(), 'rev': b.revision(), 'pages': b.pages(), 'rules': st['rules'], 'job': self.jobs.busy(b.id),
                 'pending': b.pending(),
+                'output_profile': (st.get('output_profile') or {}).get('profile') or profiles.DEFAULT,
                 'progress': b.progress(), 'jobs': self.jobs.list(b.id)[:20],
                 'can_undo': bool(st['undo_targets']), 'can_redo': bool(st['redo_targets']),
                 'stale': (c.get('human') or {}).get('stale', []), 'sections': c.get('sections', []),
@@ -79,7 +80,9 @@ class LibraryService(ServiceBase):
 
     def history(self, book_id: str) -> list[dict]:
         st = self._book(book_id).events.state()
-        return [{**e, 'active': e['seq'] in st['active']} for e in reversed(st['history'])]
+        # active = not undone; applies = in force in the current output profile (core.scopes: kept apart, not undone)
+        return [{**e, 'active': e['seq'] in st['active'], 'applies': e['seq'] in st['applies'],
+                 'scope': e.get('scope') or st['scope_of'].get(e['seq'])} for e in reversed(st['history'])]
 
     def revision(self, book_id: str) -> dict:
         b = self._book(book_id)

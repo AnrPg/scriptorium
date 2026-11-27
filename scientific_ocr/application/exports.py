@@ -5,6 +5,9 @@
   pdf              typeset document printed from the same HTML as the preview (reader-facing)
   normalized_json  flat, ordered list of segments with provenance and review state (data, for programs)
   canonical_json   the full projection: bboxes, all candidates, reasons, findings, provenance (data)
+  rag_markdown     minimal Markdown for retrieval by a text-only LLM (pipeline.rag; the book's output profile)
+  rag_chunks       structure-aligned chunks with heading path, pages and key terms (JSONL, pipeline.rag)
+  rag_zip          both + manifest.json stating what the text does not contain (profile exclusions, pictures…)
 Reader-facing formats come from the reading model (pipeline.reading): content and light separators only, no
 ids, review marks, source pages or traces of how the document was produced.
 """
@@ -22,9 +25,10 @@ import pymupdf
 
 from ..adapters import latex_render
 from ..adapters.storage import read_json
-from ..core.model import in_output
+from ..core import profiles
+from ..core.model import in_output, in_reader_output
 from ..core.reasons import text as reason_text
-from ..pipeline import notation
+from ..pipeline import notation, rag
 from ..pipeline.html_preview import body_html, document_html
 from ..pipeline.markdown import markdown
 
@@ -43,7 +47,7 @@ def normalized(c: dict) -> dict:
             'image': (b.get('source_crop') or {}).get('path') if (b.get('display_crop') or ch['type'] != 'text') else None,
             'caption_for': b['relations'].get('caption_for'), 'caption_role': b.get('caption_role'),
             'caption_label': b.get('caption_label'), 'captions': b['relations'].get('captions') or None,
-            'flow': b.get('flow'), 'in_reader_output': not b.get('omitted'),
+            'flow': b.get('flow'), 'in_reader_output': in_reader_output(b),
             'references': [{k: r.get(k) for k in ('text', 'target', 'status', 'panel')} for r in b.get('references', [])] or None,
             'referenced_by': b['relations'].get('referenced_by'), 'groups': b.get('groups'),
             'merged_from': [m['id'] for m in b.get('merged_from', [])] or None,
@@ -125,6 +129,43 @@ def _pdf_basic(book_dir: Path, c: dict, style: str, options: dict | None = None)
     return buf.getvalue()
 
 
+def rag_settings(c: dict) -> dict:
+    """The RAG shaping of this book: its own profile when it is a RAG book, else the RAG defaults (the content
+    exclusions of a profile exist only in a book built with it: pipeline.profile)."""
+    p = (c.get('profile') or {}).get('settings') or {}
+    return p if p.get('name') == 'rag' else profiles.effective('rag')
+
+
+def rag_context(book_dir: Path) -> dict:
+    """Situating sentences made by the local model for chunks (application.rag_context), if any: {chunk id: text}."""
+    return (read_json(book_dir / 'cache' / 'rag_context.json', {}) or {}).get('context') or {}
+
+
+def rag_manifest(book_dir: Path, c: dict) -> dict:
+    return {'title': _title(book_dir, c), 'release_status': c['release_status'], 'profile': rag_settings(c)['name'],
+            'heading_depth': rag_settings(c).get('heading_depth'), 'chunking': rag_settings(c).get('chunk'),
+            'not_in_text': rag.omissions(c)}
+
+
+def _rag_md(book_dir: Path, c: dict, style=None, options=None) -> bytes:
+    return rag.markdown(c, rag_settings(c)).encode()
+
+
+def _rag_chunks(book_dir: Path, c: dict, style=None, options=None) -> bytes:
+    return rag.jsonl(rag.chunks(c, rag_settings(c), _title(book_dir, c), rag_context(book_dir))).encode()
+
+
+def _rag_zip(book_dir: Path, c: dict, style=None, options=None) -> bytes:
+    """The RAG package: clean Markdown, chunks (JSONL) and a manifest that states what the text does not contain."""
+    name = _filename(_title(book_dir, c))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f'{name}.rag.md', _rag_md(book_dir, c))
+        z.writestr(f'{name}.chunks.jsonl', _rag_chunks(book_dir, c))
+        z.writestr('manifest.json', json.dumps(rag_manifest(book_dir, c), ensure_ascii=False, indent=2))
+    return buf.getvalue()
+
+
 EXPORTERS: dict[str, tuple[Callable[..., bytes], str, str]] = {
     'markdown_images': (_zip, 'application/zip', '.zip'),
     'markdown_text': (lambda d, c, st, o=None: markdown(c, images=False, style=st, options=o).encode(),
@@ -134,7 +175,11 @@ EXPORTERS: dict[str, tuple[Callable[..., bytes], str, str]] = {
                         'application/json', '.segments.json'),
     'canonical_json': (lambda d, c, st, o=None: json.dumps(c, ensure_ascii=False, indent=2).encode(), 'application/json',
                        '.canonical.json'),
+    'rag_markdown': (_rag_md, 'text/markdown; charset=utf-8', '.rag.md'),
+    'rag_chunks': (_rag_chunks, 'application/x-ndjson; charset=utf-8', '.chunks.jsonl'),
+    'rag_zip': (_rag_zip, 'application/zip', '.rag.zip'),
 }
+RAG_FORMATS = {'rag_markdown', 'rag_chunks', 'rag_zip'}
 STYLED = {'markdown_images', 'markdown_text'}
 CONTENT_OPTIONS = {'markdown_images', 'markdown_text', 'pdf'}     # reader-facing: entity filters + figure placement
 

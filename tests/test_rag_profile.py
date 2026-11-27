@@ -1,0 +1,205 @@
+"""Output profiles (core.profiles, pipeline.profile) and the RAG serialisation (pipeline.rag)."""
+import json
+
+import pytest
+from conftest import build, make_run
+
+from scientific_ocr.adapters.event_store import EventStore, fold
+from scientific_ocr.core import profiles
+from scientific_ocr.core.decisions import event_errors
+from scientific_ocr.core.model import in_reader_output, new_block, release_status
+from scientific_ocr.pipeline import profile, rag
+
+
+def _b(i, kind, text, page=1, **extra):
+    chosen = {'type': 'text', 'text': text} if text is not None else None
+    b = new_block(f'p{page}_{i}', page, kind, [50, 40 * i, 550, 40 * i + 30], source='marker', chosen=chosen, **extra)
+    b['reading_order'] = i
+    return b
+
+
+def _ent(key, etype, members, gran='box', conf='high', **extra):
+    return {'key': key, 'type': etype, 'granularity': gran, 'confidence': conf, 'members': members, 'pages': [1],
+            'verified': gran == 'human', 'placement': 'inline', 'label': etype, **extra}
+
+
+RAG = profiles.effective('rag')
+
+
+# ---------------------------------------------------------------- profiles as data + the event
+def test_profile_overrides_are_validated_and_applied_on_a_copy():
+    p = profiles.effective('rag', {'heading_depth': 2, 'unknown': 1})
+    assert p['heading_depth'] == 2 and 'unknown' not in p and profiles.PROFILES['rag']['heading_depth'] == 3
+    assert profiles.effective('nope')['name'] == 'reading'
+    assert event_errors({'type': 'output_profile', 'profile': 'rag'}) == []
+    assert event_errors({'type': 'output_profile', 'profile': 'x'})
+    assert event_errors({'type': 'output_profile', 'profile': 'rag', 'overrides': {'heading_depth': 9}})
+
+
+def test_output_profile_event_folds_and_undoes():
+    evs = [{'seq': 1, 'type': 'output_profile', 'profile': 'rag', 'actor': 'reviewer'}]
+    assert fold(evs)['output_profile']['profile'] == 'rag'
+    assert fold(evs + [{'seq': 2, 'type': 'undo', 'targets': [1], 'actor': 'reviewer'}])['output_profile'] is None
+
+
+# ---------------------------------------------------------------- what the profile excludes
+def test_box_question_is_excluded_automatically_but_a_heading_subtree_only_suggested():
+    """A box has independent boundary evidence; a 'section title' entity (a margin label set as a heading) would own
+    the body text after it — it is only suggested, so nothing of the body is lost."""
+    blocks = [_b(1, 'paragraph', 'Body text.'), _b(2, 'heading', 'ΕΡΩΤΗΣΗ 1-2'), _b(3, 'paragraph', 'Why?'),
+              _b(4, 'heading', 'ΕΡΩΤΗΣΗ 1-3'), _b(5, 'paragraph', 'Body that follows the label.')]
+    ents = [_ent('E1', 'question', ['p1_2', 'p1_3']), _ent('E2', 'question', ['p1_4', 'p1_5'], gran='section')]
+    s = profile.apply(blocks, ents, [], RAG)
+    out = [b['id'] for b in blocks if in_reader_output(b)]
+    assert out == ['p1_1', 'p1_4', 'p1_5']
+    assert s['pending'] == 1 and [e['key'] for e in s['suggested']] == ['E2']
+    assert release_status(blocks, [], s['pending']) == 'REVIEW_REQUIRED'
+
+
+def test_collective_section_closing_the_chapter_is_automatic():
+    blocks = [_b(1, 'heading', 'ΕΡΩΤΗΣΕΙΣ'), _b(2, 'paragraph', 'Q1')]
+    e = _ent('E', 'question', ['p1_1', 'p1_2'], gran='section', collective=True, placement='end_of_chapter')
+    profile.apply(blocks, [e], [], RAG)
+    assert not any(in_reader_output(b) for b in blocks)
+
+
+def test_boundary_that_cuts_a_body_paragraph_keeps_that_member_and_flags_it():
+    blocks = [_b(1, 'paragraph', 'The cell divides and'), _b(2, 'paragraph', 'Question?'), _b(3, 'paragraph', 'its halves')]
+    blocks[0]['relations']['continues_in'] = 'p1_3'
+    blocks[2]['relations']['continues_from'] = 'p1_1'
+    ent = _ent('E', 'question', ['p1_2', 'p1_3'])           # wrong boundary: swallowed the end of the paragraph
+    profile.apply(blocks, [ent], [], RAG)
+    assert in_reader_output(blocks[2]) and 'PROFILE_BOUNDARY_CHECK' in blocks[2]['reasons']
+    assert not in_reader_output(blocks[1])
+
+
+def test_answered_question_stays_with_its_answer_and_reviewer_keep_wins():
+    blocks = [_b(1, 'paragraph', 'Q 1.1'), _b(2, 'paragraph', 'A 1.1'), _b(3, 'paragraph', 'Q 1.2')]
+    ents = [_ent('Q1', 'question', ['p1_1'], answers=['p1_2']), _ent('A', 'answer', ['p1_2']), _ent('Q2', 'question', ['p1_3'])]
+    blocks[2]['kept'] = {'seq': 9}
+    profile.apply(blocks, ents, [], RAG)
+    assert all(in_reader_output(b) for b in blocks)
+
+
+def test_excursus_type_removed_and_reading_profile_changes_nothing():
+    blocks = [_b(1, 'paragraph', 'History of the microscope'), _b(2, 'paragraph', 'Body')]
+    x = [{'id': 'X1', 'type': 'history', 'members': ['p1_1'], 'pages': [1]}]
+    assert profile.apply(blocks, [], x, profiles.effective('reading'))['excluded'] == []
+    assert all(in_reader_output(b) for b in blocks)
+    profile.apply(blocks, [], x, RAG)
+    assert [in_reader_output(b) for b in blocks] == [False, True]
+
+
+def test_text_only_output_asks_again_about_content_kept_only_as_an_image():
+    """A table kept as an image under another profile (carried into RAG) would vanish from a text-only output."""
+    t = _b(1, 'table', None)
+    t['review'] = 'image_only'
+    t['decisions'] = [{'seq': 3, 'action': 'mark_image_only', 'scope': 'reading'}]
+    pic = _b(2, 'figure', None)
+    pic['review'] = 'recommended'
+    pic['reasons'] = ['FIGURE_INTERNAL_TEXT_WITHHELD']
+    s = profile.apply([t, pic], [], [], RAG)
+    assert 'TEXT_ONLY_LOSS' in t['reasons'] and t['review'] == 'required'
+    assert pic['review'] == 'not_needed' and 'PROFILE_NOT_RELEVANT' in pic['reasons']
+    assert s['text_only_loss'] == 1 and s['pictures_not_reviewed'] == 1
+    t2 = _b(3, 'table', None)
+    t2['review'], t2['decisions'] = 'approved', [{'seq': 12, 'action': 'approve', 'scope': 'rag'}]   # under RAG: stands
+    profile.apply([t2], [], [], RAG)
+    assert t2['review'] == 'approved'
+
+
+# ---------------------------------------------------------------- the RAG text
+def test_clean_strips_markup_keeps_math_collects_bold_terms():
+    s, terms = rag.clean('Το **γονιδίωμα** και <i>κύτταρα</i> με H<sub>2</sub>O και $x^{2}$ δια-\nσπάται­')
+    assert s == 'Το γονιδίωμα και κύτταρα με H$_{2}$O και $x^{2}$ διασπάται' and terms == ['γονιδίωμα']
+
+
+def test_tables_become_markdown_or_rows():
+    assert rag.table_text('<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>') == '| A | B |\n|---|---|\n| 1 | 2 |'
+    assert rag.table_text('<table><tr><td>1655</td><td>Hooke</td></tr></table>') == '- 1655: Hooke'
+    assert rag.table_text('<table><tr><th>A</th><th>B</th></tr><tr><td colspan="2">x</td></tr></table>') == '- A: x'
+
+
+def _canon(blocks, **extra):
+    return {'source': {'sha256': 'abc'}, 'blocks': blocks, 'groups': [], 'entities': [], 'excursus': [], **extra}
+
+
+def test_markdown_flattens_deep_headings_drops_pictures_and_places_captions_after_the_reference():
+    h1 = _b(1, 'heading', 'Κύτταρα', heading_level=1)
+    h4 = _b(2, 'heading', 'Μικροσκόπια', heading_level=4)
+    fig = _b(3, 'figure', None)
+    cap = _b(4, 'caption', '**ΕΙΚΟΝΑ 1-4** Ένα κύτταρο. (Με την άδεια του E.B. Lewis)', caption_label='ΕΙΚΟΝΑ 1-4')
+    fig['relations']['captions'] = ['p1_4']
+    cap['relations']['caption_for'] = 'p1_3'
+    p1 = _b(5, 'paragraph', 'Πρώτη παράγραφος.')
+    p2 = _b(6, 'paragraph', 'Όπως δείχνει η Εικόνα 1-4.')
+    p2['relations']['refers_to'] = ['p1_3']
+    lonely = _b(7, 'figure', None)
+    md = rag.markdown(_canon([h1, h2 := h4, fig, cap, p1, p2, lonely]), RAG)
+    assert md.split('\n\n') == ['# Κύτταρα', 'Μικροσκόπια. Πρώτη παράγραφος.', 'Όπως δείχνει η Εικόνα 1-4.',
+                                'ΕΙΚΟΝΑ 1-4: Ένα κύτταρο.\n'] and h2
+
+
+def test_chunks_carry_breadcrumbs_pages_terms_and_respect_sizes():
+    long = ' '.join(['Λέξη πρότασης εδώ.'] * 150)                # 450 words: split at sentence ends
+    blocks = [_b(1, 'heading', 'Κεφάλαιο', heading_level=1), _b(2, 'heading', 'Ενότητα', heading_level=2),
+              _b(3, 'paragraph', 'Το **κύτταρο** ζει. ' * 30), _b(4, 'paragraph', long, page=2), _b(5, 'paragraph', 'Τέλος.', page=2)]
+    cfg = {**RAG, 'chunk': {'target_words': 120, 'max_words': 200, 'min_words': 40}}
+    ch = rag.chunks(_canon(blocks), cfg, 'Βιβλίο')
+    assert all(c['breadcrumb'] == ['Κεφάλαιο', 'Ενότητα'] and c['text'].startswith('Κεφάλαιο › Ενότητα\n\n') for c in ch)
+    assert all(c['words'] <= 200 for c in ch) and ch[0]['key_terms'] == ['κύτταρο'] and ch[-1]['pages'] == [2]
+    assert 'Τέλος.' in ch[-1]['text'] and len({c['id'] for c in ch}) == len(ch)
+    assert json.loads(rag.jsonl(ch).splitlines()[0])['book'] == 'Βιβλίο'
+
+
+# ---------------------------------------------------------------- end to end: event -> build -> export gate
+def test_rag_profile_end_to_end_build_and_export(tmp_path):
+    from scientific_ocr.adapters.storage import Library
+    from scientific_ocr.application.services import App, ServiceError
+    from test_application import FakeJobs
+    out = make_run(tmp_path)
+    lib = Library(tmp_path)
+    lib.adopt(out)
+    assert build(out) == 0
+    app = App(lib, FakeJobs())
+    with pytest.raises(ServiceError):
+        app.set_output_profile('run', 'rag')                     # a change needs the reviewer's choice (core.scopes)
+    app.set_output_profile('run', 'rag', carry='copy')
+    with pytest.raises(ServiceError):
+        app.export('run', 'markdown_text')                       # built for 'reading': never exported as 'rag'
+    assert build(out) == 0
+    st = app.output_profile('run')
+    assert st['current'] == 'rag' and st['built'] == 'rag' and not st['awaiting_rebuild']
+    c = json.loads((out / 'canonical.json').read_text())
+    if rag.unsettled(c):
+        with pytest.raises(ServiceError):
+            app.export('run', 'rag_zip')
+    else:
+        data, ctype, name = app.export('run', 'rag_zip')
+        assert name.endswith('.rag.zip') and data[:2] == b'PK'
+    assert app.preview('run', 'rag', False).strip()
+    with pytest.raises(ServiceError):
+        app.set_output_profile('run', 'nope')
+    assert EventStore(out).state()['output_profile']['profile'] == 'rag'
+
+
+def test_rag_context_sentences_are_kept_apart_and_content_addressed(tmp_path):
+    """The local model's situating sentence goes to the chunk's own 'context' field; asked once per chunk."""
+    from scientific_ocr.application import rag_context
+    from scientific_ocr.application.exports import rag_context as stored
+    out = make_run(tmp_path)
+    assert build(out) == 0
+
+    class Fake:
+        name, calls = 'fake', 0
+
+        def complete_json(self, system, user, schema, **kw):
+            Fake.calls += 1
+            return {'json': {'context': 'Situates the excerpt.'}}
+    assert rag_context.run(out, Fake(), log=lambda m: None) == 0
+    first = Fake.calls
+    assert first and set(stored(out).values()) == {'Situates the excerpt.'}
+    assert rag_context.run(out, Fake(), log=lambda m: None) == 0 and Fake.calls == first     # cached
+    c = json.loads((out / 'canonical.json').read_text())
+    ch = rag.chunks(c, RAG, 't', stored(out))
+    assert all(x.get('context') == 'Situates the excerpt.' and 'Situates' not in x['text'] for x in ch)

@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import random
 
+from ...core.model import in_reader_output
 from ...core.reasons import REASONS
 from ...core.stats import sample_size, wilson_upper
-from ...pipeline.overlay import CommandError, decision_event, has_human_value
+from ...pipeline.overlay import CommandError, decision_events, has_human_value
 from ...pipeline.triage import critical
 from .base import PROFILES, ServiceBase, ServiceError, _now  # noqa: F401
 from .views import _block_view
@@ -22,8 +23,10 @@ class TriageService(ServiceBase):
         tri = c.get('triage') or {}
         out = {}
         for b in c.get('blocks', []):
-            if b['review'] not in ('required', 'recommended') or b.get('decisions'):
-                continue
+            if b['review'] not in ('required', 'recommended') or not in_reader_output(b):
+                continue                                 # (what the output profile leaves out is never reviewed)
+            # an open item with a decision of yours = that decision is asked again (e.g. taken for another output
+            # profile): it is open like any other, and «approve» confirms it as it is
             for r in b['reasons']:
                 if REASONS.get(r) and REASONS[r].review in ('required', 'recommended'):
                     e = out.setdefault(r, {'reason': r, 'required': 0, 'recommended': 0, 'critical': critical(r)})
@@ -38,12 +41,13 @@ class TriageService(ServiceBase):
     def class_items(self, book_id: str, reason: str, limit: int = 200) -> list[dict]:
         c = self._book(book_id).canonical() or {}
         items = [x for x in c.get('blocks', []) if reason in x['reasons'] and x['review'] in ('required', 'recommended')
-                 and not x.get('decisions')]
+                 and in_reader_output(x)]
         return [_block_view(x) for x in items[:limit]]
 
     def bulk_decide(self, book_id: str, block_ids: list[str], action: str, actor='reviewer',
                     include_critical: bool = True) -> dict:
-        """One reviewer action on many segments (one undo). Segments with a reviewer value are skipped; with
+        """One reviewer action on many segments (one undo). A segment with a reviewer value is skipped unless that
+        value is asked again and the action is 'approve' (then it is confirmed as it is: overlay.reconfirm_event); with
         include_critical=False so are segments with a CRITICAL flag (symbols, charges, numbers, equations…), which
         then stay in review — the project rule: those are never accepted in bulk without an explicit choice."""
         if action not in ('approve', 'mark_image_only'):
@@ -53,13 +57,13 @@ class TriageService(ServiceBase):
         evs, kept_critical = [], 0
         for i in dict.fromkeys(block_ids):
             blk = by_id.get(i)
-            if not blk or has_human_value(blk):
+            if not blk or (has_human_value(blk) and not (action == 'approve' and blk['review'] in ('required', 'recommended'))):
                 continue
             if not include_critical and any(critical(r) for r in blk['reasons']):
                 kept_critical += 1
                 continue
             try:
-                evs.append({**decision_event(action, blk, {}, by_id.get), 'bulk': True})
+                evs += [{**e, 'bulk': True} for e in decision_events(action, blk, {}, by_id.get)]
             except CommandError:
                 continue
         if evs:
