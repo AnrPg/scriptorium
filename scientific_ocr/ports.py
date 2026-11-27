@@ -36,5 +36,17 @@ class PageImaging(Protocol):
     def render_zoom(self, pdf: Path, page: int, zoom: float) -> float: ...  # zoom crops really use (scan density)
 
 
+class QuickOcr(Protocol):
+    def __call__(self, png: Path, langs: str) -> str | None:
+        """Quick OCR of a small region image (evidence only); None when unavailable."""
+
+
+class Lexicon(Protocol):
+    """Spelling dictionaries of the book's languages (adapters.lexicon: Hunspell files, offline)."""
+    name: str
+
+    def known(self, word: str) -> bool: ...
+
+
 # Renders formulas with the app's maths renderer: [{id, latex, display}] -> {id: error}, or None if unavailable.
 LatexChecker = Callable[[list], 'dict | None']

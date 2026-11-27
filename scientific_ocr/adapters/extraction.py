@@ -58,14 +58,18 @@ def _resolution_args(engine: str, profile_args: list[str], native: float | None)
 
 
 def _command(engine: str, pdf: Path, page: int, out_dir: Path, lang: str | None = None,
-             profile: str = 'standard', marker_extra: list[str] | None = None, native: float | None = None) -> list[str]:
+             profile: str = 'standard', marker_extra: list[str] | None = None, native: float | None = None,
+             last: int | None = None) -> list[str]:
+    """The engine's command for `page` (or the range page..last: several pages in ONE run, one model load)."""
+    last = last or page
     if engine == 'marker':
         # Marker page ranges are ZERO-based.
-        return [str(config.MARKER_BIN), str(pdf), '--page_range', str(page - 1), *config.MARKER_ARGS,
+        rng = str(page - 1) if last == page else f'{page - 1}-{last - 1}'
+        return [str(config.MARKER_BIN), str(pdf), '--page_range', rng, *config.MARKER_ARGS,
                 *_resolution_args('marker', config.PROFILES[profile], native), *(marker_extra or []),
                 '--output_dir', str(out_dir)]
     # Docling page ranges are ONE-based.
-    return [str(config.DOCLING_BIN), 'convert', str(pdf), '--page-range', f'{page}-{page}', *config.docling_args(lang),
+    return [str(config.DOCLING_BIN), 'convert', str(pdf), '--page-range', f'{page}-{last}', *config.docling_args(lang),
             *_resolution_args('docling', [], native),
             '--enrich-picture-classes', '--artifacts-path', str(config.CKPT['docling']), '--output', str(out_dir)]
 
@@ -76,13 +80,31 @@ def find_raw_json(engine: str, run_dir: Path) -> Path | None:
     return files[0] if files else None
 
 
+def _run_dir(engine, pdf, pdf_sha, page, raw_root, version, lang, profile, marker_extra, subdir, last=None):
+    """(run directory, native dpi) of an extraction: content-addressed (pdf content, pages, engine, version, args)."""
+    native = pdfio.native_dpi(pdf, page)
+    args = _command(engine, Path('PDF'), page, Path('OUT'), lang, profile, marker_extra, native, last)[1:]  # no paths
+    key = cache_key(pdf_sha, page if not last or last == page else [page, last], engine, version, args)
+    return raw_root / (subdir or engine) / f'p{page:04d}-{key}', native, key
+
+
+def cached_page(engine: str, pdf: Path, pdf_sha: str, page: int, raw_root: Path, version: str, lang=None,
+                profile: str = 'standard', marker_extra=None, subdir: str | None = None) -> dict | None:
+    """The cached successful extraction of this page with these settings, or None (nothing is run)."""
+    run_dir, _, _ = _run_dir(engine, pdf, pdf_sha, page, raw_root, version, lang, profile, marker_extra, subdir)
+    done = run_dir / '_DONE.json'
+    if done.exists():
+        rec = json.loads(done.read_text())
+        if rec['status'] == 'OK':
+            return {**rec, 'cached': True}
+    return None
+
+
 def extract_page(engine: str, pdf: Path, pdf_sha: str, page: int, raw_root: Path, version: str,
                  log=print, lang: str | None = None, profile: str = 'standard', marker_extra=None,
-                 subdir: str | None = None) -> dict:
-    native = pdfio.native_dpi(pdf, page)
-    args = _command(engine, Path('PDF'), page, Path('OUT'), lang, profile, marker_extra, native)[1:]  # no paths in key
-    key = cache_key(pdf_sha, page, engine, version, args)
-    run_dir = raw_root / (subdir or engine) / f'p{page:04d}-{key}'
+                 subdir: str | None = None, last: int | None = None) -> dict:
+    """Extract `page` (or pages page..last in ONE engine run) into a content-addressed run directory."""
+    run_dir, native, key = _run_dir(engine, pdf, pdf_sha, page, raw_root, version, lang, profile, marker_extra, subdir, last)
     done = run_dir / '_DONE.json'
     if done.exists():
         rec = json.loads(done.read_text())
@@ -93,8 +115,8 @@ def extract_page(engine: str, pdf: Path, pdf_sha: str, page: int, raw_root: Path
     tmp = run_dir.with_name(run_dir.name + '.partial')
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
-    cmd = _command(engine, pdf, page, tmp, lang, profile, marker_extra, native)
-    log(f'[{engine}] page {page}: {" ".join(cmd)}')
+    cmd = _command(engine, pdf, page, tmp, lang, profile, marker_extra, native, last)
+    log(f'[{engine}] page {page}{f"-{last}" if last and last != page else ""}: {" ".join(cmd)}')
     t0 = time.time()
     with open(tmp / 'process.log', 'w') as lf:
         try:
@@ -157,9 +179,8 @@ def region_pdf(src_pdf: Path, page: int, bbox, dest: Path, zoom: float = config.
     return dest
 
 
-def region_ocr(out: Path, src_pdf: Path, region: dict, force_block: str, log=print, lang: str | None = None) -> dict:
-    """OCR one reviewer region with both engines; Marker treats the whole region as `force_block` (no layout
-    detection), Docling gives an independent reading. Cached by crop content + settings."""
+def _region_crop(out: Path, src_pdf: Path, region: dict) -> tuple[Path, str]:
+    """The region's pixels as a one-page PDF, stored by content: (path, sha256)."""
     import hashlib as _h
     rdir = out / 'raw' / 'regions'
     tmp_pdf = rdir / '_tmp' / f'{region["id"]}.pdf'
@@ -170,17 +191,69 @@ def region_ocr(out: Path, src_pdf: Path, region: dict, force_block: str, log=pri
         os.replace(tmp_pdf, final_pdf)
     else:
         tmp_pdf.unlink()
-    # The two engines are independent subprocesses: run them AT ONCE (a region costs the slower one, not both).
-    from concurrent.futures import ThreadPoolExecutor
+    return final_pdf, sha
 
-    def one(engine):
-        extra = ['--force_layout_block', force_block] if engine == 'marker' else None
-        return extract_page(engine, final_pdf, sha, 1, out / 'raw', engine_version(engine), log, lang,
-                            'standard', extra, subdir=f'regions/{engine}-{sha[:16]}')
+
+def regions_ocr(out: Path, src_pdf: Path, items: list[tuple[dict, str]], log=print, lang: str | None = None) -> dict:
+    """OCR several reviewer regions [(region, force_block)] with both engines: {region id: record}.
+
+    An engine run costs mostly its START (loading its models: Marker ~20 s, Docling ~6 s, whatever it reads), so
+    the regions are read TOGETHER — one engine run over a PDF with one page per region — instead of one run per
+    region. Each region reads its own page of that run (engine_json selects pages by id); the readings are the
+    same as alone (measured). A region already read alone with the same settings reuses that cache; Marker runs
+    once per forced block type (its setting applies to the whole run). The two engines run at once."""
+    import hashlib as _h
+
+    import pymupdf
+    crops = {r['id']: _region_crop(out, src_pdf, r) for r, _ in items}
+    force = {r['id']: fb for r, fb in items}
+    raw_root = out / 'raw'
+
+    def engine_runs(engine):
+        version = engine_version(engine)
+        res, groups = {}, {}
+        for r, _ in items:
+            pdf, sha = crops[r['id']]
+            extra = ['--force_layout_block', force[r['id']]] if engine == 'marker' else None
+            sub = f'regions/{engine}-{sha[:16]}'
+            hit = cached_page(engine, pdf, sha, 1, raw_root, version, lang, 'standard', extra, sub)
+            if hit is not None:
+                res[r['id']] = {**hit, 'page': 1}
+            else:
+                # regions share a run when the engine would read them with the SAME arguments (forced block type,
+                # resolution): the raw pixel density of crops differs a little, the resolution argument does not
+                args = tuple(_command(engine, Path('PDF'), 1, Path('OUT'), lang, 'standard', extra, pdfio.native_dpi(pdf, 1)))
+                groups.setdefault((tuple(extra or ()), args), []).append(r['id'])
+        for (extra, _), ids in groups.items():
+            if len(ids) == 1:                              # alone: exactly the single-region run (and its cache)
+                pdf, sha = crops[ids[0]]
+                rec = extract_page(engine, pdf, sha, 1, raw_root, version, log, lang, 'standard', list(extra) or None,
+                                   subdir=f'regions/{engine}-{sha[:16]}')
+                res[ids[0]] = {**rec, 'page': 1}
+                continue
+            shas = [crops[i][1] for i in ids]
+            bsha = _h.sha256('|'.join(shas).encode()).hexdigest()
+            bpdf = out / 'raw' / 'regions' / f'batch-{bsha[:16]}.pdf'
+            if not bpdf.exists():
+                doc = pymupdf.open()
+                for i in ids:
+                    with pymupdf.open(crops[i][0]) as one:
+                        doc.insert_pdf(one)
+                tmp = bpdf.with_name(bpdf.name + f'.{os.getpid()}.tmp')
+                doc.save(tmp)
+                os.replace(tmp, bpdf)
+            rec = extract_page(engine, bpdf, bsha, 1, raw_root, version, log, lang, 'standard', list(extra) or None,
+                               subdir=f'regions/{engine}-batch-{bsha[:16]}', last=len(ids))
+            for k, i in enumerate(ids, 1):
+                res[i] = {**rec, 'page': k, 'batch': len(ids)}
+        return res
+
+    from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {e: pool.submit(one, e) for e in ('marker', 'docling')}
-        res = {e: f.result() for e, f in futures.items()}
-    return {'crop_pdf': str(final_pdf.relative_to(out)), 'crop_sha': sha, 'engines': res}
+        futures = {e: pool.submit(engine_runs, e) for e in ('marker', 'docling')}
+        per_engine = {e: f.result() for e, f in futures.items()}
+    return {r['id']: {'crop_pdf': str(crops[r['id']][0].relative_to(out)), 'crop_sha': crops[r['id']][1],
+                      'engines': {e: per_engine[e][r['id']] for e in per_engine}} for r, _ in items}
 
 
 # Marker's OCR (surya) runs a llama-server it spawns DETACHED and stops only via atexit in the spawning

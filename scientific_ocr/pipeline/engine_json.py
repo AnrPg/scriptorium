@@ -137,13 +137,13 @@ def html_to_md(html: str) -> tuple[str, list[str]]:
 def marker_blocks(raw: dict, page: int) -> list[dict]:
     """`page` is the canonical 1-based page (Marker ids are 0-based: /page/2/... == page 3)."""
     out: list[dict] = []
-    pages = [c for c in raw.get('children') or [] if c.get('block_type') == 'Page']
-    if len(pages) != 1:
-        raise ValueError(f'expected 1 Marker page, got {len(pages)}')
-    pg = pages[0]
-    m = re.match(r'/page/(\d+)/', pg.get('id', ''))
-    if not m or int(m.group(1)) != page - 1:
-        raise ValueError(f'Marker page id {pg.get("id")} does not match canonical page {page}')
+    pages = [(i, c) for i, c in enumerate(raw.get('children') or []) if c.get('block_type') == 'Page']
+    # one run may hold several pages (reviewer regions read together: one page per region); exactly one must be
+    # the requested page, by its id — never by position
+    hits = [(i, c) for i, c in pages if (m := re.match(r'/page/(\d+)/', c.get('id', ''))) and int(m.group(1)) == page - 1]
+    if len(hits) != 1:
+        raise ValueError(f'Marker output has {len(hits)} pages with id /page/{page - 1}/ ({len(pages)} pages)')
+    pidx, pg = hits[0]
 
     def walk(block, pointer, group):
         bt = block.get('block_type')
@@ -163,7 +163,7 @@ def marker_blocks(raw: dict, page: int) -> list[dict]:
                                                       **_heading_level(bt, block.get('html') or ''),
                                                       **({'list_items': items} if items else {})}})
     for i, c in enumerate(pg.get('children') or []):
-        walk(c, f'/children/0/children/{i}', None)
+        walk(c, f'/children/{pidx}/children/{i}', None)
     return out
 
 

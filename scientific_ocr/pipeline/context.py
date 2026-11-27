@@ -34,6 +34,8 @@ class PageContext:
     median_density: float | None = None
     picture_boxes: list = field(default_factory=list)
     imaging: object = None                               # ports.PageImaging (injected by the application)
+    quick_ocr: object = None                             # ports.QuickOcr (injected; None = no OCR evidence)
+    ocr_lang: str = 'ell,eng'
     _crop_zoom: float | None = None                      # zoom crops of this page are rendered at (cached)
 
     @classmethod

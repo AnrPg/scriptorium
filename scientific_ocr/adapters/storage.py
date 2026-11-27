@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import stat
+import threading
 import time
 import unicodedata
 import uuid
@@ -67,6 +68,9 @@ def read_json(path: Path, default=None):
         return default
 
 
+_CANON_CACHE: dict[Path, tuple] = {}            # canonical.json path -> ((mtime_ns, size), parsed) — Book.canonical
+_CANON_LOCK = threading.Lock()
+
 class CorruptFile(ValueError):
     """A required input exists but cannot be read: never treated as empty."""
 
@@ -94,7 +98,6 @@ class Book:
         self.dir = root
         self.id = root.name
         self.events = EventStore(root)
-        self._canon_cache: tuple[float, dict] | None = None
 
     # paths
     source_pdf = property(lambda self: self.dir / 'source' / 'original.pdf')
@@ -131,13 +134,22 @@ class Book:
         return read_json(self.dir / 'source' / 'source.json', {}) or {}
 
     def canonical(self) -> dict | None:
+        """The projection, parsed once per VERSION of the file (path, mtime, size — it is only ever replaced by an
+        atomic write) and shared by every request of this process: a book's canonical.json is tens of MB, and
+        re-parsing it on each request cost ~0.15 s per call (several per page change). Callers treat it as read-only."""
         try:
-            m = self.canonical_path.stat().st_mtime
+            st = self.canonical_path.stat()
         except FileNotFoundError:
             return None
-        if not self._canon_cache or self._canon_cache[0] != m:
-            self._canon_cache = (m, read_json(self.canonical_path))
-        return self._canon_cache[1]
+        stamp = (st.st_mtime_ns, st.st_size)
+        with _CANON_LOCK:
+            hit = _CANON_CACHE.get(self.canonical_path)
+        if hit and hit[0] == stamp:
+            return hit[1]
+        data = read_json(self.canonical_path)
+        with _CANON_LOCK:
+            _CANON_CACHE[self.canonical_path] = (stamp, data)
+        return data
 
     def revision(self) -> str:
         """Changes whenever the projection or the event log is written: clients compare it to know their view is
@@ -183,7 +195,7 @@ class Book:
     def pages(self) -> list[dict]:
         c = self.canonical() or {}
         by_page: dict[int, list] = {}
-        for b in c.get('blocks', []):
+        for b in self.seen_blocks():                       # page previews included: decisions show at once
             by_page.setdefault(b['page'], []).append(b)
         failed = {p['page'] for p in c.get('pages', [])
                   if any(e.get('status') != 'OK' for e in p.get('engines', {}).values())}
@@ -207,6 +219,28 @@ class Book:
         pv = read_json(self.dir / PREVIEW_DIR / f'p{int(page):04d}.json')
         base = ((self.canonical() or {}).get('run') or {}).get('built_utc')
         return pv if pv and base and pv.get('base') == base else None
+
+    def seen_blocks(self) -> list[dict]:
+        """Every segment as the reviewer SEES it, in reading order: the full projection with each page rebuilt
+        since (valid page preview) in its place. Every view of review state (page list, queue, segment) reads
+        this, so a page-local decision shows everywhere at once, not only on its page."""
+        blocks = (self.canonical() or {}).get('blocks', [])
+        previews = {}
+        for f in (self.dir / PREVIEW_DIR).glob('p*.json'):
+            if f.stem[1:].isdigit() and (pv := self.page_preview(int(f.stem[1:]))):
+                previews[pv['page']] = pv['blocks']
+        if not previews:
+            return blocks
+        out, done = [], set()
+        for x in blocks:
+            p = x['page']
+            if p in previews:
+                if p not in done:
+                    out += previews[p]
+                    done.add(p)
+            else:
+                out.append(x)
+        return out
 
     def preview_applied(self) -> set[int]:
         """Event seqs already visible in valid page previews (applied to their pages, not yet to the book)."""

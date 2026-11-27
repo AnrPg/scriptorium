@@ -144,14 +144,21 @@ def _ocr_regions(out: Path, log: Log, progress=None) -> int:
     idx = read_json(idx_path, {}) or {}
     lang = book.get('ocr_lang') or config.DEFAULT_OCR_LANG
     todo = regions_to_ocr(out)
-    for i, (r, label, spec) in enumerate(todo):
-        if progress:
-            progress('regions', i, len(todo), page=r['page'])
+    if not todo:
+        return 0
+    if progress:
+        progress('regions', 0, len(todo), page=todo[0][0]['page'])
+    for r, label, _ in todo:
         log(f'[region] {r["id"]} p{r["page"]} {r["bbox"]} label={label["engine"]}:{label["name"]}')
-        rec = extraction.region_ocr(out, out / 'source' / 'original.pdf', r, spec['force_block'], log,
-                                    book.get('ocr_lang'))
-        idx[r['id']] = {**rec, 'bbox': r['bbox'], 'label': label, 'lang': lang, 'height': r['bbox'][3] - r['bbox'][1]}
-        atomic_write(idx_path, json.dumps(idx, indent=2, default=str))
+    # every pending region in ONE run per engine (an engine run costs mostly its model loading)
+    recs = extraction.regions_ocr(out, out / 'source' / 'original.pdf', [(r, spec['force_block']) for r, _, spec in todo],
+                                  log, book.get('ocr_lang'))
+    for r, label, _ in todo:
+        idx[r['id']] = {**recs[r['id']], 'bbox': r['bbox'], 'label': label, 'lang': lang,
+                        'height': r['bbox'][3] - r['bbox'][1]}
+    atomic_write(idx_path, json.dumps(idx, indent=2, default=str))
+    if progress:
+        progress('regions', len(todo), len(todo))
     return len(todo)
 
 

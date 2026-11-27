@@ -48,19 +48,7 @@ class ServiceBase:
         """Every segment as the reviewer SEES it, in reading order: the full projection with each page rebuilt
         since (page preview) in its place. Reviewer ACTIONS resolve their segments and targets here — a merge,
         region or caption made a minute ago exists in the page preview before the next full rebuild."""
-        blocks = (b.canonical() or {}).get('blocks', [])
-        out, done = [], set()
-        for x in blocks:
-            p = x['page']
-            if p in done:
-                continue
-            pv = b.page_preview(p)
-            if pv:
-                out += pv['blocks']
-                done.add(p)
-            else:
-                out.append(x)
-        return out
+        return b.seen_blocks()
 
     def _blocks_seen(self, b: Book) -> dict[str, dict]:
         return {x['id']: x for x in self._seen_list(b)}
