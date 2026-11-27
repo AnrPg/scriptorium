@@ -6,7 +6,8 @@ Steps (language-independent; reviewer decisions override all of them later in th
      Docling's explicit picture/table -> caption links. Both agree -> confirmed; one engine only -> accepted, source
      recorded; they disagree -> Marker's choice kept and flagged for review; neither -> nearest figure, inferred
   2. chain split caption fragments: an unassigned caption, or a heading that is only a numbered label, directly
-     adjacent to an assigned caption joins the same group (layout engines often split title and body)
+     adjacent to an assigned caption joins the same group (layout engines often split title and body) — unless
+     the label names another kind of element (question, exercise, example…: pipeline.entities lexicon)
   2b. an emphasised paragraph that OPENS with a picture/table label ("**ΕΙΚΟΝΑ 5-6** Παραδείγματα…") is a caption
      even when no figure box is next to it — the layout engine may have split the picture into text lines
      (panel labels, empty lines). It stays CAPTION_WITHOUT_FIGURE; pipeline.structure suggests assembling the
@@ -22,6 +23,8 @@ from ..core.labels import CAPTION_LABEL, FIGURE_LABEL, TABLE_LABEL
 from ..core.model import CAPTIONABLE_KINDS
 from ..core.reasons import flag
 from ..core.text import label_key
+from ..core.vocabulary import family_of
+from .entities import classify
 
 # distances in page units (geometry.unit: ~1 pt on an A4/Letter page)
 MAX_GAP = 250
@@ -49,12 +52,61 @@ def associate(page_blocks: list[dict], docling_blocks: list[dict] | None = None,
             flag(cap, 'CAPTION_ENGINES_DISAGREE', marker=m['id'], docling=d['id'])
         elif m or d:
             _attach(cap, m or d, False, 'marker+docling' if m and d else ('marker' if m else 'docling'))
+        elif _other_element_label(caption_label(cap['chosen'].get('text', ''))[0] or ''):
+            cap['original_kind'], cap['kind'] = cap['kind'], 'paragraph'   # a question label the engine typed as caption
         else:
             near = _nearest(cap, figs, unit)
             if near is not None:
                 _attach(cap, near, True, 'geometry')
     _chain_fragments(page_blocks, unit)
     _orphan_labelled_captions(page_blocks)
+    _titles_are_not_captions(page_blocks)
+
+
+TITLE_MAX_WORDS = 4
+_PANEL_LETTER = re.compile(r'^\W*\(?[^\W\d_]{1,2}\)|^\W*[^\W\d_]\W*$')     # «(Α)…», «Β) …», «Γ»: a sub-figure's caption part
+_CREDIT = re.compile(r'^\W*(?:\(?\s*)?(?:με την (?:ευγενική )?άδεια|courtesy|από|from|adapted|πηγή|source)\b', re.I)
+
+
+def figure_title(text: str) -> str | None:
+    """Why an unlabelled text next to a picture is its TITLE or one of its LABELS rather than its caption — or None.
+    A caption explains the picture (a numbered label, or sentences); a picture's own title («ΦΩΣΦΟΛΙΠΙΔΙΑ»), a
+    printed label («Κυτταρόπλασμα Πυρήνας», «100 nm») is all capitals or a few words that are not a sentence.
+    Never: a labelled caption, a sub-figure letter «(Α)», a credit «Με την άδεια…», text that continues or ends a
+    sentence (lowercase start, closing full stop)."""
+    t = re.sub(r'[*_#]', '', text or '').strip()
+    if not t or caption_label(t)[0] or _PANEL_LETTER.match(t) or _CREDIT.match(t):
+        return None
+    letters = re.findall(r'[^\W\d_]', t)
+    if len(letters) >= 3 and all(ch.isupper() for ch in letters):
+        return 'all capitals'
+    words = re.findall(r'\w+', t)
+    sentence = t[:1].islower() or t.rstrip().endswith(('.', ';', '!', '?', '·'))
+    if len(words) <= TITLE_MAX_WORDS and not sentence:
+        return f'{len(words)} words, not a sentence'
+    return None
+
+
+def _titles_are_not_captions(page_blocks):
+    """Captions inferred by the machine that are a picture's title or label (figure_title) are taken back: no
+    caption link, the kind the engine gave (or heading for an all-capitals title, else paragraph). The reviewer's
+    own caption decisions are replayed afterwards and always win."""
+    by_id = {b['id']: b for b in page_blocks}
+    for b in page_blocks:
+        if b['kind'] != 'caption' or b['chosen'].get('type') != 'text':
+            continue
+        why = figure_title(b['chosen'].get('text'))
+        if not why:
+            continue
+        fig = by_id.get(b['relations'].get('caption_for'))
+        if fig is not None:
+            fig['relations']['captions'] = [c for c in fig['relations'].get('captions') or [] if c != b['id']]
+        for k in ('caption_for', 'inferred', 'caption_link_source'):
+            b['relations'].pop(k, None)
+        b['reasons'] = [r for r in b['reasons'] if r not in ('CAPTION_ASSOCIATION_INFERRED', 'CAPTION_ENGINES_DISAGREE')]
+        kind = b.get('original_kind') or ('heading' if why == 'all capitals' else 'paragraph')
+        b['original_kind'], b['kind'] = 'caption', kind
+        flag(b, 'FIGURE_TITLE_NOT_CAPTION', why=why)
 
 
 def insert_label(text: str) -> str | None:
@@ -170,6 +222,8 @@ def _chain_fragments(page_blocks: list[dict], unit: float):
             if b['kind'] not in ('caption', 'heading', 'paragraph') or b['relations'].get('caption_for'):
                 continue
             label, rest = caption_label(b['chosen'].get('text', '')) if b['chosen'].get('type') == 'text' else (None, '')
+            if label and _other_element_label(label):
+                continue                                  # «ΕΡΩΤΗΣΗ 1-7», «Παράδειγμα 2.1»: its own element
             label_only_heading = b['kind'] == 'heading' and label and len(rest) < 3
             labelled_paragraph = b['kind'] == 'paragraph' and label and label.split()[0].isupper()
             if not (b['kind'] == 'caption' or label_only_heading or labelled_paragraph):
@@ -184,6 +238,14 @@ def _chain_fragments(page_blocks: list[dict], unit: float):
                 _attach(b, fig, True, 'adjacent fragment' if near else 'labelled text next to figure')
                 fig['relations']['captions'].sort(key=lambda cid: page_blocks.index(by_id[cid]))
                 changed = True
+
+
+def _other_element_label(label: str) -> bool:
+    """The label names an element of the book that is not a picture/table (a question, exercise, example,
+    definition… per the entity lexicon, pipeline.entities): it is never a caption fragment, however close to a
+    figure it is printed (margin questions next to figures were read as the end of the figure's caption)."""
+    etype = classify(label)
+    return bool(etype) and family_of(etype) not in (None, 'insert')
 
 
 def _adjacent(a, b, unit: float) -> bool:
@@ -221,6 +283,21 @@ _SOURCE = re.compile(r'^\s*(?:πηγ[ηή]|source|σημ\.?|σημείωση|not
 _CONT_START = re.compile(r'^\s*(?:[•■▪◦\-–]\s|\(?[α-ωa-zΑ-ΩA-Z0-9]{1,2}[).]\s|(?:πηγ[ηή]|source|σημ\.?|note|key)\b)', re.I)
 CONT_GAP = 30                  # page units between the caption and its continuation
 SIZE_TOL = 0.10
+
+
+_LIST_START = re.compile(r'^\s*(?:[•■▪◦\-–]\s|\(?[α-ωa-z0-9]{1,2}[).]\s)')
+
+
+def _mid_sentence_start(text: str) -> bool:
+    """The text starts in the middle of a sentence (a lowercase word that is not a list marker «α. », «(β) »)."""
+    t = text.lstrip(' «"(')
+    return bool(t[:1].islower()) and not _LIST_START.match(text)
+
+
+def _open_end(b: dict) -> bool:
+    """The segment's text stops mid-sentence (no closing punctuation)."""
+    t = re.sub(r'[*_\s]+$', '', (b['chosen'].get('text') or '')).rstrip()
+    return bool(t) and t[-1] not in '.;;!?:)»"…'
 
 
 def continuations(blocks: list[dict], page_refs: dict, units: dict, dismissed) -> list[dict]:
@@ -261,6 +338,8 @@ def continuations(blocks: list[dict], page_refs: dict, units: dict, dismissed) -
             if not (note or (not notes_only and (_CONT_START.match(text) or same_size))
                     or (notes_only and _SOURCE.match(text))):
                 break
+            if _mid_sentence_start(text) and not _open_end(last):
+                break                                  # it continues a sentence of the BODY, not this caption
             k = skey('doc:caption_continues', [b['id'], nxt['id']])
             if k in dismissed or any(d.get('action') in ('detach_caption', 'associate_caption') for d in nxt.get('decisions', [])):
                 break

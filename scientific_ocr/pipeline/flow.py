@@ -45,6 +45,14 @@ def _text(b) -> str:
     return re.sub(r'<[^>]+>|\$[^$]*\$', ' ', b['chosen'].get('text') or '').strip()
 
 
+_MID_SENTENCE_TOKEN = re.compile(r'^(?:[A-ZΑ-Ω]{2,5}\b(?!\s+[A-ZΑ-Ω]{2,})|\d|[(\[])')   # an acronym, not a capitalised title
+_LATIN_WORD = re.compile(r'^[A-Za-z]')
+
+
+def _greek(t: str) -> bool:
+    return any('\u0370' <= ch <= '\u03ff' or '\u1f00' <= ch <= '\u1fff' for ch in t)
+
+
 def continues(prev: str, nxt: str) -> bool:
     prev, nxt = prev.rstrip(), nxt.lstrip(' *_"«(')
     if not prev or not nxt:
@@ -52,10 +60,16 @@ def continues(prev: str, nxt: str) -> bool:
     if prev.endswith(('-', '‐')) and nxt[0].isalpha() and nxt[0].islower():
         return True                                    # hyphenated word split across the break (its rest is
                                                        # lowercase: «νημα-» + «Αυτό» is a dash, not a split word)
-    return not _SENTENCE_END.search(prev) and nxt[0].isalpha() and nxt[0].islower()
+    if _SENTENCE_END.search(prev):
+        return False
+    # an open sentence continues with a lowercase word — or with a token that never starts a sentence by its form:
+    # an acronym («DNA ligase»), a number, a bracket, a Latin word inside Greek text («(Hooke)», «το Golgi»)
+    return (nxt[0].isalpha() and nxt[0].islower()) or bool(_MID_SENTENCE_TOKEN.match(nxt)) \
+        or (prev[-1:].isalpha() and _greek(prev[-12:]) and _LATIN_WORD.match(nxt) is not None)
 
 
 NEVER_CONTINUES = INSERT_KINDS | {'caption', 'heading'}
+BOX_LABELS = {'labelled_element', 'box_heading'}      # pipeline.sections: titles of boxes and their sub-headings
 
 
 def strand_of(b: dict, boxes: dict) -> str:
@@ -92,8 +106,10 @@ def annotate(blocks: list[dict], inserts: frozenset = frozenset(), boxes: dict |
             continue                                   # text the reviewer placed as an insert: outside every strand
         key = strand_of(b, boxes)
         if b['kind'] == 'heading':
-            last.pop(key, None)                        # a heading starts new text in its own context only
-            continue
+            if not (key == 'main' and b.get('heading_level_source') in BOX_LABELS):
+                last.pop(key, None)                    # a heading starts new text in its own context only
+            continue                                   # (a box's label «ΕΡΩΤΗΣΗ 6-2» is not a heading of the course
+                                                       # text: the course paragraph it interrupts still continues)
         if b['kind'] in NEVER_CONTINUES:
             continue
         prev = last.get(key)

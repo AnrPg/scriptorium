@@ -73,6 +73,8 @@ def body_html(c: dict, asset_url, reviewer: bool = False, pages: set | None = No
             body = _img(n['image'], asset_url, lab[n['kind']]) if n['image'] else ''
             if n['body']:
                 body += (f'<div class="pv-math">$${escape(n["body"]["latex"])}$$</div>' if 'latex' in n['body']
+                         else '<ul class="pv-text pv-items">' + ''.join(f'<li>{inline_html(t)}</li>' for t in n['body']['items'])
+                         + '</ul>' if n['body'].get('items')
                          else f'<div class="pv-text">{inline_html(n["body"]["text"])}</div>')
             body += ''.join(_img(p, asset_url, lab[n['kind']]) for p in n.get('caption_images') or [])
             caps = ''.join(f'<figcaption class="pv-cap pv-cap-{escape(cp["role"])}">{inline_html(cp["text"])}</figcaption>'
@@ -107,11 +109,13 @@ def page_html(c: dict, page: int, asset_url, reviewer: bool = True) -> str:
     else:
         html_left = ''
     if gone:                                            # reviewer only; never part of the output
-        items = ''.join(f'<li class="pv-seg" data-seg="{escape(b["id"])}">{escape(b["excluded"]["as"])} · '
-                        f'{escape(b["excluded"]["side"])}: {escape((b["chosen"].get("text") or "").strip()[:80]) or "[εικόνα]"}</li>'
+        # every kind of automatic exclusion (furniture, fills, duplicates…): only 'as' is common to all of them
+        items = ''.join(f'<li class="pv-seg" data-seg="{escape(b["id"])}">'
+                        f'{escape(" · ".join(x for x in (b["excluded"].get("as"), b["excluded"].get("side")) if x))}: '
+                        f'{escape((b["chosen"].get("text") or "").strip()[:80]) or "[εικόνα]"}</li>'
                         for b in gone)
-        html += (f'\n<details class="pv-excluded"><summary>Εξαιρέθηκαν ως στοιχεία σελίδας ({len(gone)}) — δεν '
-                 f'μπαίνουν στην έξοδο</summary><ul>{items}</ul></details>')
+        html += (f'\n<details class="pv-excluded"><summary>Εξαιρέθηκαν αυτόματα ({len(gone)}): στοιχεία σελίδας, '
+                 f'φόντα, διπλές αναγνώσεις — δεν μπαίνουν στην έξοδο</summary><ul>{items}</ul></details>')
     return html + html_left
 
 

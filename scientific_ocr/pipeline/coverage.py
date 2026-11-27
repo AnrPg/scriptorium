@@ -26,6 +26,20 @@ def _sheet_mask(gray, ndimage, margin_cells: int = 4):
     return ndimage.binary_erosion(sheet, iterations=margin_cells)
 
 
+BAND_ROW_FILL = 0.8       # a row of a region that is this dark across its width belongs to a solid band (fill)
+
+
+def _band(dark_region, row0: int, cell_pt: float) -> dict:
+    """How much of a region is a SOLID BAND (the dark or coloured bar behind a title, a shaded header): the share of
+    its rows that are dark across >= BAND_ROW_FILL of the width, and their vertical extent in page points. Print is
+    never that dense; filled backgrounds are (pipeline.fills decides what the band is)."""
+    rows = dark_region.mean(axis=1) >= BAND_ROW_FILL if dark_region.size else np.zeros(0, bool)
+    idx = np.where(rows)[0]
+    if not len(idx):
+        return {'band': 0.0}
+    return {'band': round(float(rows.mean()), 3), 'band_y': [(row0 + int(idx.min())) * cell_pt, (row0 + int(idx.max()) + 1) * cell_pt]}
+
+
 def uncovered_ink_regions(imaging, pdf: Path, page: int, covered: list, unit: float = 1.0) -> tuple[list[dict], dict]:
     from PIL import (
         ImageFilter,  # heavy imaging libraries: loaded only when coverage runs
@@ -60,7 +74,7 @@ def uncovered_ink_regions(imaging, pdf: Path, page: int, covered: list, unit: fl
         if cells < MIN_AREA_UNITS / CELL_UNITS ** 2 or sl[0].stop - sl[0].start < 3:
             continue
         bbox = [sl[1].start * CELL_PT, sl[0].start * CELL_PT, sl[1].stop * CELL_PT, sl[0].stop * CELL_PT]
-        regions.append({'bbox': clamp(bbox, W, H), 'ink_cells': cells})
+        regions.append({'bbox': clamp(bbox, W, H), 'ink_cells': cells, **_band(dark[sl], sl[0].start, CELL_PT)})
     rows = np.where(dark[:, m:-m].any(axis=1))[0]
     rows = rows[rows < h_px - m]
     info = {'uncovered_regions': len(regions), 'lowest_ink_y': float(rows.max() * CELL_PT) if len(rows) else None,

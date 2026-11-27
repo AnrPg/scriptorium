@@ -48,6 +48,7 @@ from ..core.vocabulary import (  # noqa: F401
     toc_entries,
     valid_entity_type,
 )
+from .fills import band_boxes
 from .furniture import body_frames
 
 VISUAL_TYPES = {'figure', 'chart', 'chemical_drawing'}
@@ -168,6 +169,7 @@ def detect(blocks: list[dict], toc: list[dict], groups: list[dict], dims: dict, 
     d = _Detector(blocks, dims, confirmed, dismissed)
     d.human(assigned or {})
     d.boxes(groups)
+    d.banners(band_boxes(blocks))
     d.sections(toc)
     d.labelled_paragraphs()
     d.contents_pages()
@@ -288,6 +290,39 @@ class _Detector:
                 stop = heads[j + 1] if j + 1 < len(heads) else len(mem)
                 t = chosen_text(self.by_id[mem[i]])
                 self.add(mem[i], 'part', classify(t), mem[i:stop], t, 'high', f'sub-heading «{t[:30]}» in box')
+
+    BANNER_SLACK = 8.0          # page units a member may stick out of the banner's column
+    BANNER_GAP = 30.0           # largest vertical gap between consecutive members (page units)
+
+    def banners(self, bars: dict):
+        """A labelled title printed on a BACKGROUND BAR (pipeline.fills: «ΕΡΩΤΗΣΗ 1-2» on a dark band): the bar is
+        the top of a box and gives its COLUMN (label + bar, left to right). Members: the label and the blocks that
+        follow it in reading order on the same page inside that column and vertically contiguous, then the text
+        that continues them (pipeline.flow continuation links, e.g. onto the next page). Independent of the shading
+        detector, which misses light or split boxes."""
+        for lid, bar in bars.items():
+            lab = self.by_id.get(lid)
+            if lab is None or lid in self.claimed:
+                continue
+            label = chosen_text(lab)
+            etype = classify(label)
+            if not etype or TYPES[etype][0] in ('insert', 'part') or COLLECTIVE.search(norm(label)):
+                continue
+            lb = lab['geometry']['bbox']
+            x0, x1 = min(lb[0], bar[0]) - self.BANNER_SLACK, max(lb[2], bar[2]) + self.BANNER_SLACK
+            members, bottom = [lid], max(lb[3], bar[3])
+            for b in self.flow[self.order[lid] + 1:]:
+                bb = b['geometry']['bbox']
+                if b['page'] != lab['page'] or bb[0] < x0 or bb[2] > x1 or bb[1] < lb[1] or bb[1] - bottom > self.BANNER_GAP \
+                        or b['id'] in self.claimed or (b['kind'] == 'heading' and classify(chosen_text(b))):
+                    break
+                members.append(b['id'])
+                bottom = max(bottom, bb[3])
+            while (nxt := self.by_id.get(self.by_id[members[-1]]['relations'].get('continues_in'))) is not None \
+                    and nxt['id'] not in members and nxt['id'] not in self.claimed:
+                members.append(nxt['id'])            # the box's text continues (next column/page)
+            if len(members) >= 2:
+                self.add(lid, 'box', etype, members, label, 'high', f'label on a background bar «{label[:30]}»')
 
     def sections(self, toc):
         """A heading whose title is an entity label: the heading and its whole subtree."""
