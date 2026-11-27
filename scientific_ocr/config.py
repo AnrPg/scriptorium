@@ -19,6 +19,18 @@ CKPT = {
     'easyocr': MODEL_HOME / 'easyocr',
 }
 
+# Spelling dictionaries (Hunspell .aff/.dic, LibreOffice dictionaries project; downloaded once by
+# `python -m scientific_ocr install-dictionaries`, pinned by sha256). Tesseract language code -> dictionary.
+DICT_HOME = MODEL_HOME.parent / 'dictionaries'
+DICTIONARIES = {
+    'ell': {'name': 'el_GR', 'url': 'https://raw.githubusercontent.com/LibreOffice/dictionaries/master/el_GR/el_GR',
+            'sha256': {'aff': '868dfe13ad7d34251915a745e44d38542831463d56e60732ba3a5bc1dcca582a',
+                       'dic': 'e5b9b9c2cf05bbc59e03fe302b462dae85968f822f4fc219a8ed2879d6943720'}},
+    'eng': {'name': 'en_US', 'url': 'https://raw.githubusercontent.com/LibreOffice/dictionaries/master/en/en_US',
+            'sha256': {'aff': 'e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e',
+                       'dic': 'f0b1a234bd178bdd01875b2a392a9647f888b8fe879f79c52aae62c2759b3647'}},
+}
+
 # Processing must be local: forbid hub lookups once weights are prefetched.
 OFFLINE_ENV = {'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'HF_DATASETS_OFFLINE': '1',
                'TOKENIZERS_PARALLELISM': 'false', 'PYTHONWARNINGS': 'ignore'}

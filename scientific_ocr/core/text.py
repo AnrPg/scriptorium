@@ -20,6 +20,25 @@ TRANSLIT = {'Α': 'A', 'Β': 'BV', 'Γ': 'G', 'Δ': 'D', 'Ε': 'E', 'Ζ': 'Z', '
             'М': 'M', 'Н': 'NH', 'О': 'O', 'П': 'P', 'Р': 'RP', 'С': 'SC', 'Т': 'T', 'У': 'UY', 'Ф': 'F', 'Х': 'XH'}
 
 
+# Lookalike letters mapped INTO one script: a word read with letters of two scripts ('ρΗ', 'τοµές' with the micro
+# sign, Cyrillic 'парагόνται') becomes a candidate in each script (pipeline.spelling).
+TO_GREEK = {**dict(zip('ABEHIKMNOPTXYZaoρpvkiuxtynwµ', 'ΑΒΕΗΙΚΜΝΟΡΤΧΥΖαορρνκιυχτγηωμ')),
+            **dict(zip('АВЕНКМОРТХаорпгктхи', 'ΑΒΕΗΚΜΟΡΤΧαορπγκτχυ'))}
+TO_LATIN = {**dict(zip('ΑΒΕΗΙΚΜΝΟΡΤΧΥΖορνκαιυχ', 'ABEHIKMNOPTXYZopvkaiux')),
+            **dict(zip('АВЕНКМОРТХаорсху', 'ABEHKMOPTXaopcxy'))}
+
+
+def letter_scripts(word: str) -> set[str]:
+    """Scripts of the LETTERS of a word (GREEK, LATIN, CYRILLIC; the micro sign counts as a lookalike)."""
+    out = set()
+    for ch in word:
+        if ch == 'µ':
+            out.add('MICRO')
+        elif ch.isalpha():
+            out.add(script_of(ch))
+    return out
+
+
 def strip_marks(s: str) -> str:
     """Remove diacritics (polytonic/monotonic Greek, accents) for comparison."""
     return ''.join(c for c in unicodedata.normalize('NFD', s) if not unicodedata.combining(c))

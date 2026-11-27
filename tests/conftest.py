@@ -9,8 +9,12 @@ Page 1 (600x800 pt):
   bottom   y 740-760  printed but seen by NO engine  -> uncovered ink / bottom omission
 """
 import json
+import os
 import shutil
 from pathlib import Path
+
+# builds in tests are deterministic whatever dictionaries this machine has (pipeline.spelling is tested with a fake)
+os.environ.setdefault('SCIENTIFIC_OCR_NO_LEXICON', '1')
 
 import pymupdf
 import pytest

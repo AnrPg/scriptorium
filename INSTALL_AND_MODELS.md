@@ -59,3 +59,9 @@ RxnScribe_smoke: reaction scheme crop -> reactants/products/conditions candidate
 Validate against source images, record false outputs, and save `model_readiness.json`. A model that imports but lacks checkpoint or fails inference is `INSTALLED_NOT_READY`.
 
 If any fail, the initial system can still operate using the successful engines and **original image excerpts**. But the upfront install phase must document exactly what failed and why; don't defer installation secretly to a later phase.
+
+## Spelling dictionaries (spelling proposals)
+`uv pip install --python .venvs/docling/bin/python spylls==0.1.7` then `.venvs/docling/bin/python -m scientific_ocr
+install-dictionaries` — downloads LibreOffice `el_GR` and `en_US` Hunspell files once (sha256 pinned in
+`config.DICTIONARIES`) into `~/.cache/scientific-textbook-ocr/dictionaries`. Optional: without them the spelling
+stage uses only the book's own vocabulary and the second engine's reading.
