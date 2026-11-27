@@ -41,3 +41,5 @@ figcaption.pv-seg{font-size:13.5px;margin:6px 0 0;font-family:-apple-system,syst
 .pv-excursus{border-left-style:dashed}
 .pv-excursus-label{font-size:.8em;text-transform:uppercase;letter-spacing:.04em;opacity:.7;margin-bottom:4px}
 .pv-items{margin:4px 0;padding-left:1.4em}.pv-items li{margin:1px 0}.pv-kv{margin:1px 0 3px;padding-left:1.2em;list-style:none}.pv-k{opacity:.75}.pv-list-label{font-weight:600;margin-top:4px}
+/* a glossary entry (pipeline.glossary → rag.html): the term in bold, then its definition; both named */
+.pv-def{margin:6px 0;padding:4px 0 4px 10px;border-left:3px solid var(--acc,#2457d6)}.pv-def dt{margin:0}.pv-def dd{margin:2px 0 0}.pv-def-l{opacity:.7;font-size:.92em}

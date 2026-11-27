@@ -26,7 +26,7 @@ import unicodedata
 
 from ..core.model import in_reader_output
 from ..core.text import MATH_SPAN, MAX_TERM_WORDS, emphasis_terms, strip_emphasis
-from . import reading, tables
+from . import glossary, reading, tables
 
 _BR = re.compile(r'<br\s*/?>', re.I)
 _SUP = re.compile(r'<sup>(.*?)</sup>', re.I | re.S)
@@ -62,6 +62,12 @@ def clean(text: str, strip: bool = True) -> tuple[str, list[str]]:
     s = '\n'.join(' '.join(ln.split()) for ln in s.split('\n'))
     s = re.sub(r'\n{3,}', '\n\n', s).strip()
     return s, list(dict.fromkeys(terms))
+
+
+def definition_text(term: str, definition: str) -> str:
+    """A glossary entry as the RAG writes it: the term in bold, both introduced by name (pipeline.glossary)."""
+    lt, ld = glossary.labels(f'{term} {definition}')
+    return f'**{lt}: {term}**\n{ld}: {definition}'
 
 
 def words(s: str) -> int:
@@ -149,6 +155,7 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
     out: list[dict] = []
     held: dict[str, list[dict]] = {}       # picture id -> its caption units, waiting for the end of the section
     lead: list[str] = []                   # titles deeper than the profile's depth: they lead the next paragraph
+    gl = {'in': False, 'label': ((c.get('glossary') or {}).get('label') or '')}   # inside the glossary (pipeline.glossary)
 
     def ids(n) -> list[str]:                      # the segments a unit comes from (views select/show them)
         return [b['id'] for b in n.get('blocks') or []]
@@ -182,8 +189,44 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
             out.append({'t': 'text', 'text': ' — '.join(lead), 'pages': [], 'ids': [], 'terms': [], 'labels': []})
             lead.clear()
 
+    def glossary_title(n) -> None:
+        """Entering the glossary: its title (the running head's; the book prints no heading) opens its section."""
+        if not gl['in']:
+            flush_lead()
+            flush_held(all_=True)
+            gl['name'] = gl['label'] or ('Γλωσσάριο' if glossary.labels(n.get('text') or '')[0] == 'Όρος' else 'Glossary')
+            out.append({'t': 'heading', 'level': 1, 'text': gl['name'], 'pages': pages(n), 'ids': [], 'terms': [], 'labels': [], 'generated': True})
+            gl['in'] = True
+
     for i, n in enumerate(nodes):
         t = n['t']
+        first = (n.get('blocks') or [{}])[0]
+        if first.get('glossary_letter'):                  # «Α», «Γ / C / G»: a section of the glossary
+            glossary_title(n)
+            title = clean(_HEADING_MARKS.sub('', n['text']), True)[0]
+            if title:
+                out.append({'t': 'heading', 'level': 2, 'text': title, 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': []})
+            continue
+        if t == 'para' and any(b.get('glossary') for b in n.get('blocks') or []):
+            glossary_title(n)
+            terms = [x for b in n['blocks'] for x in (b.get('glossary') or {}).get('terms', [])]
+            head, pairs = glossary.split(n['text'], terms)
+            head = clean(head, strip)[0] if head else ''
+            if head and out and out[-1]['t'] == 'definition':   # the rest of the previous entry (next column/page)
+                d = out[-1]
+                d['definition'] = (d['definition'] + ' ' + head).strip()
+                d['text'] = definition_text(d['term'], d['definition'])
+                d['ids'] = list(dict.fromkeys(d['ids'] + ids(n)))
+                d['pages'] = sorted(set(d['pages']) | set(pages(n)))
+            elif head:
+                put({'t': 'text', 'text': head, 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': []})
+            for term, d in pairs:
+                term, d = clean(term, True)[0], clean(d, strip)[0]
+                put({'t': 'definition', 'term': term, 'definition': d, 'glossary': gl['name'],
+                     'text': definition_text(term, d), 'pages': pages(n), 'ids': ids(n), 'terms': [term], 'labels': []})
+            continue
+        if t == 'heading' and gl['in']:
+            gl['in'] = False                              # a title of the book again: the glossary has ended
         if t == 'heading':
             title = clean(_HEADING_MARKS.sub('', n['text']), True)[0]
             if not title:
@@ -265,6 +308,10 @@ def expected(c: dict, profile: dict) -> list[tuple[str, int, str]]:
         t = n['t']
         if t == 'heading' and not n.get('generated'):
             add(n, clean(_HEADING_MARKS.sub('', n['text']), True)[0])
+        elif t == 'para' and any(b.get('glossary') for b in n.get('blocks') or []):
+            head, pairs = glossary.split(n['text'], [x for b in n['blocks'] for x in (b.get('glossary') or {}).get('terms', [])])
+            for x in [head] + [y for p in pairs for y in p]:
+                add(n, clean(x, strip)[0] if x else '')
         elif t == 'para':
             for x in (cells(n['text']) if '<table' in n['text'].lower() else [clean(n['text'], strip)[0]]):
                 add(n, x)
@@ -316,6 +363,10 @@ def html(c: dict, profile: dict, pages: set | None = None) -> str:
             out.append(f'<div{a}><pre class="pv-text pv-rag-table">{escape(text)}</pre></div>')
         elif t == 'list' and u.get('list'):
             out.append(f'<div{a}>{list_html(u["list"])}</div>')
+        elif t == 'definition':                          # a glossary entry: term (bold) and definition, named
+            lt, ld = glossary.labels(f'{u["term"]} {u["definition"]}')
+            out.append(f'<div{a}><dl class="pv-def"><dt><span class="pv-def-l">{lt}:</span> <b>{inline_html(u["term"])}</b></dt>'
+                       f'<dd><span class="pv-def-l">{ld}:</span> {inline_html(u["definition"])}</dd></dl></div>')
         elif all(x.startswith('- ') for x in lines if x.strip()) and any(x.strip() for x in lines):
             items = ''.join(f'<li>{inline_html(x[2:])}</li>' for x in lines if x.strip())
             out.append(f'<div{a}><ul class="pv-text pv-items">{items}</ul></div>')
@@ -374,7 +425,8 @@ def chunks(c: dict, profile: dict, title: str = '', context: dict | None = None)
     def close():
         nonlocal cur
         if cur and cur['parts']:
-            if out and words(' '.join(cur['parts'])) < min_w and out[-1]['_path'] == cur['path'] \
+            if out and words(' '.join(cur['parts'])) < min_w and out[-1]['_path'] == cur['path'] and not cur.get('term') \
+                    and not out[-1].get('term') \
                     and words(out[-1]['_body']) + words(' '.join(cur['parts'])) <= max_w:
                 prev = out[-1]                              # a tiny tail goes back into the previous chunk
                 prev['_body'] += '\n\n' + '\n\n'.join(cur['parts'])
@@ -383,7 +435,7 @@ def chunks(c: dict, profile: dict, title: str = '', context: dict | None = None)
             else:
                 out.append({'_path': cur['path'], 'breadcrumb': cur['crumbs'], '_body': '\n\n'.join(cur['parts']),
                             'pages': cur['pages'], 'types': cur['types'], 'figure_refs': cur['figure_refs'],
-                            'key_terms': cur['key_terms']})
+                            'key_terms': cur['key_terms'], **({'term': cur['term'], 'glossary': cur['glossary']} if cur.get('term') else {})})
         cur = None
 
     def start():
@@ -401,6 +453,14 @@ def chunks(c: dict, profile: dict, title: str = '', context: dict | None = None)
             sub = [x for x in sub if x[0] < u['level']] + [(u['level'], u['text'])]
             if cur and cur['parts'] and words(' '.join(cur['parts'])) >= min_w:
                 close()                                     # a deep title is a good place to cut
+            continue
+        if u['t'] == 'definition':                         # a glossary entry: ONE chunk of its own, never cut
+            close()                                         # (a longer one in sentence parts, each with its term)
+            for piece in _split_long(u['definition'], max(max_w - words(u['term']) - 2, 50)):
+                start()
+                cur.update(term=u['term'], glossary=u.get('glossary') or '', parts=[definition_text(u['term'], piece)],
+                           pages=list(u['pages']), types=['definition'], key_terms=[u['term']])
+                close()
             continue
         pieces = _split_long(u['text'], max_w, lines=u['t'] != 'text' or '\n- ' in u['text'] or u['text'].startswith('- '))
         for piece in pieces:
