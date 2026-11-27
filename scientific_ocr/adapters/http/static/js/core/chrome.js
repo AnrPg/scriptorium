@@ -66,8 +66,7 @@ export async function poll() {
     S.jobs = jobs;
     renderJobsPill(); renderPendingPill();
     for (const j of finished) { const now = jobs.find(x => x.id === j.id); if (now && now.state === 'failed') toast(`Απέτυχε: ${now.label}`, { error: true });
-      else if (now && now.warning === 'integrity') toast(`${now.label}: ολοκληρώθηκε, αλλά ο έλεγχος ακεραιότητας βρήκε κρίσιμο εύρημα — πάτα για να το δεις`,
-        { error: true, onclick: () => showCritical(now.book) }); }
+      else if (now && now.warning === 'integrity') integrityToast(now); }
     // Every view of the book is derived from its projection: when the book's revision changed (an edit was
     // re-projected — even one that finished before we ever saw its job), reload whatever is on screen.
     let busy = false;
@@ -122,6 +121,16 @@ export function removeJobButton(j, after) {
     S.jobs = S.jobs.filter(x => x.id !== j.id); if (S.book && S.book.jobs) S.book.jobs = S.book.jobs.filter(x => x.id !== j.id); after && after(); } }, '✕');
 }
 /** The book's «Έλεγχος» tab, scrolled to its critical findings, the ones the last build added highlighted. */
+// after a build whose integrity audit has a critical finding: how many are NEW in this build (finding.first_seen =
+// run.built_utc, application/projection._mark_first_seen); a click opens the list with the new ones flashing
+async function integrityToast(job) {
+  let fresh = null, total = null;
+  try { const b = await api(B(job.book)); total = (b.critical || []).length; fresh = (b.critical || []).filter(f => b.built && f.first_seen === b.built).length; } catch { /* the toast still opens the list */ }
+  const what = fresh == null ? 'ο έλεγχος ακεραιότητας βρήκε κρίσιμα ευρήματα'
+    : fresh ? `${fresh} νέ${fresh === 1 ? 'ο κρίσιμο εύρημα' : 'α κρίσιμα ευρήματα'}${total > fresh ? ` (σύνολο ${total})` : ''}`
+    : `κανένα νέο κρίσιμο εύρημα · ${total} από πριν παραμένουν`;
+  toast(`${job.label}: ολοκληρώθηκε — ${what}. Πάτα για να ${fresh ? 'τα δεις' : 'δεις τη λίστα'}`, { error: !!fresh || fresh == null, onclick: () => showCritical(job.book) });
+}
 export function showCritical(bookId) { S.critFocus = bookId; go(`#/b/${encodeURIComponent(bookId)}/review`); }
 export async function showLog(j) {             // the plain-language job report (raw log folded inside)
   const { jobSummaryDialog } = await import('../ui/joblog.js');
