@@ -211,9 +211,13 @@ def _letters(t: str) -> int:
     return len(re.findall(r'[^\W\d_]', re.sub(r'<[^>]+>|\$[^$]*\$', ' ', t or '')))
 
 
-def text_loss(b: dict) -> tuple[int, int]:
-    """(letters Docling read beyond the chosen reading, letters Docling read) — the evidence that text was LOST."""
+def text_loss(b: dict, owner: dict | None = None) -> tuple[int, int]:
+    """(letters Docling read beyond the chosen reading, letters Docling read) — the evidence that text was LOST.
+    A caption's `owner` (the table/figure it captions) counts as read: Docling often reads a printed title together
+    with the table under it, and that text is in the output, with the table."""
     mine = _letters((b.get('chosen') or {}).get('text') or '')
+    if owner is not None:
+        mine += _letters((owner.get('chosen') or {}).get('text') or '')
     theirs = sum(_letters(c.get('text') or '') for c in b.get('candidates') or [] if c.get('engine') == 'docling')
     return max(0, theirs - mine), theirs
 
@@ -226,6 +230,7 @@ def review_policy(blocks: list[dict], profile: dict) -> int:
     if profile.get('engine_policy') != 'marker_primary':
         return 0
     waivable = set(MARKER_PRIMARY_WAIVES)
+    by_id = {b['id']: b for b in blocks}
     n = 0
     for b in blocks:
         if b.get('decisions') or b['review'] not in ('required', 'recommended'):
@@ -233,7 +238,7 @@ def review_policy(blocks: list[dict], profile: dict) -> int:
         hit = [r for r in b['reasons'] if r in waivable]
         if not hit:
             continue
-        missing, total = text_loss(b)
+        missing, total = text_loss(b, by_id.get(b['relations'].get('caption_for')))
         if missing >= LOSS_MIN_CHARS and missing >= LOSS_SHARE * max(total, 1):
             flag(b, 'ENGINE_TEXT_LOSS_SUSPECTED', missing=missing, of=total)
             continue
