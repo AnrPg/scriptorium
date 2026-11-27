@@ -200,3 +200,33 @@ def fold(evs: list[dict]) -> dict:
             'undo_targets': undo_targets, 'redo_targets': redo_stack[-1] if redo_stack else [],
             'history': evs, 'active': not_undone, 'applies': {e['seq'] for e in live},
             'scope': current, 'scope_counts': counts, 'scope_of': scope_of}
+
+
+# ---------------------------------------------------------------- net effect since a build
+# The projection is a pure function of the ACTIVE (not undone) events: an action recorded after a build and then
+# undone, or an older action undone and redone, leaves the effective input — and so the outputs — exactly as built.
+
+def net_changes(evs: list[dict], last: int) -> set[int]:
+    """Seqs whose active state differs between the build that saw events up to `last` and the log now."""
+    return fold([e for e in evs if e['seq'] <= last])['active'] ^ fold(evs)['active']
+
+
+def net_pending(evs: list[dict], last: int, shown=()) -> list[dict]:
+    """The events after `last` that still have to reach the outputs: actions active now that the build did not
+    see, and the undo/redo that changed an action the build saw. `shown`: seqs already visible in page previews
+    — one undone since then is pending too (its page still shows it), as the undo that undid it. Undone pairs
+    and undo-redo round trips cancel out."""
+    changed = net_changes(evs, last)
+    shown_undone = {s for s in shown if s > last} - fold(evs)['active']
+    out, touch = [], {}
+    for e in evs:
+        if e['seq'] <= last:
+            continue
+        if e['type'] in ('undo', 'redo'):
+            for t in e.get('targets') or []:
+                if (t <= last and t in changed) or t in shown_undone:
+                    touch[t] = e                       # the latest undo/redo of that action
+        elif e['seq'] in changed:
+            out.append(e)
+    out += list({e['seq']: e for e in touch.values()}.values())
+    return sorted(out, key=lambda e: e['seq'])

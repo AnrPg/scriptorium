@@ -192,6 +192,12 @@ class ReviewService(ServiceBase):
         if pages:
             self.jobs.submit(b.id, 'process', ['process', '--book', str(b.dir), '--pages', ','.join(map(str, pages))],
                              f'{label}: επανεξέταση σελ. {", ".join(map(str, pages))}')
+            return
+        from ..build_history import restore        # lazy, like the projection
+        # back to the exact state of a kept build (nothing else changed): its outputs, at once; or nothing left
+        # to apply (an action undone before any rebuild saw it): only pages showing a preview are redone
+        if restore(b.dir) or not b.pending()['count']:
+            self._update_pages(b)
         else:
             self._reproject(b, label)
 

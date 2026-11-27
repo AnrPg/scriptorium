@@ -29,7 +29,7 @@ from ..core.decisions import NEEDS_OCR
 from .. import config
 from ..core.model import page_summary
 from . import pdf as pdfio
-from .event_store import EventStore
+from .event_store import EventStore, net_pending
 
 ID_RE = re.compile(r'^[a-z0-9][a-z0-9_.-]{0,63}$')
 
@@ -56,6 +56,23 @@ def book_lock(book_dir: Path, name: str = 'build'):
         fcntl.flock(fh, fcntl.LOCK_EX)
         try:
             yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def try_book_lock(book_dir: Path, name: str = 'build'):
+    """book_lock without waiting: yields True when taken, False when someone else holds it (e.g. a full build is
+    running — a request must never wait minutes for it)."""
+    book_dir.mkdir(parents=True, exist_ok=True)
+    with open(book_dir / f'.{name}.lock', 'w') as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
 
@@ -261,15 +278,18 @@ class Book:
         return len(c['source']['pages_processed']) * config.BUILD_SECONDS_PER_PAGE_GUESS if c else None
 
     def pending(self) -> dict:
-        """Reviewer actions recorded after the last rebuild (banked: in the event log, not yet in the outputs).
-        `ocr`: how many of them need new OCR, done by the rebuild."""
+        """Reviewer actions recorded after the last rebuild that still have to reach the outputs (banked: in the
+        event log, not yet in the outputs). NET of undo: an action undone before any rebuild saw it is not pending
+        — the outputs already show the book without it (event_store.net_pending). `ocr`: how many of them need
+        new OCR, done by the rebuild."""
         last = ((self.canonical() or {}).get('human') or {}).get('last_seq', 0)
+        applied = self.preview_applied()
         try:
-            evs = [e for e in self.events.load() if e['seq'] > last]
+            evs = net_pending(self.events.load(), last, applied)
         except Exception:                      # an invalid log is reported by the projection, not here
             evs = []
         return {'count': len(evs), 'ocr': sum(e['type'] in NEEDS_OCR for e in evs), 'events': evs[-200:],
-                'estimate_s': self.rebuild_estimate(), 'page_applied': sorted(self.preview_applied())}
+                'estimate_s': self.rebuild_estimate(), 'page_applied': sorted(applied)}
 
     def removed_pages(self) -> list[int]:
         """Pages the reviewer left out of the book (events page_remove/page_restore; reversible, raw OCR kept)."""

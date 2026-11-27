@@ -1476,3 +1476,46 @@ def test_a_decision_asked_again_is_confirmed_as_it_is_with_one_approve(app):
     build(out)
     seg = next(b for b in load(out)[0]['blocks'] if b['id'] == blk['id'])
     assert seg['review'] != 'required' and seg['chosen']['type'] == 'image_only'
+
+
+def test_undoing_a_banked_action_leaves_nothing_pending_and_needs_no_rebuild(app):
+    """An action undone before any rebuild saw it cancels out: the outputs already show the book without it."""
+    a, out = app
+    (out / 'cache' / 'build.json').write_text(json.dumps({'seconds': 400}))      # slow book: actions are banked
+    blk = next(b for b in a.page('run', 1)['blocks'] if 'SINGLE_ENGINE_DOCLING' in b['reasons'])
+    a.add_region('run', 1, [10, 10, 200, 60], {'engine': 'marker', 'name': 'Text'})
+    a.decide('run', blk['id'], 'replace_text', value='fixed text')
+    assert a.book('run')['pending']['count'] == 2
+    a.undo('run')
+    p = a.book('run')['pending']
+    assert p['count'] == 1 and p['ocr'] == 1                 # the region is still pending, the decision is not
+    a.undo('run')
+    before = len(a.jobs.submitted)
+    assert a.book('run')['pending']['count'] == 0 and a.revision('run')['pending'] == 0
+    a.redo('run')
+    assert a.book('run')['pending']['count'] == 1
+    assert ('reproject', 'light') not in a.jobs.submitted[before:]
+
+
+def test_undo_of_a_built_action_restores_the_kept_build_at_once_and_redo_comes_back(app):
+    """Undo/redo of an action a rebuild already applied: the kept previous build is put back (no rebuild), and the
+    replaced one is kept in turn, so redo is instant too. Anything else changed meanwhile -> normal rebuild."""
+    a, out = app
+    blk = next(b for b in a.page('run', 1)['blocks'] if 'SINGLE_ENGINE_DOCLING' in b['reasons'])
+    md0 = (out / 'chapter.md').read_text()
+    assert build(out) == 0                                   # a build that records its key (the fixture's is older)
+    a.decide('run', blk['id'], 'replace_text', value='fixed text')
+    assert build(out) == 0
+    md1 = (out / 'chapter.md').read_text()
+    assert 'fixed text' in md1 and md1 != md0
+    before = len(a.jobs.submitted)
+    a.undo('run')
+    assert (out / 'chapter.md').read_text() == md0 and a.book('run')['pending']['count'] == 0
+    a.redo('run')
+    assert (out / 'chapter.md').read_text() == md1 and a.book('run')['pending']['count'] == 0
+    assert ('reproject', 'light') not in a.jobs.submitted[before:]
+    # an input changed since the kept build: never restored, the normal path rebuilds
+    bj = json.loads((out / 'book.json').read_text()) if (out / 'book.json').exists() else {}
+    (out / 'book.json').write_text(json.dumps({**bj, 'ocr_lang': 'eng'}))
+    a.undo('run')
+    assert (out / 'chapter.md').read_text() == md1 and a.jobs.submitted[-1] == ('reproject', 'light')

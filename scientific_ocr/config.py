@@ -61,6 +61,7 @@ OCR_MAX_DPI = 600
 # at most this long; otherwise actions are BANKED (recorded, not yet applied to the outputs) until the reviewer
 # rebuilds — explicitly, or when a view that needs book-wide results asks for it.
 AUTO_REBUILD_MAX_S = 15
+BUILD_HISTORY_KEEP = 2                   # previous full builds kept (hard links) so undo/redo can restore one at once
 PAGE_PREVIEW_MAX_PAGES = 8               # more changed pages than this: a full rebuild (~17 s) beats page previews
 BUILD_SECONDS_PER_PAGE_GUESS = 1.0      # until a book's first measured rebuild (cache/build.json)
 MARKER_DEFAULT_OCR_DPI = 192

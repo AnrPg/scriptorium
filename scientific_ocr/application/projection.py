@@ -19,7 +19,7 @@ from pathlib import Path
 from .. import config
 from ..adapters import latex_render, lexicon, quick_ocr, specialized
 from ..adapters import pdf as pdfio
-from ..adapters.event_store import EventError, EventStore
+from ..adapters.event_store import EventError, EventStore, net_changes
 from ..adapters.storage import (
     PREVIEW_DIR,
     CorruptFile,
@@ -29,6 +29,7 @@ from ..adapters.storage import (
     read_json_strict,
 )
 from ..core import joblog, lineage, profiles
+from . import build_history
 from ..core.decisions import event_pages, page_of
 from ..core.reasons import flag
 from ..core.model import block_id, content_hash, page_summary, profile_omitted, release_status
@@ -537,6 +538,7 @@ def _publish(out: Path, canonical: dict, inp: _Inputs, spec, stale: int, log: Lo
                                                  (canonical.get('profile') or {}).get('pending', 0))
     canonical['assets'] = sorted({b['source_crop']['path'] for b in blocks if b.get('source_crop')})
     audit.validate_schema(canonical)
+    build_history.keep_previous(out)                  # undo/redo back to it is shown at once (no rebuild)
     atomic_write(out / 'chapter.md', md)
     atomic_write(out / 'canonical.json', json.dumps(canonical, ensure_ascii=False, indent=2))
     atomic_write(out / 'review_report.html', report.report_html(canonical))
@@ -547,6 +549,7 @@ def _publish(out: Path, canonical: dict, inp: _Inputs, spec, stale: int, log: Lo
         'built_utc': canonical['run']['built_utc'], 'source_sha256': inp.src['sha256'],
         'pages': inp.src['pages_processed'], 'release_status': canonical['release_status'],
         'extraction': inp.extraction, 'specialized': spec, 'counts': counts}, ensure_ascii=False, indent=2, default=str))
+    build_history.record(out, canonical, inp.human)
     log(f'built: {counts} release_status={canonical["release_status"]}')
     integrity = any(f['severity'] == 'critical' and f['type'].startswith('INTEGRITY') for f in canonical['findings'])
     return 5 if integrity else 0
@@ -605,7 +608,12 @@ def dirty_pages(out: Path, canonical: dict | None = None) -> list[int]:
     by_seq = {e['seq']: e for e in evs}
     regions = {e['region']['id']: int(e['region']['page']) for e in evs if e['type'] == 'region_add'}
     merges_ = {e['merge']['id']: int(e['merge']['page']) for e in evs if e['type'] == 'merge_add'}
+    # an action undone before any build saw it (and an undo-redo round trip) changes nothing on a page that
+    # shows the full build; a page with a preview is redone (the preview may show the undone action)
+    changed = net_changes(evs, last)
+    matters = lambda e: e['seq'] in changed or any(t in changed for t in e.get('targets') or ())
     covered: dict[int, int] = {}
+    previewed: set[int] = set()
     dirty: set[int] = set()
     for e in evs:
         if e['seq'] <= last:
@@ -614,7 +622,9 @@ def dirty_pages(out: Path, canonical: dict | None = None) -> list[int]:
             if p not in covered:
                 pv = read_preview(out, p, c)
                 covered[p] = pv['last_seq'] if pv else last
-            if e['seq'] > covered[p]:
+                if pv:
+                    previewed.add(p)
+            if e['seq'] > covered[p] and (p in previewed or matters(e)):
                 dirty.add(p)
     return sorted(dirty)
 

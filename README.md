@@ -164,6 +164,9 @@ again where the new output would lose it (TEXT_ONLY_LOSS); «Εγκρίνω ως
   (PROFILE_BOUNDARY_CHECK). Each automatic exclusion waits for one boundary confirmation («Έλεγχος» tab; status
   REVIEW_REQUIRED until then). The reviewer's «Στην έξοδο» always wins. «Έλεγχος ορίων ▶» loops over them on
   their pages, members drawn hatched with ΑΡΧΗ/ΤΕΛΟΣ (↵ σωστό · X όχι αυτό · J/K · T αρχή/τέλος · Esc).
+  Right kind, wrong limits: «Όρια ✎» (D) — select a segment (any page) and press [ / ] for the new start / end;
+  ↵ saves. One undoable step: the detection is dismissed as wrongly bounded (`boundary: true`, a wrong outcome for
+  its rule) and the span (pipeline/entities.span, reading order, furniture left out) becomes your own verified entity.
 * **Review.** Excluded content is not drawn on the page, not listed, not queued, not in bulk review; it is listed
   under «Κρυμμένα από την έξοδο — προφίλ». Picture fidelity flags are not asked (PROFILE_NOT_RELEVANT). Content
   that exists only as an image but is not a picture (table, paragraph, uncovered region) is asked again
@@ -475,6 +478,9 @@ Layout engines tag headings per page, so their levels are not comparable across 
 - **Rendering speed:** page crops and coverage are content-addressed caches, so a re-projection after a click rebuilds in under 1 s.
 - **Confirmation messages:** an action's confirmation appears only once the rebuild that reflects it has finished.
 - **Job logs:** each rebuild logs what triggered it, what changed and the timings per phase.
+- **Undo without a rebuild:**
+  - Pending changes are counted **net of undo** (`event_store.net_pending`): an action undone before any rebuild saw it cancels out, so nothing is pending and no rebuild is asked for.
+  - The previous builds are kept as hard links in `cache/builds/` (`config.BUILD_HISTORY_KEEP`, `application/build_history.py`), keyed by the active events plus a fingerprint of every other build input (raw OCR, source, settings, model proposals, calibration books, dictionaries, code). When undo/redo returns to exactly the state of a kept build, that build is put back at once. Redo comes back the same way. If anything else changed, the normal rebuild runs.
 - **Engine conflicts:** marked in the text and in the editor (`ui/highlight.js`), with 12 words of context on each side.
 - **Coverage:** uses the darkest colour channel, so coloured print counts as ink. An unread header is not excluded on an engine label alone.
 - **Captions and figures:** a labelled «ΕΙΚΟΝΑ N» paragraph becomes a caption, and the pieces of a split picture are offered as one region (`figure_assemble`).
