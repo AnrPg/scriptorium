@@ -203,3 +203,21 @@ def test_rag_context_sentences_are_kept_apart_and_content_addressed(tmp_path):
     c = json.loads((out / 'canonical.json').read_text())
     ch = rag.chunks(c, RAG, 't', stored(out))
     assert all(x.get('context') == 'Situates the excerpt.' and 'Situates' not in x['text'] for x in ch)
+
+
+def test_a_picture_caption_goes_to_the_end_of_its_section_right_before_the_next_title():
+    h1 = _b(1, 'heading', 'Ενότητα Α', heading_level=2)
+    fig = _b(2, 'figure', None)
+    cap = _b(3, 'caption', 'ΕΙΚΟΝΑ 1-4 Ένα κύτταρο.', caption_label='ΕΙΚΟΝΑ 1-4')
+    fig['relations']['captions'] = ['p1_3']
+    cap['relations']['caption_for'] = 'p1_2'
+    p1 = _b(4, 'paragraph', 'Όπως δείχνει η Εικόνα 1-4, το κύτταρο.')
+    p1['relations']['refers_to'] = ['p1_2']
+    p2 = _b(5, 'paragraph', 'Η ενότητα συνεχίζει.')
+    deep = _b(6, 'heading', 'Λεπτομέρεια', heading_level=5)          # leads its paragraph: not the section end
+    p3 = _b(7, 'paragraph', 'Κι άλλο κείμενο.')
+    h2 = _b(8, 'heading', 'Ενότητα Β', heading_level=2)
+    md = rag.markdown(_canon([h1, fig, cap, p1, p2, deep, p3, h2]), RAG).split('\n\n')
+    assert md[:4] == ['## Ενότητα Α', 'Όπως δείχνει η Εικόνα 1-4, το κύτταρο.', 'Η ενότητα συνεχίζει.',
+                      'Λεπτομέρεια. Κι άλλο κείμενο.']
+    assert md[4] == 'ΕΙΚΟΝΑ 1-4: Ένα κύτταρο.' and md[5].strip() == '## Ενότητα Β'

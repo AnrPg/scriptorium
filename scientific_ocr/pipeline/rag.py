@@ -12,8 +12,8 @@ Two outputs from one list of UNITS (heading | text | equation | table | caption)
                         key terms (the book's own bold terms).
 What a text-only reader cannot use never appears: pictures (their captions stay), untranscribed crops (the
 profile made them reviewable as TEXT_ONLY_LOSS; what the reviewer kept as an image is listed by omissions()).
-A figure's caption follows the first paragraph of the same section that refers to the figure, when one does
-(pipeline.references), else it stays where the figure was. Trailing credit notes of captions are dropped (the
+A picture's caption (the picture itself never travels) goes to the END OF ITS SECTION, right before the next
+title, so it never interrupts the text; a table's or an equation's caption stays with it. Trailing credit notes of captions are dropped (the
 profile's caption_credits hints). Unicode is NFC; soft hyphens and line-break hyphens are repaired; the words
 are the book's own (nothing is rephrased).
 """
@@ -107,49 +107,43 @@ def _caption(cap: dict, credits: list[re.Pattern], strip: bool) -> tuple[str, li
 
 
 def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
-    """The reading model as RAG units: {'t': heading|text|equation|table|caption, 'text', 'level'?, 'pages',
-    'terms', 'labels'}. Pictures and untranscribed crops never appear."""
+    """The reading model as RAG units: {'t': heading|subheading|text|list|equation|table|caption, 'text', 'level'?,
+    'pages', 'ids', 'terms', 'labels'}. Pictures and untranscribed crops never appear."""
     strip = profile.get('strip_emphasis', True)
     credits = [re.compile(p, re.I) for p in profile.get('caption_credits') or ()]
     depth = int(profile.get('heading_depth') or 6)
     nodes = reading.nodes(c, pages)
     out: list[dict] = []
-    held: dict[str, list[dict]] = {}       # figure block id -> its caption units, waiting for the first reference
+    held: dict[str, list[dict]] = {}       # picture id -> its caption units, waiting for the end of the section
     lead: list[str] = []                   # titles deeper than the profile's depth: they lead the next paragraph
+
+    def ids(n) -> list[str]:                      # the segments a unit comes from (views select/show them)
+        return [b['id'] for b in n.get('blocks') or []]
 
     def pages(n) -> list[int]:
         return sorted({b['page'] for b in n.get('blocks') or []})
 
-    def refs_in(n) -> list[str]:
-        return [t for b in n.get('blocks') or [] for t in (b.get('relations') or {}).get('refers_to') or []]
+    def kept_terms(n) -> list[str]:
+        return [t for b in n.get('blocks') or [] for t in b.get('emphasis_terms') or []]
 
-    def flush_held(all_=False, ids=()):
-        for fid in (list(held) if all_ else list(dict.fromkeys(ids))):
+    def flush_held(all_=True):
+        for fid in list(held):
             out.extend(held.pop(fid, []))
-
-    def referenced_later(fid: str, i: int) -> bool:
-        """A later paragraph of the same section refers to this figure."""
-        for n in nodes[i + 1:]:
-            if n['t'] == 'heading':
-                return False
-            if n['t'] == 'para' and fid in refs_in(n):
-                return True
-        return False
 
     for i, n in enumerate(nodes):
         t = n['t']
         if t == 'heading':
-            flush_held(all_=True)
             title = clean(_HEADING_MARKS.sub('', n['text']), True)[0]
             if not title:
                 continue
             src = ((n.get('blocks') or [{}])[0]).get('heading_level_source')
             if n.get('level', 1) <= depth and src not in BOX_LABEL_SOURCES:
+                flush_held(all_=True)                     # the section ends: its picture captions, then the title
                 lead.clear()
-                out.append({'t': 'heading', 'level': n.get('level', 1), 'text': title, 'pages': pages(n), 'terms': [], 'labels': []})
+                out.append({'t': 'heading', 'level': n.get('level', 1), 'text': title, 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': []})
             else:
                 lead.append(title)
-                out.append({'t': 'subheading', 'level': n.get('level', depth + 1), 'text': title, 'pages': pages(n),
+                out.append({'t': 'subheading', 'level': n.get('level', depth + 1), 'text': title, 'pages': pages(n), 'ids': ids(n),
                             'terms': [], 'labels': []})
         elif t == 'para':
             text, terms = (table_text(n['text']), []) if '<table' in n['text'].lower() else clean(n['text'], strip)
@@ -159,10 +153,10 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
                 head = ' — '.join(lead)
                 text = head + ('' if head.endswith(('.', ':', ';', '?', '!')) else '.') + ' ' + text
                 lead.clear()
-            out.append({'t': 'text', 'text': text, 'pages': pages(n), 'terms': terms, 'labels': []})
-            flush_held(ids=refs_in(n))
+            out.append({'t': 'text', 'text': text, 'pages': pages(n), 'ids': ids(n), 'terms': list(dict.fromkeys(terms + kept_terms(n))),
+                        'labels': []})
         elif t == 'equation':
-            out.append({'t': 'equation', 'text': f'$$ {n["latex"].strip()} $$', 'pages': pages(n), 'terms': [], 'labels': []})
+            out.append({'t': 'equation', 'text': f'$$ {n["latex"].strip()} $$', 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': []})
         elif t in ('figure', 'group_caption'):
             caps, terms, labels = [], [], []
             for cap in n.get('captions') or []:
@@ -174,25 +168,25 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
                         labels.append(clean(cap['label'], True)[0])
             body = n.get('body') if t == 'figure' else None
             if body and 'latex' in body:
-                out.append({'t': 'equation', 'text': f'$$ {body["latex"].strip()} $$', 'pages': pages(n), 'terms': [], 'labels': labels})
+                out.append({'t': 'equation', 'text': f'$$ {body["latex"].strip()} $$', 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': labels})
             elif body and body.get('items'):                  # a term grid read as a list (pipeline.tables)
                 its = [x for x in (clean(i, strip)[0] for i in body['items']) if x]
                 if its:
-                    out.append({'t': 'list', 'text': '\n'.join(f'- {x}' for x in its), 'pages': pages(n),
+                    out.append({'t': 'list', 'text': '\n'.join(f'- {x}' for x in its), 'pages': pages(n), 'ids': ids(n),
                                 'terms': [x for x in its if len(x.split()) <= MAX_TERM_WORDS], 'labels': labels})
             elif body and body.get('text'):
                 kind = 'table' if n.get('kind') == 'table' else 'text'
                 txt = table_text(body['text']) if kind == 'table' else clean(body['text'], strip)[0]
                 if txt:
-                    out.append({'t': kind, 'text': txt, 'pages': pages(n), 'terms': [], 'labels': labels})
+                    out.append({'t': kind, 'text': txt, 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': labels})
             if not caps:
                 continue
-            unit = {'t': 'caption', 'text': '\n\n'.join(caps), 'pages': pages(n), 'terms': terms, 'labels': labels}
+            unit = {'t': 'caption', 'text': '\n\n'.join(caps), 'pages': pages(n), 'ids': ids(n), 'terms': terms, 'labels': labels}
             fig = (n.get('blocks') or [{}])[0]
-            fid = fig.get('id')
-            if t == 'figure' and not body and fid and fig.get('kind') != 'caption' and referenced_later(fid, i):
+            fid = fig.get('id') or f'n{i}'
+            if not body:                                  # a picture's caption: at the end of its section
                 held.setdefault(fid, []).append(unit)
-            else:
+            else:                                         # a table's / equation's caption stays with it
                 out.append(unit)
         # 'image' (an untranscribed crop the reviewer kept as an image), box_start/box_end: nothing for a text reader
     flush_held(all_=True)
@@ -200,6 +194,38 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------- outputs
+def html(c: dict, profile: dict, pages: set | None = None) -> str:
+    """The RAG output as the reviewer sees it in «Αποτέλεσμα»: the SAME units as the export (titles to the
+    profile's depth, deeper ones leading their paragraph, picture captions at the end of their section, tables as
+    rows), each element carrying the segment it comes from (data-seg: click selects, loops show it)."""
+    from html import escape
+
+    from .inline import inline_html
+    out = []
+    for u in units(c, profile, pages):
+        seg = (u.get('ids') or [''])[0]
+        a = f' class="pv-seg" data-seg="{escape(seg)}"' if seg else ''
+        t, text = u['t'], u['text']
+        lines = text.split('\n')
+        if t == 'heading':
+            lv = max(1, min(6, u.get('level') or 1))
+            out.append(f'<h{lv}{a}>{inline_html(text)}</h{lv}>')
+        elif t == 'subheading':
+            continue                                     # it leads its paragraph
+        elif t == 'equation':
+            out.append(f'<div{a}><div class="pv-math">{escape(text)}</div></div>')
+        elif t == 'table' and text.startswith('|'):
+            out.append(f'<div{a}><pre class="pv-text pv-rag-table">{escape(text)}</pre></div>')
+        elif all(x.startswith('- ') for x in lines if x.strip()) and any(x.strip() for x in lines):
+            items = ''.join(f'<li>{inline_html(x[2:])}</li>' for x in lines if x.strip())
+            out.append(f'<div{a}><ul class="pv-text pv-items">{items}</ul></div>')
+        else:
+            cls = 'pv-cap' if t == 'caption' else 'pv-text'
+            body = '<br>'.join(inline_html(x) for x in lines)
+            out.append(f'<div{a}><p class="{cls}">{body}</p></div>')
+    return '\n'.join(out)
+
+
 def markdown(c: dict, profile: dict, pages: set | None = None) -> str:
     depth = int(profile.get('heading_depth') or 6)
     out = []

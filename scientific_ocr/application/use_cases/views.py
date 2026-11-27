@@ -102,7 +102,9 @@ class ViewsService(ServiceBase):
         url = lambda rel: f'/api/books/{b.id}/{rel}' if rel else ''
         rag_book = ((c.get('profile') or {}).get('settings') or {}).get('name') == 'rag'
         md = rag.markdown(c, exports.rag_settings(c), {page}) if rag_book else html_preview.page_markdown(c, page, style)
-        return {'page': page, 'html': html_preview.page_html(c, page, url), 'preview': bool(pv), 'rag': rag_book,
+        # «Αποτέλεσμα» shows THE output of the profile in force: RAG's own rendering (same units as its export)
+        html = rag.html(c, exports.rag_settings(c), {page}) if rag_book else html_preview.page_html(c, page, url)
+        return {'page': page, 'html': html, 'preview': bool(pv), 'rag': rag_book,
                 'markdown': md, 'release_status': c['release_status']}
 
     def raw_fragment(self, book_id: str, raw_file: str, pointer: str | None) -> dict:
