@@ -4,6 +4,7 @@ import { S } from '../core/state.js';
 import { toggleMulti } from '../inspector/multi.js';
 import { toast } from '../ui/feedback.js';
 import { hoverSeg } from '../workspace/hover.js';
+import { honourReveal } from '../workspace/reveal.js';
 import { clearSelection, selectBlock, zoom } from '../workspace/workspace.js';
 
 // ---------------------------------------------------------------- page output preview (final rendering, approximate)
@@ -50,8 +51,9 @@ export async function outputView(wrap, b, n) {
     el.addEventListener('click', (e) => { e.stopPropagation(); if (e.shiftKey || S.selectMode) { const blk = S.page.blocks.find(x => x.id === id); if (blk) toggleMulti(blk); } else { clearSelection(); selectBlock(id); } });
     if (id === S.sel) el.classList.add('pv-sel');
   });
+  honourReveal(body);                               // a loop step's item is centred here too
   const selEl = body.querySelector('.pv-sel');
-  if (selEl && S.outputScrolledTo !== S.sel) {          // only when the selection changed, never after an action
+  if (selEl && S.outputScrolledTo !== S.sel && !S.reveal) {          // only when the selection changed, never after an action
     S.outputScrolledTo = S.sel;
     selEl.scrollIntoView({ block: 'center' });
   }

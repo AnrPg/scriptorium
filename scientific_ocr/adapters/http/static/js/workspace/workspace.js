@@ -14,7 +14,9 @@ import { EMBED } from '../ui/page_overlay.js';
 import { hoverSeg } from '../workspace/hover.js';
 import { outputView } from '../workspace/output.js';
 import { updateSelectionPalette } from '../ui/selpalette.js';
-import { boundActive, boundBar, boundMembers } from '../inspector/boundloop.js';
+import { boundActive, boundBar, boundMembers, startBoundLoop } from '../inspector/boundloop.js';
+import { honourReveal, revealPending } from '../workspace/reveal.js';
+import { startTypoLoop, typoActive, typoBar } from '../inspector/typoloop.js';
 
 // ------------------------------------------------------------------ Page workspace
 // ------------------------------------------------------------------ page views and the tools each one supports
@@ -86,7 +88,8 @@ export function renderWorkspace() {
   const same = S.wsScrollKey === key;
   if (!same) { S.scrolledTo = null; S.outputScrolledTo = null; }   // new screen: bring the selected segment into view once
   S.wsScrollKey = key;
-  if (same) keepScroll($('#view'), buildWorkspace); else buildWorkspace();
+  // a loop step asked to show its item (workspace/reveal.js): that outranks keeping the old scroll position
+  if (same && !revealPending()) keepScroll($('#view'), buildWorkspace); else buildWorkspace();
   updateSelectionPalette();
 }
 // The side panel is resizable like a deck. Wide screens: a vertical handle between page and panel (drag, ←/→ when
@@ -183,12 +186,9 @@ export function buildWorkspace() {
       // the whole-book review loop, always reachable (also with no segment selected): errors and warnings, any page
       processed ? h('div', { class: 'seg-ctl review-loop' },
         h('button', { onclick: () => stepReview(-1), title: 'Προηγούμενο προς έλεγχο, σε όλο το βιβλίο (K)', 'aria-label': 'Προηγούμενο προς έλεγχο' }, '↑'),
-        h('button', { class: 'primary', onclick: () => stepReview(1), title: `Επόμενο προς έλεγχο (${loopLevel() === 'all' ? 'σφάλματα και προειδοποιήσεις' : 'μόνο σφάλματα'}), σε όλο το βιβλίο· αλλάζει σελίδα μόνο του (J)` },
+        h('button', { class: 'primary', onclick: () => stepReview(1), title: `Επόμενο προς έλεγχο (${LOOP_EL[loopLevel()]}), σε όλο το βιβλίο· αλλάζει σελίδα μόνο του (J)` },
           h('span', { class: 'wide-only' }, 'Επόμενο για έλεγχο '), '↓', h('kbd', {}, 'J')),
-        h('label', { class: 'loop-level small', title: 'Τι περιλαμβάνει το «Επόμενο για έλεγχο»: μόνο σφάλματα («απαιτείται έλεγχος») ή και προειδοποιήσεις («συνιστάται»)' },
-          (() => { const cb = h('input', { type: 'checkbox', role: 'switch' }); cb.checked = loopLevel() === 'all';
-            cb.onchange = () => { setLoopLevel(cb.checked ? 'all' : 'required'); renderWorkspace(); }; return cb; })(),
-          h('span', {}, 'και προειδοποιήσεις'))) : null,
+        loopSelect()) : null,
       h('span', { class: 'spacer' }),
       processed ? h('div', { class: 'seg-ctl view-switch', role: 'tablist' }, VIEWS.map(([k, l, t], i) =>
         h('button', { class: S.leftView === k ? 'on' : '', role: 'tab', 'aria-selected': S.leftView === k ? 'true' : 'false', title: `${l} (${i + 1}) — ${t}`, 'aria-label': l,
@@ -197,7 +197,8 @@ export function buildWorkspace() {
         VIEWS.map(([k, l]) => h('option', { value: k, selected: S.leftView === k }, l))) : null,
       processed ? toolsMenu() : null),
     processed ? h('div', { class: 'ws-row ws-actions' }, toolsFor(S.leftView).map(t => TOOLS[t]())) : null,
-    boundActive() ? boundBar() : null));
+    boundActive() ? boundBar() : null,
+    typoActive() ? typoBar() : null));
   const wrap = h('div', { class: 'canvas-wrap', 'data-keep-scroll': 'canvas' }); left.append(wrap);
   if (processed && S.leftView !== 'scan') { outputView(wrap, b, n); renderInspector(right); return; }
   const dims = pg.dims || [600, 800];
@@ -213,7 +214,7 @@ export function buildWorkspace() {
     const edge = bound.get(blk.id);
     if (profileHidden(blk) && S.sel !== blk.id && !edge) continue;     // excluded by the output profile: no box
     if (edge) {                                    // hatched, never confused with an accepted segment's box
-      canvas.append(h('div', { 'data-seg': blk.id, class: `ws-box bound bound-${edge}`, style: pct(blk.bbox),
+      canvas.append(h('div', { 'data-seg': blk.id, class: `ws-box bound bound-${edge}${S.sel === blk.id ? ' sel' : ''}`, style: pct(blk.bbox),
         title: `Εξαίρεση προφίλ — ${edge === 'start' ? 'ΑΡΧΗ' : edge === 'end' ? 'ΤΕΛΟΣ' : 'μέλος'}`, onclick: (e) => { e.stopPropagation(); selectBlock(blk.id); } },
         edge !== 'mid' ? h('span', { class: 'bound-tag' }, edge === 'start' ? 'ΑΡΧΗ' : 'ΤΕΛΟΣ') : null));
       continue;
@@ -226,10 +227,7 @@ export function buildWorkspace() {
     if (sel && !S.drawing) for (const c of ['nw', 'ne', 'sw', 'se']) box.append(h('span', { class: 'handle ' + c, onmousedown: (e) => startResize(e, canvas, blk, c, dims) }));
     canvas.append(box);
   }
-  if (S.bound?.scroll && bound.size) {            // bring the exclusion into view once per step
-    S.bound.scroll = false;
-    requestAnimationFrame(() => canvas.querySelector('.ws-box.bound')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
-  }
+  honourReveal(canvas);                           // a loop step's item (errors, warnings, typos, exclusions) is centred
   // caption ↔ figure connections (dashed lines), so groups are visible on the page itself
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'links'); svg.setAttribute('viewBox', `0 0 ${dims[0]} ${dims[1]}`); svg.setAttribute('preserveAspectRatio', 'none');
@@ -258,11 +256,32 @@ export function buildWorkspace() {
   const nxt = S.sel && queueNeighbours(S.page.blocks.find(b => b.id === S.sel) || {}).next;
   if (nxt && nxt.crop) new Image().src = `${B(b.id)}/${nxt.crop}`;      // prefetch the next item's crop
   if (S.sel && S.scrolledTo !== S.sel) requestAnimationFrame(() => {   // only when the selection changed; scroll the canvas pane only
+    if (S.scrolledTo === S.sel) return;            // decided when it RUNS: a loop step may have shown it meanwhile (reveal.js)
     S.scrolledTo = S.sel;
     const box = canvas.querySelector('.ws-box.sel'); if (!box) return;
     const wr = wrap.getBoundingClientRect(), br = box.getBoundingClientRect();
     if (br.top < wr.top || br.bottom > wr.bottom) wrap.scrollTop += br.top - wr.top - wr.height / 3;
   });
+}
+// What «Επόμενο για έλεγχο» and J/K walk through. Errors / warnings / both = the whole-book review loop
+// (inspector/reviewloop.js); typos and the profile's exclusions are loops with their own bar (typoloop.js,
+// boundloop.js). Every one of them centres its item on each step (workspace/reveal.js).
+const LOOP_EL = { required: 'λάθη', all: 'λάθη και προειδοποιήσεις', recommended: 'προειδοποιήσεις' };
+function loopSelect() {
+  const cur = S.typo ? 'typos' : S.bound ? 'bound' : loopLevel();
+  const sel = h('select', { class: 'loop-level small', 'aria-label': 'Τι διατρέχει ο έλεγχος', title: 'Τι διατρέχει το «Επόμενο για έλεγχο» (J/K)',
+    onchange: () => {
+      const v = sel.value;
+      if (v === 'typos') return startTypoLoop();
+      if (v === 'bound') return startBoundLoop();
+      S.typo = null; S.bound = null;
+      setLoopLevel(v); renderWorkspace();
+    } },
+    h('option', { value: 'required' }, 'Λάθη'), h('option', { value: 'all' }, 'Λάθη + προειδοποιήσεις'),
+    h('option', { value: 'recommended' }, 'Προειδοποιήσεις'), h('option', { value: 'typos' }, 'Τυπογραφικά'),
+    S.book.output_profile && S.book.output_profile !== 'reading' ? h('option', { value: 'bound' }, 'Εξαιρέσεις προφίλ') : null);
+  sel.value = cur;
+  return sel;
 }
 export function zoom(d) { S.zoom = Math.max(0.5, Math.min(3, S.zoom + d)); renderWorkspace(); }
 export function syncHash() {

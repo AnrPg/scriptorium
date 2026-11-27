@@ -2,6 +2,7 @@ import { B, api } from '../core/api.js';
 import { S, go } from '../core/state.js';
 import { inFlight, toast } from '../ui/feedback.js';
 import { pendingOf } from '../ui/rebuild.js';
+import { reveal } from '../workspace/reveal.js';
 import { selectBlock } from '../workspace/workspace.js';
 
 // ------------------------------------------------------------------ the review loop (whole book)
@@ -10,9 +11,11 @@ import { selectBlock } from '../workspace/workspace.js';
 // decision is still banked for the next rebuild — are skipped. Used by J/K, the ↑/↓ of the segment panel and the
 // automatic advance after a decision.
 
-// What the loop walks: 'all' = errors (review required) and warnings (recommended); 'required' = errors only.
-// A per-reviewer preference (this browser).
-export function loopLevel() { try { return localStorage.getItem('ocr.loopLevel') === 'required' ? 'required' : 'all'; } catch { return 'all'; } }
+// What the loop walks (server queue levels): 'required' = errors, 'recommended' = warnings, 'all' = both.
+// A per-reviewer preference (this browser). Typos and the profile's exclusions are loops of their own
+// (inspector/typoloop.js, inspector/boundloop.js), chosen in the same selector (inspector/loops.js).
+export const LEVELS = ['required', 'recommended', 'all'];
+export function loopLevel() { try { const v = localStorage.getItem('ocr.loopLevel'); return LEVELS.includes(v) ? v : 'all'; } catch { return 'all'; } }
 export function setLoopLevel(v) { try { localStorage.setItem('ocr.loopLevel', v); } catch { /* storage blocked */ } cache.key = null; }
 
 let cache = { key: null, items: [] };
@@ -54,6 +57,7 @@ export async function stepReview(dir = 1) {
   if (i >= q.length) { i = 0; toast('Τέλος του βιβλίου· συνέχεια από την αρχή'); }
   if (i < 0) { i = q.length - 1; toast('Αρχή του βιβλίου· συνέχεια από το τέλος'); }
   const t = q[i];
+  reveal(t.id);                                   // centred, also on the page already open (workspace/reveal.js)
   if (S.page && t.page === S.page.page) selectBlock(t.id);
   else go(`#/b/${S.book.id}/p/${t.page}/${t.id}`);
 }

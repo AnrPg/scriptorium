@@ -4,6 +4,7 @@ import { h, section } from '../core/dom.js';
 import { S, go } from '../core/state.js';
 import { infoTip } from '../core/strings.js';
 import { act } from '../ui/feedback.js';
+import { startTypoLoop } from '../inspector/typoloop.js';
 
 // ---------------------------------------------------------------- spelling proposals (pipeline/spelling.py)
 // Every proposal: the word in its context, candidates with their evidence, a checkbox. «Εφαρμογή» = one undoable step
@@ -26,6 +27,7 @@ export async function spellingCard(body) {
     `Διορθώθηκαν ${pick.size} λέξεις`).then(refresh);
   const dismiss = () => act(() => api(`${B(S.book.id)}/spelling/dismiss`, { body: { keys: [...pick.keys()] } }), `Απορρίφθηκαν ${pick.size}`).then(refresh);
   card.append(h('div', { class: 'row', style: { marginBottom: '8px' } }, count,
+    h('button', { class: 'small', onclick: () => startTypoLoop(), title: 'Μία-μία στη σελίδα της: ↵ διόρθωση · X σωστό ως έχει · J/K · Esc' }, 'Ένα-ένα ▶'),
     h('button', { class: 'small ghost', onclick: dismiss, title: 'Οι επιλεγμένες λέξεις είναι σωστές όπως είναι (δεν ξαναπροτείνονται)' }, 'Απόρριψη επιλεγμένων'),
     h('button', { class: 'small primary', onclick: apply, title: 'Μία ενέργεια· αναιρείται με ⌘Z' }, 'Εφαρμογή επιλεγμένων')));
   for (const it of items.slice(0, SHOW)) {

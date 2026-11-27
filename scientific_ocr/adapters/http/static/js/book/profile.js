@@ -113,6 +113,7 @@ export async function profileReviewCard(body) {
           h('div', { class: 'mut' }, `${e.n} τμήματα`)),
         view(e),
         h('button', { class: 'small', onclick: () => act(() => api(`${B(b.id)}/profile/confirm`, { body: { keys: [e.key] } }), 'Επιβεβαιώθηκε').then(refresh) }, 'Σωστό'),
+        h('button', { class: 'small', title: 'Σωστό είδος, λάθος όρια: άνοιξε τη σελίδα και όρισε νέα αρχή/τέλος', onclick: () => startBoundLoop(e.key, true) }, 'Όρια…'),
         h('button', { class: 'small ghost', title: 'Δεν είναι αυτό (π.χ. δεν είναι ερώτηση): μένει στην έξοδο', onclick: () => act(() => api(`${B(b.id)}/profile/keep`, { body: { key: e.key } }), 'Μένει στην έξοδο').then(refresh) }, 'Όχι αυτό')));
     }
   }

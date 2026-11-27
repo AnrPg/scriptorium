@@ -485,3 +485,4 @@ details.section{border:0;border-radius:0;margin:0;border-bottom:1px solid var(--
 details.section>summary{font-size:15px;padding:12px 2px}
 details.section>div{padding:0 0 14px}
 label.list-item{cursor:pointer}
+.typo-bar{flex-wrap:wrap;row-gap:6px}.typo-bar .typo-ctx{min-width:0;max-width:42ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.typo-bar .typo-fix{width:170px;flex:none}

@@ -1,6 +1,7 @@
 import { B } from '../core/api.js';
 import { stepReview } from '../inspector/reviewloop.js';
-import { boundActive, boundDecide, boundStep, boundToggleEnd, stopBoundLoop } from '../inspector/boundloop.js';
+import { boundActive, boundDecide, boundEdit, boundEditing, boundSaveEdit, boundSetEdge, boundStep, boundToggleEnd, stopBoundLoop } from '../inspector/boundloop.js';
+import { stopTypoLoop, typoActive, typoDecide, typoStep } from '../inspector/typoloop.js';
 import { doRedo, doUndo } from '../core/chrome.js';
 import { $, h, isTyping } from '../core/dom.js';
 import { navStep } from '../core/nav.js';
@@ -29,11 +30,21 @@ export const SHORTCUTS = [
   { keys: 'Alt+↑ / Alt+↓', label: 'Μετακίνηση του επιλεγμένου τμήματος στη σειρά ανάγνωσης (ή σύρσιμο στη λίστα)', group: 'page',
     match: K(['ArrowUp', 'ArrowDown'], { alt: true }), when: c => free(c) && S.sel && !S.multi.size, run: (e) => moveBySteps(S.sel, e.key === 'ArrowUp' ? -1 : 1) },
   // the loop over the output profile's exclusions (inspector/boundloop.js) owns these keys while it is on
-  { keys: '↵', label: 'Όρια εξαίρεσης σωστά → επόμενη', group: 'bound', match: K('Enter'), when: (c, e) => free(c) && boundActive() && !S.multi.size && !enterOwnedBy(e), run: () => boundDecide(true) },
-  { keys: 'X', label: 'Όχι αυτό (μένει στην έξοδο) → επόμενη', group: 'bound', match: K('x'), when: c => free(c) && boundActive(), run: () => boundDecide(false) },
+  // correcting an exclusion's boundaries (right kind, wrong limits): D (Δ) starts, [ ] set them, ↵ saves, Esc cancels
+  { keys: 'D', label: 'Διόρθωση ορίων της εξαίρεσης', group: 'bound', match: K(['d', 'δ']), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundEdit() },
+  { keys: '[ / ]', label: 'Το επιλεγμένο τμήμα γίνεται η ΑΡΧΗ / το ΤΕΛΟΣ', group: 'bound', match: K(['[', ']']), when: c => free(c) && boundEditing(), run: (e) => boundSetEdge(e.key === '[' ? 'first' : 'last') },
+  { keys: '↵', label: 'Αποθήκευση νέων ορίων → επόμενη', group: 'bound', match: K('Enter'), when: (c, e) => free(c) && boundEditing() && !enterOwnedBy(e), run: () => boundSaveEdit() },
+  { keys: 'Esc', label: 'Ακύρωση διόρθωσης ορίων', group: 'bound', match: K('Escape'), when: c => free(c) && boundEditing() && !S.multi.size, run: () => boundEdit() },
+  { keys: '↵', label: 'Όρια εξαίρεσης σωστά → επόμενη', group: 'bound', match: K('Enter'), when: (c, e) => free(c) && boundActive() && !boundEditing() && !S.multi.size && !enterOwnedBy(e), run: () => boundDecide(true) },
+  { keys: 'X', label: 'Όχι αυτό (μένει στην έξοδο) → επόμενη', group: 'bound', match: K('x'), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundDecide(false) },
   { keys: 'J / K', label: 'Επόμενη / προηγούμενη εξαίρεση', group: 'bound', match: K(['j', 'k']), when: c => free(c) && boundActive(), run: (e) => boundStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
-  { keys: 'T', label: 'Σελίδα αρχής / τέλους της εξαίρεσης', group: 'bound', match: K('t'), when: c => free(c) && boundActive(), run: () => boundToggleEnd() },
+  { keys: 'T', label: 'Σελίδα αρχής / τέλους της εξαίρεσης', group: 'bound', match: K('t'), when: c => free(c) && boundActive() && !boundEditing(), run: () => boundToggleEnd() },
   { keys: 'Esc', label: 'Έξοδος από τον έλεγχο ορίων', group: 'bound', match: K('Escape'), when: c => free(c) && boundActive() && !S.sel && !S.multi.size, run: () => stopBoundLoop() },
+  // the loop over the spelling proposals (inspector/typoloop.js) owns these keys while it is on
+  { keys: '↵', label: 'Διόρθωση της λέξης → επόμενο τυπογραφικό', group: 'typo', match: K('Enter'), when: (c, e) => free(c) && typoActive() && !S.multi.size && !enterOwnedBy(e), run: () => typoDecide(true) },
+  { keys: 'X', label: 'Σωστό ως έχει → επόμενο τυπογραφικό', group: 'typo', match: K('x'), when: c => free(c) && typoActive(), run: () => typoDecide(false) },
+  { keys: 'J / K', label: 'Επόμενο / προηγούμενο τυπογραφικό', group: 'typo', match: K(['j', 'k']), when: c => free(c) && typoActive(), run: (e) => typoStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
+  { keys: 'Esc', label: 'Έξοδος από τον έλεγχο τυπογραφικών', group: 'typo', match: K('Escape'), when: c => free(c) && typoActive() && !S.multi.size, run: () => stopTypoLoop() },
   { keys: '⌘↵', label: 'Αποθήκευση της διόρθωσής μου', group: 'segment', match: K('Enter', { mod: true }), when: c => inWs(c) && c.A.save, run: (e, c) => c.A.save() },
   { keys: 'Esc', label: 'Πίσω / καθαρισμός επιλογής / ακύρωση / απόρριψη πρόχειρου', group: 'segment', match: K('Escape'), when: inWs, run: (e, c) => escapeKey(e, c) },
   { keys: '1 / 2 / 3', label: 'Σάρωση / Αποτέλεσμα / Markdown σελίδας', group: 'page', match: K(['1', '2', '3']), when: c => free(c) && S.page?.info?.state, run: (e) => setView(VIEWS[+e.key - 1][0]) },
@@ -56,7 +67,7 @@ export const SHORTCUTS = [
   { keys: 'R', label: 'Σχεδίαση περιοχής (Σάρωση)', group: 'page', match: K('r'), when: c => free(c) && toolOn('region'), run: () => toggleDraw() },
   { keys: 'B', label: 'Εμφάνιση πλαισίων (Σάρωση)', group: 'page', match: K('b'), when: c => free(c) && toolOn('boxes'), run: () => { S.showBoxes = !S.showBoxes; renderWorkspace(); } },
 ];
-export const SHORTCUT_GROUPS = [['bound', 'Έλεγχος ορίων εξαιρέσεων'], ['segment', 'Επιλεγμένο τμήμα'], ['multi', 'Πολλαπλή επιλογή'], ['page', 'Σελίδα & προβολή'], ['always', 'Πάντα']];
+export const SHORTCUT_GROUPS = [['bound', 'Έλεγχος ορίων εξαιρέσεων'], ['typo', 'Έλεγχος τυπογραφικών'], ['segment', 'Επιλεγμένο τμήμα'], ['multi', 'Πολλαπλή επιλογή'], ['page', 'Σελίδα & προβολή'], ['always', 'Πάντα']];
 // a focused control (button, link, summary, field) handles its own Enter: the multi-selection shortcut must not steal it
 const enterOwnedBy = (e) => !!e?.target?.closest?.('button,a,[role=button],summary,input,select,textarea');
 export function keyContext(e) {
