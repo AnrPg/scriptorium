@@ -595,3 +595,4 @@ label.list-item{cursor:pointer}
 .health-list{margin:6px 0 12px;padding-left:18px;display:flex;flex-direction:column;gap:10px}
 .health-log{font-family:ui-monospace,Menlo,monospace;overflow-wrap:anywhere}
 .health-item .bad{color:var(--bad)}
+.gloss-note{align-items:center;gap:8px;margin:6px 0;padding:6px 10px;border:1px solid var(--line2);border-left:3px solid var(--acc);border-radius:6px;background:var(--soft3)}

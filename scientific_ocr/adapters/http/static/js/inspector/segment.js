@@ -363,6 +363,7 @@ function propertiesCard(blk, book, decide, seg, rerender) {
     referenceSummary(blk) ? row('ref', 'Παραπομπές', h('span', { class: 'prop-line' }, referenceSummary(blk)), act1('ref', 'Αλλαγή ▾'), () => referencePanel(blk, decide)) : null,
     flowRow(),
     tableRow(),
+    glossaryRow(blk, row),
     blk.flow !== 'furniture' ? row('exc', 'Παρέκβαση', excursusValue(blk), act1('exc', 'Επιλογές ▾'), () => excursusEditor(blk)) : null,
     row('label', 'Ετικέτα μηχανής', h('span', { class: 'prop-line' }, (blk.engine_label || '—').replace(':', ' · ')), act1('label', 'Αλλαγή ▾'), () => labelStructure(blk)),
     h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, 'Στην έξοδο'),
@@ -399,3 +400,19 @@ export function labelStructure(blk) {
     h('div', { class: 'small mut' }, 'Η ετικέτα ορίζει το είδος του τμήματος και πώς ξαναγίνεται OCR. Επισημασμένες: όσες έδωσαν οι μηχανές. (Το επίπεδο στη δομή αλλάζει από τις Ιδιότητες.)'),
     labelPicker(currentLabels(blk), (l) => act(() => api(`${B(S.book.id)}/blocks/${blk.id}/relabel`, { body: { label: l } }), 'Νέα ετικέτα· τρέχει νέο OCR')));
 }
+
+// A glossary page (pipeline.glossary): the entry's term(s) as the outputs read them; the reviewer may say the page is
+// not a glossary (a dismissed hint, undoable; applies with the next book update)
+export function glossaryDismiss(page) {
+  return h('button', { class: 'small ghost', title: 'Οι παράγραφοι της σελίδας διαβάζονται ως απλό κείμενο (αναιρείται· ισχύει με την επόμενη ενημέρωση)',
+    onclick: () => act(() => api(`${B(S.book.id)}/suggestions/glossary:${page}/dismiss`, { body: {} }), 'Η σελίδα δεν θα διαβάζεται ως γλωσσάριο μετά την ενημέρωση') }, 'Δεν είναι γλωσσάριο');
+}
+function glossaryRow(blk, row) {
+  if (!blk.glossary && !blk.glossary_letter) return null;
+  const terms = blk.glossary?.terms || [];
+  const value = blk.glossary_letter ? h('span', { class: 'prop-line' }, 'γράμμα-ενότητα του γλωσσαρίου')
+    : terms.length ? h('span', { class: 'prop-line' }, terms.length > 1 ? `${terms.length} λήμματα: ` : 'Λήμμα: ', terms.map((t, i) => [i ? ', ' : '', h('b', {}, t)]))
+    : h('span', { class: 'prop-line mut' }, 'συνέχεια του προηγούμενου λήμματος');
+  return row('gl', 'Γλωσσάριο', value, glossaryDismiss(blk.page));
+}
+

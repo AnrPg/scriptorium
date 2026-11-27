@@ -7,6 +7,7 @@ import { dropInReadingOrder } from '../inspector/lineage.js';
 import { segText, toggleMulti } from '../inspector/multi.js';
 import { pageGroupsPanel, suggestionsPanel } from '../inspector/suggestions.js';
 import { continuationMark, continuesInMark, excursusBanner, excursusChip } from '../inspector/excursus.js';
+import { glossaryDismiss } from '../inspector/segment.js';
 import { act } from '../ui/feedback.js';
 import { CAT, legend, rowState } from '../ui/math.js';
 import { hoverSeg } from '../workspace/hover.js';
@@ -52,6 +53,10 @@ export function pagePanel(body) {
   body.append(h('div', { class: 'row small mut page-sum' }, h('span', { class: 'grow' }, `${pg.blocks.length} τμήματα · ${info.required || 0} απαιτούν έλεγχο · ${info.recommended || 0} συνιστάται`),
     S.meta.note_model ? h('button', { class: 'small ghost', title: 'Το τοπικό μοντέλο εξετάζει τη σελίδα και προτείνει συγχωνεύσεις/ομάδες (δεν εφαρμόζεται τίποτα χωρίς εσένα)', onclick: () => pg.askModel() }, 'Πρότεινε δομή') : null));
   body.append(sugg);
+  const gl = pg.blocks.filter(x => x.glossary);
+  if (gl.length) body.append(h('div', { class: 'row small gloss-note' }, h('span', { class: 'grow' }, h('b', {}, 'Σελίδα γλωσσαρίου'),
+    ` · ${gl.reduce((n, x) => n + (x.glossary.terms || []).length, 0)} λήμματα· κάθε όρος με τον ορισμό του γίνεται ξεχωριστό λήμμα (στο RAG: ένα κομμάτι ανά λήμμα).`),
+    glossaryDismiss(pg.page)));
   body.append(pageGroupsPanel(pg));
   body.append(h('details', {}, h('summary', {}, 'Υπόμνημα χρωμάτων'), h('div', {}, legend())));
   body.append(h('h3', {}, 'Σειρά ανάγνωσης και δομή ', infoTip('pagetree')));
