@@ -149,6 +149,7 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
     struct = _document_structure(blocks, pages, inp.human, dims, heading_prior, model, lex.known if lex else None)
     lap('document structure')
     struct.update(_classify_entities(out, blocks, struct, inp.human, dims))
+    _entity_excursus(blocks, pages, struct, inp.human)   # historical notes / biographies: excursus (before the flow)
     _final_flow(blocks, struct, inp.human)
     tables.annotate(blocks, book_profile(inp.human).get('table_default'))   # term grids (hint) + the profile's default
     struct['profile'] = _output_profile(blocks, struct, inp.human)
@@ -519,6 +520,14 @@ def _box_strands(group_list, entity_list) -> dict[str, str]:
         for m in members:
             out.setdefault(m, key)
     return out
+
+
+def _entity_excursus(blocks, pages, struct, human) -> None:
+    """The excursus again, now that the entities are known: the reviewer's, then the automatic ones of entities
+    that are excursus by nature (pipeline.excursus.from_entities)."""
+    merged_into = {mid: into['into'] for p in pages for into in p.get('merged', []) for mid in into['members']}
+    auto = excursus.from_entities(blocks, struct.get('entities') or [], set(human['dismissed']))
+    struct['excursus'] = excursus.annotate(blocks, human.get('excursus') or [], merged_into, auto)
 
 
 def _final_flow(blocks, struct, human) -> None:

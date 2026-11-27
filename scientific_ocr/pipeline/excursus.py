@@ -14,15 +14,26 @@ Consequences (other stages):
 
 Suggestions: a course paragraph that stops mid-sentence and resumes (lowercase) only after one or more pages
 whose text does not continue it marks the pages between as a likely excursus.
+
+Automatic excursus (from_entities): an entity of a kind that IS an excursus by nature (a historical note, a
+biography) becomes one — a HINT with evidence, never a guess: the reviewer verified the entity, or its boundary is
+independent evidence (a drawn box, a section, an engine element) detected with high/medium confidence. It reads in
+its own strand like any excursus; the reviewer's excursus always win (an automatic one overlapping them is not
+made); «Δεν είναι παρέκβαση» dismisses it (its id is the dismissal key) and changing it makes it the reviewer's.
 """
 from __future__ import annotations
 
 import hashlib
+import re
 
 from ..core.decisions import page_of
 from ..core.model import chosen_text
 
 PLACEMENTS = ('inplace', 'chapter_end', 'book_end', 'remove')
+ENTITY_EXCURSUS = {'history': 'history', 'biography': 'biography'}     # entity type -> excursus type
+EVIDENT_GRANULARITY = {'box', 'section', 'part', 'block'}
+EVIDENT_CONFIDENCE = {'high', 'medium'}
+_LABEL_PREFIX = re.compile(r'^\W*(?:ιστορικ\w*\s+αναδρομ\w*|βιογραφ\w*)\W*', re.I)
 SUGGEST_MAX_GAP_PAGES = 6          # an excursus longer than this is not looked for (resumption too far to be sure)
 TEXT_KINDS = {'paragraph', 'list_item'}
 
@@ -43,14 +54,49 @@ def _resolve(end: str | None, merged_into: dict, by_id: dict, flow: list[dict], 
     return (on_page[-1] if last else on_page[0]) if on_page else None
 
 
-def annotate(blocks: list[dict], excursus: list[dict], merged_into: dict[str, str]) -> list[dict]:
+def from_entities(blocks: list[dict], entities: list[dict], dismissed: set) -> list[dict]:
+    """The automatic excursus of the book's entities (module doc): first and last member in book order."""
+    pos = {b['id']: i for i, b in enumerate(_flowing(blocks))}
+    out = []
+    for e in entities or []:
+        xtype = ENTITY_EXCURSUS.get(e.get('type'))
+        if not xtype:
+            continue
+        evident = e.get('verified') or (e.get('granularity') in EVIDENT_GRANULARITY
+                                        and e.get('confidence') in EVIDENT_CONFIDENCE)
+        members = sorted((m for m in e.get('members') or [] if m in pos), key=pos.get)
+        xid = 'xe' + hashlib.sha1(str(e.get('key')).encode()).hexdigest()[:10]
+        if not evident or not members or xid in dismissed:
+            continue
+        name = _LABEL_PREFIX.sub('', re.sub(r'[*_#]', '', e.get('label') or '')).strip()[:120]
+        out.append({'id': xid, 'first': members[0], 'last': members[-1], 'type': xtype, 'name': name,
+                    'placement': 'inplace', 'source': 'entity', 'entity': e.get('key')})
+    return out
+
+
+def annotate(blocks: list[dict], excursus: list[dict], merged_into: dict[str, str],
+             auto: list[dict] | None = None) -> list[dict]:
     """Mutates blocks (b['excursus'] = id); returns the canonical excursus list (members resolved, in book order).
-    Overlaps: the excursus that starts first keeps the shared segments."""
+    Overlaps: the excursus that starts first keeps the shared segments. `auto` (from_entities) after the reviewer's:
+    one that overlaps an excursus already made, or the reviewer's own with the same id, is left out."""
     for b in blocks:
         b.pop('excursus', None)
     flow = _flowing(blocks)
     by_id = {b['id']: b for b in flow}
     out = []
+    own = {x['id'] for x in excursus}
+    for x in auto or []:
+        if x['id'] in own:
+            continue
+        a = _resolve(x['first'], merged_into, by_id, flow, last=False)
+        z = _resolve(x['last'], merged_into, by_id, flow, last=True)
+        if a is not None and z is not None and a <= z and not any(b.get('excursus') for b in flow[a:z + 1]) \
+                and not _overlaps(excursus, a, z, merged_into, by_id, flow):
+            for b in flow[a:z + 1]:
+                b['excursus'] = x['id']
+            members = [b['id'] for b in flow[a:z + 1]]
+            out.append({**_public(x), 'members': members, 'pages': sorted({b['page'] for b in flow[a:z + 1]}),
+                        'first_id': flow[a]['id'], 'last_id': flow[z]['id'], 'broken': False})
     for x in excursus:
         a = _resolve(x.get('first'), merged_into, by_id, flow, last=False)
         z = _resolve(x.get('last'), merged_into, by_id, flow, last=True)
@@ -66,10 +112,23 @@ def annotate(blocks: list[dict], excursus: list[dict], merged_into: dict[str, st
     return out
 
 
+def _overlaps(excursus, a, z, merged_into, by_id, flow) -> bool:
+    """[a, z] meets one of the reviewer's excursus."""
+    for x in excursus:
+        xa = _resolve(x.get('first'), merged_into, by_id, flow, last=False)
+        xz = _resolve(x.get('last'), merged_into, by_id, flow, last=True)
+        if xa is not None and xz is not None and not (z < xa or a > xz):
+            return True
+    return False
+
+
 def _public(x: dict) -> dict:
-    return {'id': x['id'], 'type': x.get('type') or 'other', 'name': x.get('name') or '',
-            'placement': x.get('placement') if x.get('placement') in PLACEMENTS else 'inplace',
-            'first': x.get('first'), 'last': x.get('last')}
+    out = {'id': x['id'], 'type': x.get('type') or 'other', 'name': x.get('name') or '',
+           'placement': x.get('placement') if x.get('placement') in PLACEMENTS else 'inplace',
+           'first': x.get('first'), 'last': x.get('last')}
+    if x.get('source'):
+        out['source'], out['entity'] = x['source'], x.get('entity')
+    return out
 
 
 def suggest(blocks: list[dict], dismissed: set, continues) -> list[dict]:

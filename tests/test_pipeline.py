@@ -1787,3 +1787,24 @@ def test_a_title_opening_with_a_table_label_is_the_tables_caption_never_a_chapte
     captions.associate(page)
     assert page[1]['kind'] == 'caption' and page[1]['relations']['caption_for'] == 't'    # the table, not the figure
     assert page[3]['kind'] == 'heading'                                                     # a chapter title stays one
+
+
+def test_a_historical_note_with_evidence_is_an_excursus_unless_the_reviewer_said_otherwise():
+    from scientific_ocr.pipeline import excursus
+    def blk(i, page):
+        return {'id': i, 'page': page, 'kind': 'paragraph', 'chosen': {'type': 'text', 'text': i}, 'relations': {}}
+    blocks = [blk('a', 1), blk('h1', 2), blk('h2', 3), blk('b', 4), blk('q', 5)]
+    ents = [{'key': 'E1', 'type': 'history', 'granularity': 'section', 'confidence': 'medium', 'verified': False,
+             'members': ['h2', 'h1'], 'label': 'ΙΣΤΟΡΙΚΗ ΑΝΑΔΡΟΜΗ Η ανακάλυψη του κυττάρου'},
+            {'key': 'E2', 'type': 'history', 'granularity': 'heading_subtree', 'confidence': 'low', 'verified': False,
+             'members': ['q'], 'label': 'x'},                                     # no evidence: not made
+            {'key': 'E3', 'type': 'question', 'granularity': 'box', 'confidence': 'high', 'members': ['b'], 'label': 'y'}]
+    auto = excursus.from_entities(blocks, ents, set())
+    assert [(x['first'], x['last'], x['type'], x['name'], x['source']) for x in auto] == \
+        [('h1', 'h2', 'history', 'Η ανακάλυψη του κυττάρου', 'entity')]
+    out = excursus.annotate(blocks, [], {}, auto)
+    assert out[0]['members'] == ['h1', 'h2'] and blocks[1]['excursus'] == blocks[2]['excursus'] == auto[0]['id']
+    assert excursus.from_entities(blocks, ents, {auto[0]['id']}) == []                     # dismissed: gone
+    mine = [{'id': 'X1', 'first': 'h2', 'last': 'b', 'type': 'other'}]                    # the reviewer's wins
+    out = excursus.annotate(blocks, mine, {}, auto)
+    assert [x['id'] for x in out] == ['X1'] and not blocks[1].get('excursus')
