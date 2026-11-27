@@ -7,7 +7,7 @@ from .scopes import CARRY
 UNDOABLE = {'decision', 'rule_add', 'rule_remove', 'region_add', 'region_remove', 'block_hide', 'block_show',
             'page_profile', 'merge_add', 'merge_remove', 'group_add', 'group_remove', 'suggestion_dismiss',
             'class_accept', 'entity_confirm', 'entity_assign', 'entity_remove', 'page_remove', 'page_restore',
-            'excursus_set', 'excursus_remove', 'output_profile', 'profile_copy'}
+            'excursus_set', 'excursus_remove', 'output_profile', 'profile_copy', 'glossary_page'}
 # Decisions about a segment's CONTENT. "Value" actions set the content; `approve` only confirms the current
 # version; `revert` returns the segment to the machine result.
 VALUE_ACTIONS = {'approve_candidate', 'replace_text', 'replace_latex', 'mark_image_only', 'mark_unreadable', 'revert'}
@@ -31,6 +31,7 @@ EVENT_FIELDS = {
     'excursus_set': {'excursus'}, 'excursus_remove': {'excursus_id'},
     'output_profile': {'profile'},          # the book's output profile (core.profiles) + optional 'overrides',
                                             # 'carry' (core.scopes: copy | separate) when the profile changes
+    'glossary_page': {'pages', 'glossary'},   # the reviewer: these pages are (true) / are not (false) a glossary
     'profile_copy': {'from', 'to'},         # carry the decisions of profile `from` (up to `upto`) into `to`
     'undo': {'targets'}, 'redo': {'targets'},
 }
@@ -54,6 +55,9 @@ def event_errors(ev: dict) -> list[str]:
         errs += profile_errors(ev['profile'], ev.get('overrides'))
         if 'carry' in ev and ev['carry'] not in CARRY:
             errs.append(f"output_profile: carry must be one of {list(CARRY)}")
+    if t == 'glossary_page' and not errs and (not isinstance(ev['glossary'], bool) or not ev['pages']
+                                               or not all(isinstance(p, int) and p > 0 for p in ev['pages'])):
+        errs.append('glossary_page: pages must be page numbers and glossary true or false')
     if t == 'profile_copy' and not errs:
         errs += [f'profile_copy: unknown profile {p!r}' for p in (ev['from'], ev['to']) if p not in PROFILES]
         if ev['from'] == ev['to']:

@@ -606,6 +606,11 @@ class Handler(BaseHTTPRequestHandler):
     def structure_review_accept(self, bid, key):
         self._json(200, self.app.accept_structure_proposal(bid, key, self._body().get('members'), self._actor()))
 
+    @route('POST', r'/api/books/([\w.-]+)/glossary-pages')
+    def glossary_pages(self, bid):
+        body = self._body()
+        self._json(200, self.app.mark_glossary(bid, body.get('pages') or [], body.get('glossary') is True, self._actor()))
+
     @route('POST', r'/api/books/([\w.-]+)/suggestions/(\w+)/dismiss')
     def dismiss(self, bid, key):
         self._json(200, self.app.dismiss_suggestion(bid, key, self._actor()))

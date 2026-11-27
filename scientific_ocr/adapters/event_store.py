@@ -150,6 +150,7 @@ def fold(evs: list[dict], profile: str | None = None) -> dict:
     live = [{**ev, 'scope': scope_of[ev['seq']]} if ev['seq'] in scope_of and 'scope' not in ev else ev for ev in live]
     rules, regions, profiles, hidden, merges, groups, dismissed, accepts = {}, {}, {}, set(), {}, {}, set(), {}
     entities, assigned, removed, excursus = {}, {}, set(), {}
+    glossary_pages: dict[int, bool] = {}
     output_profile = None
     for ev in live:
         t = ev['type']
@@ -193,6 +194,8 @@ def fold(evs: list[dict], profile: str | None = None) -> dict:
             excursus[ev['excursus']['id']] = ev['excursus']
         elif t == 'excursus_remove':
             excursus.pop(ev['excursus_id'], None)
+        elif t == 'glossary_page':                     # the last word per page wins
+            glossary_pages.update({int(p): bool(ev['glossary']) for p in ev['pages']})
         elif t == 'output_profile' and (profile is None or ev['profile'] == profile):   # the last one in force wins
             output_profile = {'profile': ev['profile'], 'overrides': ev.get('overrides') or {}, 'seq': ev['seq']}
     if profile is not None and output_profile is None:  # a profile never chosen yet: its name, default settings
@@ -209,7 +212,7 @@ def fold(evs: list[dict], profile: str | None = None) -> dict:
             'regions': list(regions.values()), 'profiles': profiles, 'hidden': sorted(hidden),
             'merges': list(merges.values()), 'groups': list(groups.values()), 'dismissed': sorted(dismissed),
             'accepts': list(accepts.values()), 'entities': entities, 'assigned': assigned,
-            'removed_pages': sorted(removed), 'excursus': list(excursus.values()), 'output_profile': output_profile,
+            'removed_pages': sorted(removed), 'excursus': list(excursus.values()), 'glossary_pages': glossary_pages, 'output_profile': output_profile,
             'undo_targets': undo_targets, 'redo_targets': redo_stack[-1] if redo_stack else [],
             'history': evs, 'active': not_undone, 'applies': {e['seq'] for e in live},
             'scope': current, 'scope_counts': counts, 'scope_of': scope_of,

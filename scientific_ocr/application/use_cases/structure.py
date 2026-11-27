@@ -393,6 +393,16 @@ class StructureService(ServiceBase):
                              'Έλεγχος δομής με το μοντέλο (μετά την αποδοχή)', lane='heavy')
         return out[0]
 
+    def mark_glossary(self, book_id: str, pages: list[int], glossary: bool, actor='reviewer') -> dict:
+        """The reviewer's word on glossary pages (pipeline.glossary): true makes them a glossary (entries: term +
+        definition), false reads their paragraphs as text. Undoable; applies with the next book update."""
+        b = self._book(book_id)
+        pages = sorted({int(p) for p in pages or []})
+        _require(bool(pages) and all(1 <= p <= b.page_count() for p in pages), 'pages must be pages of the book')
+        ev = self._append(b, {'type': 'glossary_page', 'pages': pages, 'glossary': bool(glossary)}, actor=actor)[0]
+        self._reproject(b)
+        return ev
+
     def dismiss_suggestion(self, book_id: str, key: str, actor='reviewer') -> dict:
         b = self._book(book_id)
         ev = self._append(b, {'type': 'suggestion_dismiss', 'key': key}, actor=actor)[0]

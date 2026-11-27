@@ -15,7 +15,8 @@ MIN_ENTRIES entries making up most of its body paragraphs, AND a running head na
 alphabetical order; a page between two glossary pages with an entry continues the run. An entry's term is the
 bold run that opens a paragraph (or a line of it) and is followed by a definition starting a sentence: a numbered
 label («ΑΠΑΝΤΗΣΗ 7-17.»), a colon label («ΠΡΟΣΚΟΛΛΗΣΗ:») or a bold subject inside a sentence («Τα ινίδια ακτίνης
-είναι…») is not. The reviewer dismisses a page (suggestion_dismiss 'glossary:<page>'): its paragraphs read as text.
+είναι…») is not. The reviewer's word wins (glossary_page event): a page marked a glossary is one without evidence, a page
+marked not one reads as text.
 """
 from __future__ import annotations
 
@@ -33,10 +34,6 @@ _DEF_START = re.compile(r'^[(«"$\[]|^[A-ZΑ-ΩΆΈΉΊΌΎΏ0-9]', re.U)
 MIN_ENTRIES = 3
 MAX_TERM_WORDS = 14
 BODY_KINDS = ('paragraph', 'text', 'list')
-
-
-def key(page: int) -> str:
-    return f'glossary:{page}'
 
 
 def source(b: dict) -> str:
@@ -84,9 +81,11 @@ def _letter(text: str) -> bool:
     return bool(parts) and all(0 < len(p) <= 2 and p.isalpha() for p in parts)
 
 
-def annotate(blocks: list[dict], dismissed=frozenset(), pages: list[int] | None = None) -> dict:
-    """Marks the glossary's entries and letter dividers; returns {'label', 'pages', 'evidence'}. pages: the pages
-    already known (a page preview keeps the full build's decision); None detects them."""
+def annotate(blocks: list[dict], marked: dict | None = None, pages: list[int] | None = None) -> dict:
+    """Marks the glossary's entries and letter dividers; returns {'label', 'pages', 'evidence', 'marked'}.
+    marked: {page: True/False}, the reviewer's word (glossary_page events). pages: the pages already known (a page
+    preview keeps the full build's decision); None detects them."""
+    marked = {int(p): v for p, v in (marked or {}).items()}
     for b in blocks:
         b.pop('glossary', None)
         b.pop('glossary_letter', None)
@@ -113,7 +112,8 @@ def annotate(blocks: list[dict], dismissed=frozenset(), pages: list[int] | None 
             if p not in evidence and any(a < p for a in found) and any(a > p for a in found) \
                     and (p - 1 in evidence or p + 1 in evidence) and any(terms.get(b['id']) for b in by_page[p]):
                 evidence[p] = 'between glossary pages'
-        pages = sorted(p for p in evidence if key(p) not in dismissed)
+        evidence.update({p: 'marked by the reviewer' for p, v in marked.items() if v and p in by_page})
+        pages = sorted(p for p in evidence if marked.get(p, True))
     pages = sorted(set(pages))
     for p in pages:
         for b in by_page.get(p, []):
@@ -122,7 +122,8 @@ def annotate(blocks: list[dict], dismissed=frozenset(), pages: list[int] | None 
             elif b['id'] in terms:                        # an entry, or the rest of one (continued from a column)
                 b['glossary'] = {'terms': terms[b['id']]}
     return {'label': _label([heads[p] for p in pages if p in heads]), 'pages': pages,
-            'evidence': {str(p): evidence.get(p, 'known') for p in pages}}
+            'evidence': {str(p): evidence.get(p, 'known') for p in pages},
+            'marked': {str(p): v for p, v in sorted(marked.items())}}
 
 
 def _label(texts: list[str]) -> str:

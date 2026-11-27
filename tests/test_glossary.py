@@ -48,7 +48,21 @@ def test_entries_are_detected_with_evidence_and_not_labels_or_bold_subjects():
     assert by['p10_9']['glossary']['terms'] == []           # the rest of an entry
     assert by['p10_1'].get('glossary_letter')
     assert not any(b.get('glossary') for b in answers + prose)
-    assert glossary.annotate(blocks, {glossary.key(10)})['pages'] == []     # the reviewer said: not a glossary
+    assert glossary.annotate(blocks, {10: False})['pages'] == []            # the reviewer said: not a glossary
+
+
+def test_the_reviewer_marks_a_page_a_glossary_without_evidence_and_undo_restores():
+    from scientific_ocr.adapters.event_store import fold
+    from scientific_ocr.core.decisions import event_errors
+    blocks = [_b(7, 1, 'paragraph', '**ομόλογος** Γονίδιο που μοιάζει με άλλο.'), _b(7, 2, 'paragraph', 'συνέχεια του ορισμού.')]
+    assert glossary.annotate(blocks)['pages'] == []                      # one entry, no running head: no evidence
+    res = glossary.annotate(blocks, {7: True})
+    assert res['pages'] == [7] and res['evidence']['7'] == 'marked by the reviewer'
+    assert blocks[0]['glossary']['terms'] == ['ομόλογος'] and blocks[1]['glossary']['terms'] == []
+    ev = {'seq': 1, 'type': 'glossary_page', 'pages': [7], 'glossary': True, 'actor': 'reviewer'}
+    assert event_errors(ev) == [] and event_errors({**ev, 'glossary': 'yes'}) and event_errors({**ev, 'pages': []})
+    assert fold([ev])['glossary_pages'] == {7: True}
+    assert fold([ev, {'seq': 2, 'type': 'undo', 'targets': [1], 'actor': 'reviewer'}])['glossary_pages'] == {}
 
 
 def test_split_reads_each_entry_and_the_text_before_the_first():

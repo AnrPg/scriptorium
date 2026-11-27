@@ -1579,3 +1579,12 @@ def test_health_check_stops_only_processes_that_can_never_finish(tmp_path):
     assert h.check('browser') is None and reaped == []        # an extraction elsewhere: its servers are in use
     procs[:] = []
     assert h.check('periodic')['stopped'] == [{'reason': 'engine_server', 'pid': 777, 'stopped': True}]
+
+
+def test_glossary_page_route_records_the_reviewers_word_and_validates(server):
+    """«Σελίδα γλωσσαρίου» / «Δεν είναι γλωσσάριο» (pipeline.glossary): an undoable glossary_page event."""
+    h = {'X-OCR-Client': '1'}
+    st, data = _req(server + '/api/books/run/glossary-pages', 'POST', {'pages': [1], 'glossary': True}, h)
+    assert st == 200 and json.loads(data)['type'] == 'glossary_page'
+    assert _req(server + '/api/books/run/glossary-pages', 'POST', {'pages': [999], 'glossary': True}, h)[0] == 400
+    assert _req(server + '/api/books/run/glossary-pages', 'POST', {'pages': [], 'glossary': False}, h)[0] == 400
