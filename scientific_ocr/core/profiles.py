@@ -30,6 +30,7 @@ PROFILES: dict[str, dict] = {
         'el': 'Ανάγνωση (το βιβλίο όπως είναι)', 'en': 'Reading (the book as it is)',
         'exclude': [], 'keep_answered': True, 'excursus_remove': [], 'auto_exclude': {},
         'pictures': 'keep', 'heading_depth': 6, 'review_pictures': True, 'engine_policy': 'cross_check',
+        'table_default': None,           # tables stay tables (pipeline.tables)
         'exports': ['markdown_images', 'markdown_text', 'pdf', 'json'],
     },
     'rag': {
@@ -57,6 +58,10 @@ PROFILES: dict[str, dict] = {
         'engine_policy': 'marker_primary',
         'review_pictures': False,        # fidelity of a picture that never reaches the output is not asked about
         'heading_depth': 3,              # deeper headings become the lead of their paragraph (and stay in breadcrumbs)
+        # every table is read as a list WITH LEVELS: one item per row, named by its 1st column, the other columns its
+        # keys (pipeline.tables) — a pipe table reads poorly for an LLM. The reviewer's choice per table wins, and
+        # a grid of terms stays a flat list of terms (user, 2026-11-27)
+        'table_default': {'layout': 'rows', 'key': 0},
         'strip_emphasis': True,          # bold/italic markup removed; bold terms collected as key_terms
         'caption_credits': [             # trailing permission/credit notes of captions (hints; Greek and English)
             r'\((?:με την )?(?:ευγενική )?άδεια[^()]*\)\s*\.?$', r'\((?:courtesy|by courtesy) of[^()]*\)\s*\.?$',
@@ -77,7 +82,7 @@ MARKER_PRIMARY_WAIVES = ('ENGINE_TEXT_CONFLICT', 'ENGINE_TEXT_CONFLICT_STRONG', 
                          'REACTION_SCHEME_IMAGE_AUTHORITATIVE', 'CHEM_CANDIDATE_IMPLAUSIBLE')
 
 OVERRIDABLE = {'exclude', 'keep_answered', 'excursus_remove', 'auto_exclude', 'pictures', 'heading_depth', 'engine_policy',
-               'strip_emphasis', 'chunk'}
+               'strip_emphasis', 'chunk', 'table_default'}
 
 
 def names() -> list[str]:
@@ -114,4 +119,7 @@ def errors(name, overrides) -> list[str]:
             errs.append(f'engine_policy must be one of {ENGINE_POLICIES}')
         elif k == 'pictures' and v not in ('keep', 'captions_only'):
             errs.append('pictures must be keep or captions_only')
+        elif k == 'table_default' and not (v is None or (isinstance(v, dict) and v.get('layout') in ('rows', 'cols')
+                                                            and (v.get('key') is None or (isinstance(v.get('key'), int) and v['key'] >= 0)))):
+            errs.append('table_default must be null or {"layout": "rows"|"cols", "key": null|column/row number}')
     return errs

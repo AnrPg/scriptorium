@@ -13,12 +13,15 @@ row names each column and the header column labels the values:
     - Υδρογόνο:
       Μάζα: 1
       Φορτίο: 0
-Headers: the leading rows (columns) whose cells are all <th>, else the first row (column). Spanned cells are
-repeated over the cells they cover (said once per item). Empty values are left out; an empty key reads '—'.
+Headers: the leading rows (columns) whose cells are all <th>; a table without them (a chronology «1655 | Ο Hooke…»)
+has no keys: each item's values are listed under it unlabelled (never its first row turned into labels). Spanned
+cells are repeated over the cells they cover (said once per item). Empty values are left out; an empty key reads '—'.
 
 Layout of a table segment (core: reviewer first, then the automatic hint):
   table_layout   the reviewer's decision (overlay `set_table_layout`): 'rows' | 'cols' | 'table' (keep the grid)
   table_key      with 'rows' / 'cols': the key column / row (0-based); None = a flat list of the cells (term grid)
+  table_default  the output profile's default for every table (core.profiles 'table_default', e.g. RAG: rows with
+                 the 1st column as key), after the reviewer's decision and the term-grid hint
   table_list     the automatic HINT (annotate): {'order', 'evidence', 'sorted'} — applied only when the cells LOOK
                  like terms (no header row, short cells, no numbers) AND independent evidence agrees: the segment is
                  a key-terms/glossary entity, or its cells are in alphabetical order down the columns (or rows).
@@ -332,12 +335,17 @@ def suggest(block: dict) -> dict | None:
     return out
 
 
-def annotate(blocks: list[dict]) -> int:
-    """Sets/clears `table_list` on every table segment; returns how many are lists."""
+def annotate(blocks: list[dict], default: dict | None = None) -> int:
+    """Sets/clears `table_list` (the term-grid hint) and `table_default` (the profile's default) on every table
+    segment; returns how many are term lists."""
     n = 0
     for b in blocks:
         if b.get('kind') != 'table':
             continue
+        if default:
+            b['table_default'] = dict(default)
+        else:
+            b.pop('table_default', None)
         s = suggest(b)
         if s:
             b['table_list'] = s
@@ -374,6 +382,14 @@ def _heads(m: list[list[tuple[str, bool]]]) -> int:
     return max(n, 1)
 
 
+def _th_heads(m: list[list[tuple[str, bool]]]) -> int:
+    """How many leading rows of `m` are header rows (all <th>); 0 when the table has none."""
+    n = 0
+    while n < len(m) - 1 and all(th for _, th in m[n]) and any(t for t, _ in m[n]):
+        n += 1
+    return n
+
+
 def _labels(m: list[list[tuple[str, bool]]]) -> list[str]:
     """Each column's label: its header cells (spans said once), else its number."""
     nh = _heads(m)
@@ -407,7 +423,10 @@ def keyed(html: str, order: str, key: int) -> dict | None:
     if not o or not 0 <= key < len(o[0][0]):
         return None
     m, title = o
-    nh, head = _heads(m), _labels(m)
+    nh = _th_heads(m)
+    if not nh and order == 'cols' and _th_heads(_oriented(html, 'rows')[0]):
+        nh = 1                                        # per column: a table with a header row names its rows by its 1st column
+    head = _labels(m) if nh else [None] * len(m[0])   # no header at all: values without labels
     items = []
     for r in range(nh, len(m)):
         fields, seen = [], set()
@@ -418,7 +437,7 @@ def keyed(html: str, order: str, key: int) -> dict | None:
             fields.append([head[c], t])
         if fields or m[r][key][0]:
             items.append({'key': m[r][key][0] or '—', 'fields': fields})
-    label = ' / '.join(dict.fromkeys(m[r][key][0] for r in range(nh) if m[r][key][0])) or None
+    label = (' / '.join(dict.fromkeys(m[r][key][0] for r in range(nh) if m[r][key][0])) or None) if nh else None
     return {'title': title, 'label': label, 'items': items} if items else None
 
 
@@ -426,7 +445,7 @@ def texts(lst: dict) -> list[str]:
     """Every piece of text of a list (the export must contain each one)."""
     out = [lst[k] for k in ('title', 'label') if lst.get(k)]
     for it in lst['items']:
-        out += [it] if isinstance(it, str) else [it['key']] + [x for kv in it['fields'] for x in kv]
+        out += [it] if isinstance(it, str) else [it['key']] + [x for kv in it['fields'] for x in kv if x]
     return [t for t in out if t and t != '—']
 
 
@@ -437,7 +456,7 @@ def clean_list(lst: dict, fmt) -> dict | None:
         if isinstance(it, str):
             items += [x] if (x := fmt(it)) else []
         else:
-            k, fields = fmt(it['key']), [[fmt(a), v] for a, b in it['fields'] if (v := fmt(b))]
+            k, fields = fmt(it['key']), [[fmt(a) if a else None, v] for a, b in it['fields'] if (v := fmt(b))]
             if fields or k:
                 items.append({'key': k or '—', 'fields': fields})
     return {**lst, **{k: fmt(lst[k]) for k in ('title', 'label') if lst.get(k)}, 'items': items} if items else None
@@ -451,7 +470,7 @@ def markdown(lst: dict) -> str:
             out.append(f'- {it}')
         else:
             out.append(f'- {it["key"]}:')
-            out += [f'  {k}: {v}' for k, v in it['fields']]
+            out += [f'  {k}: {v}' if k else f'  {v}' for k, v in it['fields']]
     return '\n'.join(out)
 
 
@@ -463,13 +482,21 @@ def layout(block: dict) -> str | None:
     if over == 'table':
         return None
     hint = block.get('table_list') or {}
-    return None if hint.get('candidate') else hint.get('order')
+    if hint.get('order'):
+        return None if hint.get('candidate') else hint['order']
+    return (block.get('table_default') or {}).get('layout')
 
 
 def key(block: dict) -> int | None:
-    """The key column / row of a list with levels: the reviewer's (only with their own rows/cols layout)."""
-    k = block.get('table_key')
-    return k if isinstance(k, int) and block.get('table_layout') in LAYOUTS else None
+    """The key column / row of a list with levels: the reviewer's (with their own rows/cols layout), else the
+    profile's default (when neither the reviewer nor the term-grid hint decided the layout)."""
+    if block.get('table_layout') in LAYOUTS:
+        k = block.get('table_key')
+        return k if isinstance(k, int) else None
+    if block.get('table_layout') is None and not (block.get('table_list') or {}).get('order'):
+        k = (block.get('table_default') or {}).get('key')
+        return k if isinstance(k, int) else None
+    return None
 
 
 def as_list(block: dict, text: str) -> dict | None:

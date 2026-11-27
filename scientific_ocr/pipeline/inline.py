@@ -40,6 +40,6 @@ def list_html(lst: dict, fmt=inline_html) -> str:
         if isinstance(it, str):
             lis.append(f'<li>{fmt(it)}</li>')
         else:
-            sub = ''.join(f'<li><span class="pv-k">{fmt(k)}:</span> {fmt(v)}</li>' for k, v in it['fields'])
+            sub = ''.join(f'<li><span class="pv-k">{fmt(k)}:</span> {fmt(v)}</li>' if k else f'<li>{fmt(v)}</li>' for k, v in it['fields'])
             lis.append(f'<li>{fmt(it["key"])}:' + (f'<ul class="pv-kv">{sub}</ul>' if sub else '') + '</li>')
     return f'{lead}<ul class="pv-text pv-items">{"".join(lis)}</ul>'

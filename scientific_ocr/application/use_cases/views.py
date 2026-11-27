@@ -149,7 +149,7 @@ def _block_view(x: dict) -> dict:
             'lineage', 'content_source', 'caption_role', 'caption_label', 'caption_role_source', 'references', 'references_dismissed',
             'merge_id', 'merged_from', 'groups', 'entities', 'excluded', 'omitted', 'profile_omitted', 'kept', 'text_norm', 'notation',
             'chosen', 'display_crop', 'rule_corrections', 'evidence', 'decisions', 'figure_text_candidates', 'relations',
-            'match', 'flow_override', 'continues_override', 'excursus', 'table_layout', 'table_key', 'table_list')
+            'match', 'flow_override', 'continues_override', 'excursus', 'table_layout', 'table_key', 'table_list', 'table_default')
     v = {k: x.get(k) for k in keep if x.get(k) not in (None, [], {})}
     v['reasons'] = x['reasons']                        # always present in the view model, even when empty
     if x['kind'] == 'table' and (lst := tables.as_list(x, chosen_text(x))):

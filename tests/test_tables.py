@@ -228,3 +228,32 @@ def test_a_title_row_across_the_table_is_the_lists_title_not_a_key():
     assert per_col['title'] == 'ΠΙΝΑΚΑΣ 6-2 Ένζυμα' and per_col['items'] == [
         {'key': 'Αντίδραση', 'fields': [['λιπάση', 'υδρόλυση λιπών'], ['αμυλάση', 'υδρόλυση αμύλου']]}]
     assert tables.axes(html)['cols'] == ['Ένζυμο', 'λιπάση', 'αμυλάση']
+
+
+def test_the_output_profile_reads_every_table_as_a_list_unless_the_reviewer_or_the_term_grid_hint_decided():
+    from scientific_ocr.core import profiles
+    rag_default = profiles.effective('rag')['table_default']
+    assert rag_default == {'layout': 'rows', 'key': 0} and profiles.effective('reading')['table_default'] is None
+    b = _table(ELEMENTS, ink=False)
+    tables.annotate([b], rag_default)
+    lst = tables.as_list(b, ELEMENTS)
+    assert lst['order'] == 'rows' and lst['key'] == 0 and lst['items'][0]['key'] == 'πρωτόνιο'
+    overlay.COMMANDS['set_table_layout'](b, {'layout': 'table'}, None)     # the reviewer: a table after all
+    assert tables.as_list(b, ELEMENTS) is None
+    overlay.COMMANDS['set_table_layout'](b, {'layout': 'auto'}, None)      # back to the profile
+    assert tables.as_list(b, ELEMENTS)['key'] == 0
+    terms = _table()                                                       # a term grid stays a flat list of terms
+    tables.annotate([terms], rag_default)
+    assert tables.as_list(terms, TERMS)['key'] is None
+    tables.annotate([b], None)                                             # the reading profile: a table
+    assert tables.as_list(b, ELEMENTS) is None
+    assert profiles.errors('rag', {'table_default': {'layout': 'diag'}}) and not profiles.errors('rag', {'table_default': None})
+
+
+def test_a_table_without_header_rows_lists_its_values_unlabelled_never_its_first_row_as_keys():
+    html = ('<table><tr><td>1655</td><td>Ο Hooke περιγράφει πόρους σε τομές φελλού.</td></tr>'
+            '<tr><td>1674</td><td>Ο Leeuwenhoek ανακαλύπτει τα πρωτόζωα.</td></tr></table>')
+    lst = tables.as_list(_keyed('rows', 0, html), html)
+    assert lst['label'] is None and lst['items'][0] == {'key': '1655', 'fields': [[None, 'Ο Hooke περιγράφει πόρους σε τομές φελλού.']]}
+    assert tables.markdown(lst) == ('- 1655:\n  Ο Hooke περιγράφει πόρους σε τομές φελλού.\n'
+                                    '- 1674:\n  Ο Leeuwenhoek ανακαλύπτει τα πρωτόζωα.')

@@ -150,7 +150,7 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
     lap('document structure')
     struct.update(_classify_entities(out, blocks, struct, inp.human, dims))
     _final_flow(blocks, struct, inp.human)
-    tables.annotate(blocks)                               # term grids read as lists (hint; entities known)
+    tables.annotate(blocks, book_profile(inp.human).get('table_default'))   # term grids (hint) + the profile's default
     struct['profile'] = _output_profile(blocks, struct, inp.human)
     struct['profile']['text_policy'] = profile.text_policy(blocks, book_profile(inp.human))   # before review + spelling
     lap('entities')
@@ -728,7 +728,7 @@ def _build_page(out: Path, page: int, log: Log, runner: SpecializedRunner) -> in
     profile.text_policy(blocks, book_profile(inp.human))  # the reviewer sees what the output will say
     old = {b['id']: b for b in prev.get('blocks', []) if b['page'] == page}
     merged = [_preview_block(b, old.get(b['id'])) for b in blocks]
-    tables.annotate(merged)                               # entities kept from the full build
+    tables.annotate(merged, book_profile(inp.human).get('table_default'))   # entities kept from the full build
     profile.review_policy([b for b in merged if b.get('preview_changed') or b.get('preview_new')], book_profile(inp.human))
     latex_check.annotate(merged, latex_render.check)
     info = {**pages[0], **page_summary(merged)}
