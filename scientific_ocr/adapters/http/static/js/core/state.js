@@ -7,6 +7,11 @@ import { leaveScanModes, zoom } from '../workspace/workspace.js';
 export const S = { leftView: localStorage.getItem('ocr.leftView') || 'scan', multi: new Map(), selectMode: false, meta: null, books: [], book: null, page: null, sel: null, jobs: [], tab: 'pages', filter: 'all',
             selPages: new Set(), lastPageClicked: null, zoom: 1, showBoxes: true, drawing: false, draft: null, inspTab: 'segment', level: 'required' };
 export const R = (code) => (S.meta && S.meta.reasons[code]) || { el: code, review: null, crop: false, finding: null };
+/** Left out by the book's OUTPUT PROFILE (e.g. questions in a RAG book) and not kept back by the reviewer:
+ *  not drawn on the page, not listed in the structure, not reviewed — only listed under «Κρυμμένα από την έξοδο». */
+export const profileHidden = b => !!(b && b.profile_omitted && !b.kept);
+/** Out of the reader output for any reason (the reviewer's choice or the output profile). */
+export const outOfOutput = b => !!(b && (b.omitted || profileHidden(b)));
 export const kindLabel = b => ROLE_EL[b.role] || KIND_EL[b.original_kind || b.kind] || b.kind;
 export function scriptTag(ch) {             // show the alphabet when glyphs look identical (Α vs A)
   const c = (ch || '').codePointAt(0) || 0;

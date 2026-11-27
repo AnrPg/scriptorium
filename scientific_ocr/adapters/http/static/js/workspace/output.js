@@ -1,5 +1,5 @@
 import { B, api } from '../core/api.js';
-import { $, clear, h } from '../core/dom.js';
+import { $, clear, h, loadFailed } from '../core/dom.js';
 import { S } from '../core/state.js';
 import { toggleMulti } from '../inspector/multi.js';
 import { toast } from '../ui/feedback.js';
@@ -25,7 +25,11 @@ export async function outputView(wrap, b, n) {
   wrap.append(sheet);
   const style = (S.meta.styles || []).includes(localStorage.getItem('ocr.style')) ? localStorage.getItem('ocr.style') : 'tags';
   const token = ++outputToken;
-  const o = await pageOutput(b.id, n, style);
+  let o;
+  try { o = await pageOutput(b.id, n, style); } catch (e) {
+    if (token === outputToken && sheet.isConnected) loadFailed(sheet, e);
+    return;
+  }
   if (token !== outputToken || !sheet.isConnected) return;     // superseded by a newer render
   clear(sheet);
   if (S.leftView === 'markdown') {

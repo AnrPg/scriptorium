@@ -1,8 +1,8 @@
 import { B, api } from '../core/api.js';
 import { $, h } from '../core/dom.js';
-import { S, kindLabel } from '../core/state.js';
+import { S, kindLabel, profileHidden } from '../core/state.js';
 import { CAT_EL, KIND_EL, REVIEW_EL, infoTip } from '../core/strings.js';
-import { entityChip } from '../book/entities.js';
+import { entName, entityChip } from '../book/entities.js';
 import { dropInReadingOrder } from '../inspector/lineage.js';
 import { segText, toggleMulti } from '../inspector/multi.js';
 import { pageGroupsPanel, suggestionsPanel } from '../inspector/suggestions.js';
@@ -55,7 +55,7 @@ export function pagePanel(body) {
   body.append(pageGroupsPanel(pg));
   body.append(h('details', {}, h('summary', {}, 'Υπόμνημα χρωμάτων'), h('div', {}, legend())));
   body.append(h('h3', {}, 'Σειρά ανάγνωσης και δομή ', infoTip('pagetree')));
-  const tree = pageTree(pg.blocks.filter(x => !x.excluded));
+  const tree = pageTree(pg.blocks.filter(x => !x.excluded && !profileHidden(x)));
   if (tree.context.length) body.append(h('div', { class: 'tree-context small' }, h('span', { class: 'mut' }, 'Η σελίδα ξεκινά μέσα σε: '),
     tree.context.map((s2, i) => [i ? h('span', { class: 'mut' }, ' › ') : null, h('span', { class: 'chip lvl' }, levelTag(s2)), ' ', s2.title.slice(0, 40)])));
   const list = h('div', { class: 'seglist tree', 'aria-multiselectable': 'true' }); body.append(list);
@@ -108,9 +108,19 @@ export function pagePanel(body) {
       b.omitted ? h('span', { class: 'chip warn', title: 'Εκτός εξόδου (επιλογή σου) — μένει στο βιβλίο' }, 'εκτός εξόδου') : null,
       settled ? h('span', { class: 'ok-mark' }, '✓') : null));
   }
+  const byProfile = pg.blocks.filter(x => !x.excluded && profileHidden(x));
+  if (byProfile.length) {               // the output profile's exclusions: listed only here, without boxes on the page
+    body.append(h('details', {}, h('summary', {}, `Κρυμμένα από την έξοδο — προφίλ (${byProfile.length}) `, infoTip('profilehidden')),
+      byProfile.map(b => h('div', { class: 'list-item omitted', 'data-seg': b.id, onclick: () => selectBlock(b.id) },
+        h('span', { class: 'chip ent' }, entName(b.profile_omitted.type.replace(/^excursus:/, ''))),
+        b.profile_omitted.confirmed ? null : h('span', { class: 'chip warn', title: 'Αυτόματη εξαίρεση· επιβεβαίωσέ την στην καρτέλα «Έλεγχος»' }, 'προς επιβεβαίωση'),
+        h('span', { class: 'txt grow' }, (b.chosen && (b.chosen.text || b.chosen.latex)) ? segText(b) : `[${kindLabel(b)} — εικόνα]`),
+        h('button', { class: 'small ghost', title: 'Να μπει στην έξοδο παρά το προφίλ (μόνο αυτό το τμήμα)', onclick: (e) => { e.stopPropagation();
+          act(() => api(`${B(S.book.id)}/output`, { body: { blocks: [b.id], include: true } }), 'Ξανά στην έξοδο'); } }, 'Στην έξοδο')))));
+  }
   const furn = pg.blocks.filter(x => x.excluded);
   if (furn.length) {
-    const FURN_EL = { page_number: 'Αριθμός σελίδας', running_title: 'Τίτλος κεφαλίδας', running_text: 'Κεφαλίδα/υποσέλιδο' };
+    const FURN_EL = { background_fill: 'Φόντο τίτλου', empty_fragment: 'Κενό κομμάτι', no_text_ink: 'Μελάνι χωρίς κείμενο', duplicate_reading: 'Διπλή ανάγνωση', page_number: 'Αριθμός σελίδας', running_title: 'Τίτλος κεφαλίδας', running_text: 'Κεφαλίδα/υποσέλιδο' };
     body.append(h('details', {}, h('summary', {}, `Εξαιρέθηκαν ως στοιχεία σελίδας (${furn.length}) `, infoTip('furniture')),
       furn.map(b => h('div', { class: 'list-item excluded', 'data-seg': b.id, onmouseenter: () => hoverSeg(b.id, 'list'), onmouseleave: () => hoverSeg(null), onclick: () => selectBlock(b.id) },
         h('span', { class: 'txt grow' }, `${FURN_EL[b.excluded.as] || b.excluded.as}: ${(b.chosen && b.chosen.text) || '[εικόνα]'}`),

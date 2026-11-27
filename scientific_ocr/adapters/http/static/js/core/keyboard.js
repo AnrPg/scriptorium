@@ -1,5 +1,6 @@
 import { B } from '../core/api.js';
 import { stepReview } from '../inspector/reviewloop.js';
+import { boundActive, boundDecide, boundStep, boundToggleEnd, stopBoundLoop } from '../inspector/boundloop.js';
 import { doRedo, doUndo } from '../core/chrome.js';
 import { $, h, isTyping } from '../core/dom.js';
 import { navStep } from '../core/nav.js';
@@ -27,6 +28,12 @@ export const SHORTCUTS = [
   { keys: '?', label: 'Συντομεύσεις', group: 'always', match: K('?'), when: c => !c.typing && !c.inDialog, run: () => showHelp() },
   { keys: 'Alt+↑ / Alt+↓', label: 'Μετακίνηση του επιλεγμένου τμήματος στη σειρά ανάγνωσης (ή σύρσιμο στη λίστα)', group: 'page',
     match: K(['ArrowUp', 'ArrowDown'], { alt: true }), when: c => free(c) && S.sel && !S.multi.size, run: (e) => moveBySteps(S.sel, e.key === 'ArrowUp' ? -1 : 1) },
+  // the loop over the output profile's exclusions (inspector/boundloop.js) owns these keys while it is on
+  { keys: '↵', label: 'Όρια εξαίρεσης σωστά → επόμενη', group: 'bound', match: K('Enter'), when: (c, e) => free(c) && boundActive() && !S.multi.size && !enterOwnedBy(e), run: () => boundDecide(true) },
+  { keys: 'X', label: 'Όχι αυτό (μένει στην έξοδο) → επόμενη', group: 'bound', match: K('x'), when: c => free(c) && boundActive(), run: () => boundDecide(false) },
+  { keys: 'J / K', label: 'Επόμενη / προηγούμενη εξαίρεση', group: 'bound', match: K(['j', 'k']), when: c => free(c) && boundActive(), run: (e) => boundStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
+  { keys: 'T', label: 'Σελίδα αρχής / τέλους της εξαίρεσης', group: 'bound', match: K('t'), when: c => free(c) && boundActive(), run: () => boundToggleEnd() },
+  { keys: 'Esc', label: 'Έξοδος από τον έλεγχο ορίων', group: 'bound', match: K('Escape'), when: c => free(c) && boundActive() && !S.sel && !S.multi.size, run: () => stopBoundLoop() },
   { keys: '⌘↵', label: 'Αποθήκευση της διόρθωσής μου', group: 'segment', match: K('Enter', { mod: true }), when: c => inWs(c) && c.A.save, run: (e, c) => c.A.save() },
   { keys: 'Esc', label: 'Πίσω / καθαρισμός επιλογής / ακύρωση / απόρριψη πρόχειρου', group: 'segment', match: K('Escape'), when: inWs, run: (e, c) => escapeKey(e, c) },
   { keys: '1 / 2 / 3', label: 'Σάρωση / Αποτέλεσμα / Markdown σελίδας', group: 'page', match: K(['1', '2', '3']), when: c => free(c) && S.page?.info?.state, run: (e) => setView(VIEWS[+e.key - 1][0]) },
@@ -45,11 +52,11 @@ export const SHORTCUTS = [
   { keys: 'N', label: 'Σημείωση (μοντέλο)', group: 'segment', match: K('n'), when: c => free(c) && c.A.note, run: (e, c) => c.A.note() },
   { keys: 'L', label: 'Ετικέτα & δομή', group: 'segment', match: K('l'), when: c => free(c) && c.A.label, run: (e, c) => c.A.label() },
   { keys: 'J / K', label: 'Επόμενο / προηγούμενο προς έλεγχο (σε όλο το βιβλίο, χωρίς αλλαγή σελίδας με το χέρι)', group: 'page', match: K(['j', 'k']), when: free, run: (e) => queueStep(e.key.toLowerCase() === 'j' ? 1 : -1) },
-  { keys: '← / →', label: 'Προηγούμενη / επόμενη σελίδα', group: 'page', match: K(['ArrowLeft', 'ArrowRight']), when: free, run: (e) => pageStep(e.key === 'ArrowLeft' ? -1 : 1) },
+  { keys: '← / → · PgUp / PgDn', label: 'Προηγούμενη / επόμενη σελίδα (σελίδες στη σειρά, χωρίς τον έλεγχο)', group: 'page', match: K(['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown']), when: free, run: (e) => pageStep(['ArrowLeft', 'PageUp'].includes(e.key) ? -1 : 1) },
   { keys: 'R', label: 'Σχεδίαση περιοχής (Σάρωση)', group: 'page', match: K('r'), when: c => free(c) && toolOn('region'), run: () => toggleDraw() },
   { keys: 'B', label: 'Εμφάνιση πλαισίων (Σάρωση)', group: 'page', match: K('b'), when: c => free(c) && toolOn('boxes'), run: () => { S.showBoxes = !S.showBoxes; renderWorkspace(); } },
 ];
-export const SHORTCUT_GROUPS = [['segment', 'Επιλεγμένο τμήμα'], ['multi', 'Πολλαπλή επιλογή'], ['page', 'Σελίδα & προβολή'], ['always', 'Πάντα']];
+export const SHORTCUT_GROUPS = [['bound', 'Έλεγχος ορίων εξαιρέσεων'], ['segment', 'Επιλεγμένο τμήμα'], ['multi', 'Πολλαπλή επιλογή'], ['page', 'Σελίδα & προβολή'], ['always', 'Πάντα']];
 // a focused control (button, link, summary, field) handles its own Enter: the multi-selection shortcut must not steal it
 const enterOwnedBy = (e) => !!e?.target?.closest?.('button,a,[role=button],summary,input,select,textarea');
 export function keyContext(e) {

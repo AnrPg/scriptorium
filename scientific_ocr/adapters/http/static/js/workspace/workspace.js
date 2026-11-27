@@ -3,7 +3,7 @@ import { refresh } from '../core/chrome.js';
 import { loopLevel, setLoopLevel, stepReview } from '../inspector/reviewloop.js';
 import { $, clear, h, keepScroll, pctStyle } from '../core/dom.js';
 import { NAV, navSave } from '../core/nav.js';
-import { R, S, go, kindLabel, parseRoute } from '../core/state.js';
+import { R, S, go, kindLabel, outOfOutput, parseRoute, profileHidden } from '../core/state.js';
 import { REVIEW_EL, STATE_EL } from '../core/strings.js';
 import { finishLink } from '../inspector/captions.js';
 import { queueNeighbours, renderInspector } from '../inspector/inspector.js';
@@ -14,6 +14,7 @@ import { EMBED } from '../ui/page_overlay.js';
 import { hoverSeg } from '../workspace/hover.js';
 import { outputView } from '../workspace/output.js';
 import { updateSelectionPalette } from '../ui/selpalette.js';
+import { boundActive, boundBar, boundMembers } from '../inspector/boundloop.js';
 
 // ------------------------------------------------------------------ Page workspace
 // ------------------------------------------------------------------ page views and the tools each one supports
@@ -49,7 +50,7 @@ export async function setView(k) {
 // (review, hierarchy, entities, JSON). Not the same as removing a wrong box (inspector › layout).
 export const omitTargets = () => S.multi.size ? [...S.multi.keys()] : (S.sel ? [S.sel] : []);
 const blockById = (id) => (S.page?.blocks || []).find(b => b.id === id);
-export const omitState = () => { const ids = omitTargets(); return ids.length && ids.every(id => blockById(id)?.omitted); };
+export const omitState = () => { const ids = omitTargets(); return ids.length && ids.every(id => outOfOutput(blockById(id))); };
 export function toggleOmit() {
   const ids = omitTargets();
   if (!ids.length) return toast('Διάλεξε πρώτα τμήμα(τα)', { error: true });
@@ -195,7 +196,8 @@ export function buildWorkspace() {
       processed ? h('select', { class: 'view-select', 'aria-label': 'Προβολή', title: 'Προβολή: σάρωση, αποτέλεσμα ή Markdown', onchange: (e) => setView(e.target.value) },
         VIEWS.map(([k, l]) => h('option', { value: k, selected: S.leftView === k }, l))) : null,
       processed ? toolsMenu() : null),
-    processed ? h('div', { class: 'ws-row ws-actions' }, toolsFor(S.leftView).map(t => TOOLS[t]())) : null));
+    processed ? h('div', { class: 'ws-row ws-actions' }, toolsFor(S.leftView).map(t => TOOLS[t]())) : null,
+    boundActive() ? boundBar() : null));
   const wrap = h('div', { class: 'canvas-wrap', 'data-keep-scroll': 'canvas' }); left.append(wrap);
   if (processed && S.leftView !== 'scan') { outputView(wrap, b, n); renderInspector(right); return; }
   const dims = pg.dims || [600, 800];
@@ -206,7 +208,16 @@ export function buildWorkspace() {
   const pct = (bb) => pctStyle(bb, dims);
   const selBlk = pg.blocks.find(b => b.id === S.sel);
   const groupMates = new Set((S.book.groups || []).filter(g => selBlk && (selBlk.groups || []).includes(g.id)).flatMap(g => g.members));
+  const bound = boundMembers();                   // the profile exclusion being checked (inspector/boundloop.js)
   for (const blk of pg.blocks) {
+    const edge = bound.get(blk.id);
+    if (profileHidden(blk) && S.sel !== blk.id && !edge) continue;     // excluded by the output profile: no box
+    if (edge) {                                    // hatched, never confused with an accepted segment's box
+      canvas.append(h('div', { 'data-seg': blk.id, class: `ws-box bound bound-${edge}`, style: pct(blk.bbox),
+        title: `Εξαίρεση προφίλ — ${edge === 'start' ? 'ΑΡΧΗ' : edge === 'end' ? 'ΤΕΛΟΣ' : 'μέλος'}`, onclick: (e) => { e.stopPropagation(); selectBlock(blk.id); } },
+        edge !== 'mid' ? h('span', { class: 'bound-tag' }, edge === 'start' ? 'ΑΡΧΗ' : 'ΤΕΛΟΣ') : null));
+      continue;
+    }
     const sel = S.sel === blk.id;
     const box = h('div', { 'data-seg': blk.id, onmouseenter: () => hoverSeg(blk.id, 'page'), onmouseleave: () => hoverSeg(null),
       class: `ws-box ${blk.review}${blk.excluded ? ' excluded' : ''}${blk.omitted ? ' omitted' : ''}${sel ? ' sel' : ''}${S.multi.has(blk.id) ? ' multi' : ''}${groupMates.has(blk.id) ? ' mate' : ''}${(S.hl || new Set()).has(blk.id) ? ' hl-member' : ''}`, style: pct(blk.bbox), title: `${kindLabel(blk)} · ${REVIEW_EL[blk.review]}`,
@@ -214,6 +225,10 @@ export function buildWorkspace() {
       S.multi.has(blk.id) ? h('span', { class: 'ord-badge', title: 'Θέση στην επιλογή' }, String([...S.multi.keys()].indexOf(blk.id) + 1)) : null);
     if (sel && !S.drawing) for (const c of ['nw', 'ne', 'sw', 'se']) box.append(h('span', { class: 'handle ' + c, onmousedown: (e) => startResize(e, canvas, blk, c, dims) }));
     canvas.append(box);
+  }
+  if (S.bound?.scroll && bound.size) {            // bring the exclusion into view once per step
+    S.bound.scroll = false;
+    requestAnimationFrame(() => canvas.querySelector('.ws-box.bound')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
   }
   // caption ↔ figure connections (dashed lines), so groups are visible on the page itself
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
