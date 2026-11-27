@@ -5,13 +5,14 @@ import uuid
 
 from ...core import proposals
 from ...core import rules as book_rules
-from ...core.model import CAPTIONABLE_KINDS, EQUATION_KINDS
+from ...core.model import CAPTIONABLE_KINDS, EQUATION_KINDS, in_reader_output
 from ...core.model import block_id as block_id_of
 from ...pipeline import engine_json
 from ...pipeline.overlay import (
     COMMANDS,
     CommandError,
     decision_event,
+    decision_events,
     heading_level_events,
 )
 from .base import PROFILES, ServiceBase, ServiceError, _now  # noqa: F401
@@ -38,7 +39,7 @@ class ReviewService(ServiceBase):
                     decision_event(action, blk, params, by_id.get)          # validate the request first
                     evs = heading_level_events(c, {blk['id']: params['level']}, by_id.get)
                 else:
-                    evs = [decision_event(action, blk, params, by_id.get)]
+                    evs = decision_events(action, blk, params, by_id.get)      # with what it implies
         except CommandError as exc:
             raise ServiceError(str(exc)) from None
         out = b.events.append(*evs, actor=actor)
@@ -85,7 +86,7 @@ class ReviewService(ServiceBase):
                         skipped.append({'id': i, 'reason': 'a figure/table/equation cannot be a caption'})
                         continue                    # (the overlay would only mark it stale at the next rebuild)
                     try:
-                        evs.append(decision_event(action, by_id[i], params, by_id.get))
+                        evs += decision_events(action, by_id[i], params, by_id.get)
                     except CommandError as exc:
                         skipped.append({'id': i, 'reason': str(exc)})
         except CommandError as exc:
@@ -158,7 +159,7 @@ class ReviewService(ServiceBase):
             if g is None:
                 raise ServiceError('unknown group')
             ids += g['members']
-        ids = [i for i in dict.fromkeys(ids) if i in by_id and bool(by_id[i].get('omitted')) == include]
+        ids = [i for i in dict.fromkeys(ids) if i in by_id and (not in_reader_output(by_id[i])) == include]
         if not ids:
             return {'applied': 0}
         try:

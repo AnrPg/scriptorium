@@ -1273,6 +1273,11 @@ def test_page_local_actions_rebuild_only_their_page_as_a_preview(app):
     a.assign_entity('run', [other['id']], 'example')              # book-wide: banked, no page made dirty by it
     projection.build_page(out, 1, log=lambda m: None, runner=no_models)
     assert projection.dirty_pages(out) == []
+    # every view of review state sees the decision at once, not only the page: the queue and the page list
+    assert other['id'] not in {x['id'] for x in a.queue('run', 'all')}
+    seen = a.page('run', 1)['blocks']
+    p1 = next(p for p in a.book('run')['pages'] if p['page'] == 1)
+    assert p1['required'] == sum(b['review'] == 'required' for b in seen)
     assert build(out) == 0                                                               # full rebuild
     assert a.page('run', 1)['preview'] is None and not list((out / 'cache' / 'page_preview').glob('*.json'))
     c, _ = load(out)
@@ -1442,3 +1447,32 @@ def test_page_preview_does_not_wait_for_a_running_book_update_and_nothing_made_m
     pg = a.page('run', 1)
     assert pg['preview'] is not None                                               # caught up at the build's end
     assert next(b for b in pg['blocks'] if b['id'] == blk['id'])['chosen']['text'] == 'made during the book update'
+
+
+def test_http_handler_names_are_unique():
+    """Routes resolve their handler by NAME: a second method with the same name silently replaces the first
+    (observed: the output-profile route shadowed the page-profile one)."""
+    src = (PKG / 'adapters' / 'http' / 'server.py').read_text()
+    tree = ast.parse(src)
+    for cls in (n for n in tree.body if isinstance(n, ast.ClassDef)):
+        names = [f.name for f in cls.body if isinstance(f, ast.FunctionDef)]
+        dup = sorted({n for n in names if names.count(n) > 1})
+        assert not dup, f'{cls.name}: duplicate methods {dup}'
+
+
+def test_a_decision_asked_again_is_confirmed_as_it_is_with_one_approve(app):
+    """A decision taken under other conditions (here: an image kept before a text-only profile) is asked again;
+    «approve» records the same decision anew — single segment and bulk alike — and the item is settled."""
+    from scientific_ocr.adapters.event_store import EventStore
+    a, out = app
+    blk = next(b for b in load(out)[0]['blocks'] if b['kind'] == 'paragraph' and b['chosen'].get('type') == 'text')
+    a.decide('run', blk['id'], 'mark_image_only')
+    EventStore(out).append({'type': 'output_profile', 'profile': 'rag'}, actor='reviewer')     # later: text only
+    build(out)
+    seg = next(b for b in load(out)[0]['blocks'] if b['id'] == blk['id'])
+    assert seg['review'] == 'required' and 'TEXT_ONLY_LOSS' in seg['reasons']
+    ev = a.decide('run', blk['id'], 'approve')
+    assert ev['action'] == 'mark_image_only' and ev.get('reconfirm')
+    build(out)
+    seg = next(b for b in load(out)[0]['blocks'] if b['id'] == blk['id'])
+    assert seg['review'] != 'required' and seg['chosen']['type'] == 'image_only'

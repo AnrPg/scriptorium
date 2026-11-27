@@ -12,12 +12,14 @@ from .use_cases.excursus import ExcursusService
 from .use_cases.export import ExportService
 from .use_cases.hierarchy import HierarchyService
 from .use_cases.library import LibraryService
+from .use_cases.profile import ProfileService
 from .use_cases.review import ReviewService
+from .use_cases.spelling import SpellingService
 from .use_cases.structure import StructureService
 from .use_cases.triage import TriageService
 from .use_cases.views import ViewsService
 
 
 class App(LibraryService, ViewsService, ReviewService, TriageService, StructureService, HierarchyService, EntityService,
-          ExcursusService, ExportService):
-    """The application: library, read views, review, triage, structure, entity and export use cases."""
+          ExcursusService, ExportService, ProfileService, SpellingService):
+    """The application: library, read views, review, triage, structure, entity, export and output-profile use cases."""

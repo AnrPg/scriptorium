@@ -7,12 +7,13 @@ from pathlib import Path
 from ...adapters import pdf as pdfio
 from ...adapters.storage import Book, NotFound
 from ...core import lineage
-from ...core.model import REVIEW_PRIORITY
+from ...core.model import REVIEW_PRIORITY, chosen_text, in_reader_output
 from ...core.reasons import REASONS
-from ...pipeline import html_preview, markdown
+from ...pipeline import html_preview, markdown, rag, tables
 from ...pipeline.inline import inline_html
 from ...pipeline.triage import critical
 from .base import PROFILES, ServiceBase, ServiceError, _now  # noqa: F401
+from .. import exports
 from .export import _export_options
 
 
@@ -46,7 +47,8 @@ class ViewsService(ServiceBase):
         b = self._book(book_id)
         blk = self._block(b, block_id)
         st = b.events.state()
-        evs = [{**e, 'active': e['seq'] in st['active']} for e in st['history']
+        evs = [{**e, 'active': e['seq'] in st['active'], 'applies': e['seq'] in st['applies'],
+                'scope': e.get('scope') or st['scope_of'].get(e['seq'])} for e in st['history']
                if e.get('block_id') == block_id or (e.get('type') == 'region_add' and e['region']['id'] == blk.get('region_id'))]
         props = [{k: r.get(k) for k in ('ts', 'note', 'proposal', 'valid', 'errors', 'model')}
                  for r in b.proposals() if r.get('block_id') == block_id]
@@ -68,8 +70,7 @@ class ViewsService(ServiceBase):
         if level not in ('required', 'recommended', 'all') or order not in ('priority', 'book'):
             raise ServiceError("level: required|recommended|all; order: priority|book")
         levels = ('required', 'recommended') if level == 'all' else (level,)
-        c = self._book(book_id).canonical() or {}
-        items = [x for x in c.get('blocks', []) if x['review'] in levels and not x.get('omitted') and not x.get('excluded')]
+        items = [x for x in self._seen_list(self._book(book_id)) if x['review'] in levels and in_reader_output(x)]
         if order == 'book':
             items.sort(key=lambda x: (x['page'], x['reading_order']))
         else:
@@ -83,6 +84,8 @@ class ViewsService(ServiceBase):
         c = self._book(book_id).canonical()
         if not c:
             raise ServiceError('nothing processed yet')
+        if style == 'rag':                             # the RAG text of a book (application.exports.rag_settings)
+            return rag.markdown(c, exports.rag_settings(c))[:chars]
         return markdown.markdown(c, images=images, style=style, options=_export_options(options))[:chars]
 
     def page_output(self, book_id: str, page: int, style: str = 'tags') -> dict:
@@ -97,8 +100,10 @@ class ViewsService(ServiceBase):
         if pv:
             c = {**c, 'blocks': [x for x in c['blocks'] if x['page'] != page] + pv['blocks']}
         url = lambda rel: f'/api/books/{b.id}/{rel}' if rel else ''
-        return {'page': page, 'html': html_preview.page_html(c, page, url), 'preview': bool(pv),
-                'markdown': html_preview.page_markdown(c, page, style), 'release_status': c['release_status']}
+        rag_book = ((c.get('profile') or {}).get('settings') or {}).get('name') == 'rag'
+        md = rag.markdown(c, exports.rag_settings(c), {page}) if rag_book else html_preview.page_markdown(c, page, style)
+        return {'page': page, 'html': html_preview.page_html(c, page, url), 'preview': bool(pv), 'rag': rag_book,
+                'markdown': md, 'release_status': c['release_status']}
 
     def raw_fragment(self, book_id: str, raw_file: str, pointer: str | None) -> dict:
         """The exact piece of an engine's raw output a candidate came from (read-only)."""
@@ -139,11 +144,13 @@ def _block_view(x: dict) -> dict:
     keep = ('id', 'page', 'kind', 'original_kind', 'role', 'source', 'region_id', 'reading_order', 'review', 'reasons',
             'human_notes', 'heading_level', 'heading_level_source', 'section_path', 'flow', 'engine_label',
             'lineage', 'content_source', 'caption_role', 'caption_label', 'caption_role_source', 'references',
-            'merge_id', 'merged_from', 'groups', 'entities', 'excluded', 'omitted', 'text_norm', 'notation',
+            'merge_id', 'merged_from', 'groups', 'entities', 'excluded', 'omitted', 'profile_omitted', 'kept', 'text_norm', 'notation',
             'chosen', 'display_crop', 'rule_corrections', 'evidence', 'decisions', 'figure_text_candidates', 'relations',
-            'match', 'flow_override', 'continues_override', 'excursus')
+            'match', 'flow_override', 'continues_override', 'excursus', 'table_layout', 'table_list')
     v = {k: x.get(k) for k in keep if x.get(k) not in (None, [], {})}
     v['reasons'] = x['reasons']                        # always present in the view model, even when empty
+    if x['kind'] == 'table' and (items := tables.as_list(x, chosen_text(x))):
+        v['list_items'] = items                        # how the outputs read it (pipeline.tables): shown as such
     v['lineage_dag'] = lineage.dag(x)
     v['bbox'] = x['geometry']['bbox']
     v['crop'] = (x.get('source_crop') or {}).get('path')

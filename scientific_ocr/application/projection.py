@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import config
-from ..adapters import latex_render, specialized
+from ..adapters import latex_render, lexicon, quick_ocr, specialized
 from ..adapters import pdf as pdfio
 from ..adapters.event_store import EventError, EventStore
 from ..adapters.storage import (
@@ -28,10 +28,10 @@ from ..adapters.storage import (
     read_json,
     read_json_strict,
 )
-from ..core import joblog, lineage
+from ..core import joblog, lineage, profiles
 from ..core.decisions import event_pages, page_of
 from ..core.reasons import flag
-from ..core.model import block_id, content_hash, page_summary, release_status
+from ..core.model import block_id, content_hash, page_summary, profile_omitted, release_status
 from ..core.vocabulary import family_of
 from ..pipeline import (
     audit,
@@ -40,6 +40,7 @@ from ..pipeline import (
     enrich,
     entities,
     excursus,
+    fills,
     flow,
     furniture,
     groups,
@@ -48,12 +49,15 @@ from ..pipeline import (
     merge,
     notation,
     overlay,
+    profile,
     references,
     report,
     rule_suggest,
     sections,
+    spelling,
     structure,
     structure_review,
+    tables,
     triage,
 )
 from ..pipeline.context import PageContext
@@ -127,12 +131,20 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
     heading_prior = [tuple(o) for c in _calibration_books(out) for o in ((c.get('heading_review') or {}).get('outcomes') or [])]
     model = structure_review.model_levels(read_json(out / structure_review.FILE) or {},   # 2nd-pass votes = hints
                                           inp.human.get('dismissed') or ())
-    struct = _document_structure(blocks, pages, inp.human, dims, heading_prior, model)
+    lex = lexicon.lexicon((read_json(out / 'book.json', {}) or {}).get('ocr_lang'))     # loaded once per process
+    lap('inputs of the structure (calibration, model votes, lexicon)')
+    struct = _document_structure(blocks, pages, inp.human, dims, heading_prior, model, lex.known if lex else None)
     lap('document structure')
     struct.update(_classify_entities(out, blocks, struct, inp.human, dims))
     _final_flow(blocks, struct, inp.human)
+    tables.annotate(blocks)                               # term grids read as lists (hint; entities known)
+    struct['profile'] = _output_profile(blocks, struct, inp.human)
     lap('entities')
     annotations = _annotations(out, blocks, inp.human, result)
+    annotations['spelling'] = _spelling(out, blocks, inp.human)
+    if lex is not None and hasattr(lex, 'save'):
+        lex.save()                                        # words learned this build: no dictionary read next time
+    lap('spelling')
     lap('annotations')
     for info in pages:
         info.update(page_summary([b for b in blocks if b['page'] == info['page']]))
@@ -144,7 +156,7 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
                 'specialized': spec, 'allow_inference': allow_inference, 'latex_check': annotations.pop('latex_check')},
         'human': {'events': 'events.jsonl', 'last_seq': max((e['seq'] for e in inp.human['history']), default=0),
                   'decisions_applied': result['applied'], 'stale': result['stale'],
-                  'superseded': result['superseded'], 'merges': merges, 'rules': inp.human['rules'],
+                  'superseded': result['superseded'], 'resolved_stale': result.get('resolved_stale', []), 'merges': merges, 'rules': inp.human['rules'],
                   'regions': inp.human['regions'], 'hidden': inp.human['hidden'], 'profiles': inp.human['profiles']},
         'pages': pages, **struct, **annotations, 'notation': notation_summary, 'blocks': blocks,
     }
@@ -175,7 +187,7 @@ def change_facts(prev: dict, c: dict, history: list[dict]) -> list[str]:
     count = lambda x, pred: sum(1 for b in x.get('blocks', []) if pred(b))
     review = {name: [count(prev, pred), count(c, pred)] for name, pred in (
         ('required', lambda b: b['review'] == 'required'), ('recommended', lambda b: b['review'] == 'recommended'),
-        ('omitted', lambda b: b.get('omitted')), ('furniture', lambda b: b.get('excluded')))}
+        ('omitted', lambda b: b.get('omitted')), ('profile', lambda b: profile_omitted(b)), ('furniture', lambda b: b.get('excluded')))}
     old_toc = {s['id']: s['level'] for s in prev.get('sections', [])}
     levels = [{'title': s['title'][:60], 'before': old_toc.get(s['id']), 'after': s['level']}
               for s in c.get('sections', []) if old_toc.get(s['id']) != s['level']]
@@ -218,7 +230,7 @@ def change_report(prev: dict, c: dict, history: list[dict]) -> list[str]:
         lines.append('hierarchy: ' + '; '.join(lv[:10]) + (' …' if len(lv) > 10 else ''))
     count = lambda x, pred: sum(1 for b in x.get('blocks', []) if pred(b))
     for name, pred in (('required', lambda b: b['review'] == 'required'), ('recommended', lambda b: b['review'] == 'recommended'),
-                       ('omitted', lambda b: b.get('omitted')), ('furniture', lambda b: b.get('excluded'))):
+                       ('omitted', lambda b: b.get('omitted')), ('profile', lambda b: profile_omitted(b)), ('furniture', lambda b: b.get('excluded'))):
         a, b = count(prev, pred), count(c, pred)
         if a != b:
             lines.append(f'{name}: {a} → {b}')
@@ -276,10 +288,12 @@ def _compose_pages(out: Path, inp: _Inputs, progress):
     ex, src = inp.extraction, inp.src
     versions = {e: next((r.get('version') for r in d.values()), None) for e, d in ex.items()}
     blocks, pages, contexts = [], [], {}
+    langs = (read_json(out / 'book.json', {}) or {}).get('ocr_lang') or 'ell,eng'
     for i, page in enumerate(src['pages_processed']):
         progress('compose', i, len(src['pages_processed']), page=page)
         ctx = PageContext.load(out, inp.pdf, src['sha256'], page, src['page_dims_pt'][str(page)], ex, versions,
                                inp.human['rules'], imaging=pdfio)
+        ctx.quick_ocr, ctx.ocr_lang = quick_ocr.read, langs
         contexts[page] = ctx
         seq, info = assemble(ctx, inp.human['regions'], inp.regions_index, set(inp.human['hidden']))
         captions.associate(seq, ctx.docling, ctx.unit)
@@ -325,6 +339,7 @@ def _apply_decisions(blocks, pages, contexts, inp: _Inputs):
     for k in ('applied', 'stale', 'ignored', 'resolved_by_overlap'):
         result[k] = result[k] + later[k]
     result['superseded'] = result['ignored']                  # replaced by a later decision, or by your later action
+    _relocate_stale(blocks, result, decisions, sha)
     order: dict[int, int] = {}
     for b in blocks:                                  # reading order after possible reordering decisions
         order[b['page']] = order.get(b['page'], 0) + 1
@@ -332,7 +347,58 @@ def _apply_decisions(blocks, pages, contexts, inp: _Inputs):
     return result, merges
 
 
+def _legacy_ids(blocks, sha) -> dict[str, dict]:
+    """Old id of a Docling-only segment (pipeline.page._docling_only) -> the segment that now holds that Docling
+    element (e.g. after Marker's own reading of the same list item became available). Ids follow content, so
+    when an engine's reading changes a segment's identity, decisions recorded on the old id can be found again."""
+    out = {}
+    for b in blocks:
+        for c in b['candidates']:
+            if c.get('engine') == 'docling' and c.get('ref') and c.get('bbox'):
+                out.setdefault(block_id(sha, b['page'], c['ref'] + json.dumps([round(v) for v in c['bbox']])), b)
+    return out
+
+
+def _relocate_stale(blocks, result, decisions, sha) -> None:
+    """A decision whose segment no longer exists used to flag nothing (there was no segment to flag), so the
+    reviewer's correction silently dropped out of the output while the book said «sent back to review». Now:
+    the segment now holding the same Docling element is found (_legacy_ids). If its text already IS the reviewer's
+    value, the decision is satisfied (resolved, not stale); otherwise that segment is flagged DECISION_STALE —
+    unless the reviewer has decided on it since (a later content decision there supersedes the old one). Nothing
+    is applied automatically: the machine reading changed, so the old decision is never replayed onto it."""
+    from ..core.decisions import CONTENT_ACTIONS
+    gone = [r for r in result['stale'] if r['why'].startswith('block no longer exists')]
+    if not gone:
+        return
+    legacy = _legacy_ids(blocks, sha)
+    by_seq = {d['seq']: d for d in decisions}
+    later = {}
+    for d in decisions:
+        if d['action'] in CONTENT_ACTIONS:
+            later[d['block_id']] = max(later.get(d['block_id'], 0), d['seq'])
+    norm = lambda t: ' '.join((t or '').replace('\u2022', ' ').split()).lstrip('- ').strip()
+    keep, relocated = [], []
+    for r in result['stale']:
+        b = legacy.get(r['block_id']) if r in gone else None
+        if b is None:
+            keep.append(r)
+            continue
+        d = by_seq.get(r['seq'], {})
+        rec = {**r, 'now_in': b['id']}
+        if d.get('action') in ('replace_text',) and norm(d.get('value')) and norm(d.get('value')) == norm(b['chosen'].get('text')):
+            relocated.append({**rec, 'why': 'the segment that now holds it already has the reviewer\'s text'})
+        elif later.get(b['id'], 0) > r['seq']:
+            result['ignored'].append({**rec, 'why': 'superseded by a later decision on the segment that now holds it'})
+        else:
+            keep.append({**rec, 'why': 'its segment changed identity (new engine reading); review it where it is now'})
+            flag(b, 'DECISION_STALE', seq=r['seq'], why='a decision on this content was recorded before the machine reading '
+                 'changed', value=d.get('value'))
+    result['stale'] = keep
+    result['resolved_stale'] = relocated
+
+
 RELATIONAL = {'associate_caption', 'detach_caption', 'set_caption_role', 'move_after_block', 'set_output', 'set_flow',
+              'set_table_layout',
               'set_continuation', 'associate_group_caption'}
 
 
@@ -351,13 +417,15 @@ def removed_by_reviewer(human: dict, sha: str) -> set[str]:
     return out
 
 
-def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None) -> dict:
+def _document_structure(blocks, pages, human, dims, heading_prior=(), model=None, known=None) -> dict:
     """Book-wide structure: needs every page and every decision (see pipeline.document for the safety contract)."""
     dismissed = set(human['dismissed'])
     toc_ids = frozenset(m for g in human['groups'] if g.get('type') == 'toc' for m in g.get('members', [])) | \
         frozenset(m for e in human['assigned'].values() if e.get('entity_type') == 'toc' for m in e.get('members', []))
     inserts = _reviewer_inserts(human)
     fixes = furniture.classify(blocks, dims, dismissed)
+    fixes += fills.classify(blocks, dismissed, {p['page']: (p.get('coverage') or {}).get('unit', 1.0) for p in pages})
+    fixes += fills.fragments(blocks, dismissed, dims, known)
     fixes += document.captions_across_pages(blocks, dismissed)
     fixes += captions.continuations(blocks, {p['page']: p.get('typography_ref') for p in pages},
                                     {p['page']: (p.get('coverage') or {}).get('unit', 1.0) for p in pages}, dismissed)
@@ -430,6 +498,24 @@ def _classify_entities(out: Path, blocks, struct, human, dims) -> dict:
     return {'entities': res['entities'], 'entity_outcomes': res['outcomes'], 'entity_stats': res['stats']}
 
 
+def book_profile(human: dict) -> dict:
+    """The book's effective output profile (core.profiles): the last output_profile event in force, else the default."""
+    ev = human.get('output_profile') or {}
+    return profiles.effective(ev.get('profile'), ev.get('overrides'))
+
+
+def _output_profile(blocks, struct, human) -> dict:
+    """The output profile (pipeline.profile) after entities and flow, before triage: what it excludes is no longer
+    reviewed, and what a text-only output would lose is."""
+    return profile.apply(blocks, struct.get('entities') or [], struct.get('excursus') or [], book_profile(human))
+
+
+def _spelling(out: Path, blocks, human) -> dict:
+    """Spelling proposals (pipeline.spelling) with the dictionaries of the book's OCR languages, if installed."""
+    langs = (read_json(out / 'book.json', {}) or {}).get('ocr_lang')
+    return spelling.check(blocks, lexicon.lexicon(langs), frozenset(human['dismissed']))
+
+
 def _annotations(out: Path, blocks, human, result) -> dict:
     overrides = {f'{d["block_id"]}#{d.get("n")}': d.get('target') for d in human['decisions']
                  if d['action'] == 'link_reference' and d['seq'] in result['applied']}
@@ -447,7 +533,8 @@ def _publish(out: Path, canonical: dict, inp: _Inputs, spec, stale: int, log: Lo
     canonical['findings'] = audit.pre_render(canonical, out)
     md = markdown.markdown(canonical)                 # the reader-facing document (also checked by the audit)
     canonical['findings'] += audit.post_render(canonical, md, out)
-    canonical['release_status'] = release_status(blocks, canonical['findings'])
+    canonical['release_status'] = release_status(blocks, canonical['findings'],
+                                                 (canonical.get('profile') or {}).get('pending', 0))
     canonical['assets'] = sorted({b['source_crop']['path'] for b in blocks if b.get('source_crop')})
     audit.validate_schema(canonical)
     atomic_write(out / 'chapter.md', md)
@@ -492,10 +579,10 @@ def _calibration_books(out: Path) -> list[dict]:
 BOOK_WIDE_FIELDS = ('role', 'excluded', 'heading_level', 'heading_level_source', 'heading_style', 'heading_hints',
                     'heading_evidence', 'heading_shift', 'section_path', 'running_head', 'engine_rank',
                     'style_of_numbered', 'human_style', 'model', 'typography_rel', 'flow', 'entities', 'references',
-                    'box_head', 'groups', 'review_triage', 'excursus')
+                    'box_head', 'groups', 'review_triage', 'excursus', 'profile_omitted')
 BOOK_WIDE_REASONS = ('EXCLUDED_AS_PAGE_FURNITURE', 'ENGINE_FURNITURE_IN_BODY', 'CAPTION_CONTINUATION',
                      'CAPTION_ACROSS_PAGES', 'HEADING_NUMBER_DUPLICATE', 'HEADING_NUMBER_OUT_OF_ORDER',
-                     'REFERENCE_AMBIGUOUS', 'TRIAGE_DOWNGRADED', 'ACCEPTED_BY_SAMPLING')
+                     'REFERENCE_AMBIGUOUS', 'TRIAGE_DOWNGRADED', 'ACCEPTED_BY_SAMPLING', 'PROFILE_BOUNDARY_CHECK')
 
 
 def preview_path(out: Path, page: int) -> Path:
@@ -563,6 +650,8 @@ def _build_page(out: Path, page: int, log: Log, runner: SpecializedRunner) -> in
     captions.finalize(blocks)
     old = {b['id']: b for b in prev.get('blocks', []) if b['page'] == page}
     merged = [_preview_block(b, old.get(b['id'])) for b in blocks]
+    tables.annotate(merged)                               # entities kept from the full build
+    profile.review_policy([b for b in merged if b.get('preview_changed') or b.get('preview_new')], book_profile(inp.human))
     latex_check.annotate(merged, latex_render.check)
     info = {**pages[0], **page_summary(merged)}
     last = max((e['seq'] for e in inp.human['history']), default=0)

@@ -37,6 +37,10 @@ def main(argv=None) -> int:
         p.add_argument('--book', type=Path, required=True)
         p.add_argument('--samples', type=int, default=3)
         p.add_argument('--reproject', action='store_true', help='rebuild the projection first (after an accepted change)')
+    p = sub.add_parser('rag-context', help='optional: one situating sentence per RAG chunk, by the local model')
+    p.add_argument('--book', type=Path, required=True)
+    p.add_argument('--limit', type=int, default=None)
+    sub.add_parser('install-dictionaries', help='download the pinned spelling dictionaries once (offline afterwards)')
     p = sub.add_parser('doctor')
     p.add_argument('pdf', type=Path)
     p.add_argument('--page', type=int, default=3)
@@ -81,6 +85,13 @@ def main(argv=None) -> int:
     if a.cmd == 'propose-entities':
         from .application import entity_llm
         return entity_llm.run(a.book.resolve(), a.samples)
+    if a.cmd == 'rag-context':
+        from .application import rag_context
+        from .application.processing import file_logger
+        return rag_context.run(a.book.resolve(), log=file_logger(a.book.resolve()), limit=a.limit)
+    if a.cmd == 'install-dictionaries':
+        from .adapters import lexicon
+        return 0 if all(v == 'OK' for v in lexicon.install().values()) else 1
     if a.cmd == 'doctor':
         from . import readiness
         rep = readiness.run(a.pdf.expanduser().resolve(), a.page, a.work.resolve(), a.skip_layout)

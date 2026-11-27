@@ -463,6 +463,48 @@ class Handler(BaseHTTPRequestHandler):
     def entities(self, bid):
         self._json(200, self.app.entities(bid))
 
+    @route('GET', r'/api/books/([\w.-]+)/spelling')
+    def spelling_get(self, bid):
+        self._json(200, self.app.spelling(bid, self.query.get('strength', 'all')))
+
+    @route('POST', r'/api/books/([\w.-]+)/spelling/apply')
+    def spelling_apply(self, bid):
+        self._json(200, self.app.apply_spelling(bid, self._body().get('choices') or [], self._actor()))
+
+    @route('POST', r'/api/books/([\w.-]+)/spelling/dismiss')
+    def spelling_dismiss(self, bid):
+        self._json(200, self.app.dismiss_spelling(bid, self._body().get('keys') or [], self._actor()))
+
+    @route('GET', r'/api/books/([\w.-]+)/profile')
+    def output_profile_get(self, bid):
+        self._json(200, self.app.output_profile(bid))
+
+    @route('POST', r'/api/books/([\w.-]+)/profile')
+    def output_profile_set(self, bid):
+        p = self._body()
+        self._json(200, self.app.set_output_profile(bid, p.get('profile'), p.get('overrides'), self._actor(), p.get('carry')))
+
+    @route('POST', r'/api/books/([\w.-]+)/profile/copy')
+    def output_profile_copy(self, bid):
+        p = self._body()
+        self._json(200, self.app.copy_decisions(bid, p.get('from'), self._actor()))
+
+    @route('POST', r'/api/books/([\w.-]+)/profile/confirm')
+    def output_profile_confirm(self, bid):
+        self._json(200, self.app.confirm_exclusions(bid, self._body().get('keys'), self._actor()))
+
+    @route('POST', r'/api/books/([\w.-]+)/profile/exclude')
+    def output_profile_exclude(self, bid):
+        self._json(200, self.app.exclude_suggested(bid, self._body().get('keys') or [], self._actor()))
+
+    @route('POST', r'/api/books/([\w.-]+)/profile/context')
+    def output_profile_context(self, bid):
+        self._json(200, self.app.start_rag_context(bid))
+
+    @route('POST', r'/api/books/([\w.-]+)/profile/keep')
+    def output_profile_keep(self, bid):
+        self._json(200, self.app.keep_in_output(bid, self._body().get('key'), self._actor()))
+
     @route('POST', r'/api/books/([\w.-]+)/entities/confirm')
     def entities_confirm(self, bid):
         p = self._body()

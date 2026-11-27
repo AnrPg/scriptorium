@@ -25,6 +25,7 @@ from . import engine_json
 from .checks import Evidence, layout_splits, run_text_checks
 from .context import PageContext
 from .coverage import uncovered_ink_regions
+from .fills import is_text
 
 
 def assemble(ctx: PageContext, regions: list[dict], region_index: dict, hidden: set) -> tuple[list, dict]:
@@ -72,7 +73,63 @@ def assemble(ctx: PageContext, regions: list[dict], region_index: dict, hidden: 
         if _typography_relevant(b):
             ctx.typography(b)
     info['typography_ref'] = ctx.body_typography(seq)
+    _table_ink(ctx, seq)
     return seq, info
+
+
+TABLE_INK_SCALE = 4.0      # raster scale (pixels per page unit) of the table line measurement
+
+
+def _table_ink(ctx: PageContext, seq) -> None:
+    """The printed lines of every table (pipeline.tables.ink_lines): geometric evidence for term lists whose long
+    items wrap onto an indented line. Cached by content; the page is rasterised only when a table is not cached."""
+    import hashlib
+
+    from . import tables
+    todo = [b for b in seq if b['kind'] == 'table']
+    if not todo or ctx.imaging is None:
+        return
+    cache = ctx.out / 'cache' / 'coverage'
+    page_img = None
+    for b in todo:
+        bbox = [round(v, 1) for v in b['geometry']['bbox']]
+        key = hashlib.sha1(json.dumps([ctx.doc_sha, ctx.page, bbox, TABLE_INK_SCALE, tables.INK_VERSION]).encode()).hexdigest()[:20]
+        f = cache / f'table_{key}.json'
+        try:
+            b['ink_lines'] = json.loads(f.read_text())
+            continue
+        except (OSError, ValueError):
+            pass
+        try:
+            if page_img is None:
+                raster = getattr(ctx.imaging, 'ink_raster', None) or ctx.imaging.gray_raster
+                page_img = raster(ctx.pdf, ctx.page, TABLE_INK_SCALE)[0]
+            b['ink_lines'] = _measure_table(page_img, bbox)
+        except (OSError, ValueError, RuntimeError):
+            b['ink_lines'] = []                       # no evidence: nothing is joined
+            continue
+        cache.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_name(f.name + f'.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp')
+        tmp.write_text(json.dumps(b['ink_lines']))
+        tmp.replace(f)
+
+
+def _measure_table(page_img, bbox, pad: float = 2.0) -> list[dict]:
+    import numpy as np
+    from PIL import ImageFilter
+
+    from . import tables
+    S = TABLE_INK_SCALE
+    X0, Y0 = max(0, int((bbox[0] - pad) * S)), max(0, int((bbox[1] - pad) * S))
+    X1, Y1 = min(page_img.width, int((bbox[2] + pad) * S)), min(page_img.height, int((bbox[3] + pad) * S))
+    if X1 - X0 < 4 or Y1 - Y0 < 4:
+        return []
+    crop = page_img.crop((X0, Y0, X1, Y1))
+    # local background (median over ~31 px), computed on an 8x smaller copy: a full-size median filter costs seconds
+    small = crop.resize((max(1, crop.width // 8), max(1, crop.height // 8)))
+    bg = np.asarray(small.filter(ImageFilter.MedianFilter(5)).resize(crop.size), dtype=np.float32)
+    dark = np.asarray(crop, dtype=np.float32) < bg * 0.72      # local background: tinted boxes, uneven light
+    return tables.ink_lines(dark, X0 / S, Y0 / S, 1 / S)
 
 
 TYPO_MAX_CHARS = 220
@@ -93,8 +150,10 @@ def _coverage(ctx: PageContext):
 
     from . import coverage
     boxes = [[round(v, 1) for v in b['bbox']] for b in ctx.marker + ctx.docling]
+    ocr_on = ctx.quick_ocr is not None
     key = hashlib.sha1(json.dumps([ctx.doc_sha, ctx.page, boxes, round(ctx.unit, 4), coverage.CELL_UNITS,
-                                   coverage.MIN_AREA_UNITS, coverage.BOX_PAD_UNITS, 'ink-v1']).encode()).hexdigest()[:20]
+                                   coverage.MIN_AREA_UNITS, coverage.BOX_PAD_UNITS, 'ink-v2',
+                                   ['ocr-v1', ctx.ocr_lang] if ocr_on else None]).encode()).hexdigest()[:20]
     f = ctx.out / 'cache' / 'coverage' / f'{key}.json'
     try:
         hit = json.loads(f.read_text())
@@ -102,6 +161,16 @@ def _coverage(ctx: PageContext):
     except (OSError, ValueError, KeyError):
         pass
     regs, info = uncovered_ink_regions(ctx.imaging, ctx.pdf, ctx.page, boxes, ctx.unit)
+    if ocr_on:                                         # what the uncovered ink SAYS (evidence: is it text at all?)
+        for i, r in enumerate(regs):
+            png = f.parent / 'ocr' / f'{key}_{i}.png'
+            try:
+                ctx.imaging.crop(ctx.pdf, ctx.page, r['bbox'], png, pad=0)     # exactly the region: no neighbours
+                r['ink_text'] = ctx.quick_ocr(png, ctx.ocr_lang)
+            except (OSError, ValueError):
+                r['ink_text'] = None
+            finally:
+                png.unlink(missing_ok=True)
     f.parent.mkdir(parents=True, exist_ok=True)
     tmp = f.with_name(f.name + f'.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp')
     tmp.write_text(json.dumps({'regions': regs, 'info': info}))
@@ -231,7 +300,11 @@ def _docling_only(ctx: PageContext):
 def _uncovered(ctx, reg) -> dict:
     bid = block_id(ctx.doc_sha, ctx.page, 'uncovered' + json.dumps([round(v) for v in reg['bbox']]))
     blk = new_block(bid, ctx.page, 'excerpt', reg['bbox'], source='coverage', original_kind='unknown',
-                    ink_cells=reg['ink_cells'])
+                    ink_cells=reg['ink_cells'], ink_band={k: reg[k] for k in ('band', 'band_y') if k in reg},
+                    ink_text=reg.get('ink_text'))
+    if is_text(reg.get('ink_text')):                   # the ink reads as words: offered as a candidate reading
+        blk['candidates'].append({'engine': 'tesseract', 'ref': 'tesseract:uncovered-region', 'text': reg['ink_text'],
+                                  'bbox': reg['bbox']})
     blk['source_crop'] = ctx.crop(bid, reg['bbox'], pad=16)
     blk['machine_hash'] = content_hash(blk['chosen'])
     flag(blk, 'UNCOVERED_INK_REGION')
@@ -309,8 +382,9 @@ def _region_texts(ctx: PageContext, ocr: dict) -> dict | None:
         texts, latex = [], []
         if rec.get('status') == 'OK':
             raw = json.loads((ctx.out / rec['raw_json']).read_text())
-            blocks = engine_json.marker_blocks(raw, 1) if eng == 'marker' else \
-                engine_json.docling_blocks(raw, 1, ocr['height'])
+            pno = rec.get('page', 1)                      # regions read together: one page each
+            blocks = engine_json.marker_blocks(raw, pno) if eng == 'marker' else \
+                engine_json.docling_blocks(raw, pno, ocr['height'])
             for b in sorted(blocks, key=lambda b: b['order']):
                 if b['text'] and b['kind'] != 'figure':
                     texts.append(b['text'])

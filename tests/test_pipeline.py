@@ -1629,3 +1629,53 @@ def test_childless_marker_list_is_kept_and_split_into_items_with_docling_boxes()
     assert all(x['extra']['bbox_from'] == 'docling' for x in items)
     kept = ej.split_list_groups([m], dl[:2])                     # boxes cannot account for every item
     assert kept == [m]
+
+
+def test_decision_on_a_segment_that_changed_identity_is_found_where_its_content_is_now():
+    """A Docling-only segment absorbed into another (e.g. Marker's reading of the same list item) gets a new id.
+    The old decision is found again through the Docling element: satisfied when the text there already is the
+    reviewer's, superseded by a later decision there, otherwise that segment is flagged for review — never replayed."""
+    import json
+    from scientific_ocr.application.projection import _relocate_stale
+    from scientific_ocr.core.model import block_id, new_block
+    sha = 'sha'
+
+    def seg(i, text, dref, dbox):
+        b = new_block(f'p1_new{i}', 1, 'paragraph', dbox, source='marker',
+                      candidates=[{'engine': 'docling', 'ref': dref, 'bbox': dbox, 'text': text}])
+        b['chosen'] = {'type': 'text', 'text': text, 'provenance': 'm'}
+        return b
+    blocks = [seg(0, '- Alpha item', 'docling:#/texts/1', [10, 10, 200, 20]),
+              seg(1, '- Bravo item', 'docling:#/texts/2', [10, 30, 200, 40]),
+              seg(2, '- Charlie itme', 'docling:#/texts/3', [10, 50, 200, 60])]
+    old = lambda b: block_id(sha, 1, b['candidates'][0]['ref'] + json.dumps([round(v) for v in b['candidates'][0]['bbox']]))
+    decisions = [{'seq': 1, 'block_id': old(blocks[0]), 'action': 'replace_text', 'value': 'Alpha item'},
+                 {'seq': 2, 'block_id': old(blocks[1]), 'action': 'replace_text', 'value': 'Bravo fixed'},
+                 {'seq': 3, 'block_id': old(blocks[2]), 'action': 'replace_text', 'value': 'Charlie item'},
+                 {'seq': 4, 'block_id': 'p1_new1', 'action': 'approve'},
+                 {'seq': 5, 'block_id': 'p1_nothing', 'action': 'replace_text', 'value': 'x'}]
+    why = 'block no longer exists (layout or OCR changed)'
+    result = {'stale': [{'seq': s, 'block_id': decisions[s - 1]['block_id'], 'action': 'replace_text', 'why': why} for s in (1, 2, 3, 5)],
+              'ignored': []}
+    _relocate_stale(blocks, result, decisions, sha)
+    assert [r['seq'] for r in result['resolved_stale']] == [1]                      # text already the reviewer's
+    assert [(r['seq'], r['now_in']) for r in result['ignored']] == [(2, 'p1_new1')]  # approved since
+    assert [(r['seq'], r.get('now_in')) for r in result['stale']] == [(3, 'p1_new2'), (5, None)]
+    assert 'DECISION_STALE' in blocks[2]['reasons'] and blocks[2]['review'] == 'required'
+    assert blocks[2]['chosen']['text'] == '- Charlie itme'                          # never replayed onto new reading
+
+
+def test_audit_bounds_nested_and_attributed_figures_and_asides():
+    """A group of figures nests <figure>s and an excursus opens <aside data-…>: neither is an unbalanced boundary,
+    and a caption inside the group is not 'outside its figure'. A caption really outside still is."""
+    from pathlib import Path
+    from scientific_ocr.pipeline import audit
+    cap_text = 'ΕΙΚΟΝΑ 1-4 Η ζωή είναι μια διεργασία που αυτο-καταλύεται μέσω του DNA και των πρωτεϊνών του κυττάρου.'
+    cap = {'id': 'c1', 'kind': 'caption', 'page': 1, 'relations': {'caption_for': 'f1'}, 'chosen': {'type': 'text', 'text': cap_text},
+           'reasons': [], 'review': 'not_needed'}
+    c = {'blocks': [cap], 'findings': []}
+    inside = ('<figure data-group="g">\n<figure>\n![a](x.png)\n</figure>\n<figure>\n![b](y.png)\n</figure>\n'
+              f'<figcaption>{cap_text}</figcaption>\n</figure>\n<aside data-excursus="history" title="t">\ntext\n</aside>\n')
+    codes = lambda md: {f['type'] for f in audit.post_render(c, md, Path('.'), images=False)}
+    assert not codes(inside) & {'CAPTION_BLEED', 'INTEGRITY_UNBALANCED_BOUNDARY'}
+    assert 'CAPTION_BLEED' in codes(f'<figure>\n![a](x.png)\n</figure>\n\n{cap_text}\n')
