@@ -9,6 +9,7 @@ from ...adapters.storage import Book, NotFound
 from ...core import lineage
 from ...core.model import REVIEW_PRIORITY, chosen_text, in_reader_output
 from ...core.reasons import REASONS
+from ...core.text import symbol_plain
 from ...pipeline import html_preview, markdown, rag, tables
 from ...pipeline.inline import inline_html
 from ...pipeline.triage import critical
@@ -148,11 +149,14 @@ def _block_view(x: dict) -> dict:
             'lineage', 'content_source', 'caption_role', 'caption_label', 'caption_role_source', 'references',
             'merge_id', 'merged_from', 'groups', 'entities', 'excluded', 'omitted', 'profile_omitted', 'kept', 'text_norm', 'notation',
             'chosen', 'display_crop', 'rule_corrections', 'evidence', 'decisions', 'figure_text_candidates', 'relations',
-            'match', 'flow_override', 'continues_override', 'excursus', 'table_layout', 'table_list')
+            'match', 'flow_override', 'continues_override', 'excursus', 'table_layout', 'table_key', 'table_list')
     v = {k: x.get(k) for k in keep if x.get(k) not in (None, [], {})}
     v['reasons'] = x['reasons']                        # always present in the view model, even when empty
-    if x['kind'] == 'table' and (items := tables.as_list(x, chosen_text(x))):
-        v['list_items'] = items                        # how the outputs read it (pipeline.tables): shown as such
+    if x['kind'] == 'table' and (lst := tables.as_list(x, chosen_text(x))):
+        v['list_items'] = lst                          # how the outputs read it (pipeline.tables): shown as such
+    if x['kind'] == 'table' and (src := tables.source_text(x)) and (ax := tables.axes(src[0])):
+        # what the key column / row is picked from (plain text: button labels)
+        v['table_axes'] = {k: [symbol_plain(t) or str(i + 1) for i, t in enumerate(ls)] for k, ls in ax.items()}
     v['lineage_dag'] = lineage.dag(x)
     v['bbox'] = x['geometry']['bbox']
     v['crop'] = (x.get('source_crop') or {}).get('path')

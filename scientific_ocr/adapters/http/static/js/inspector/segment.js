@@ -38,10 +38,14 @@ export function contentView(blk, value, latex, { codeOpen = null } = {}) {   // 
     h('pre', { class: 'preview-pre', style: { maxHeight: '260px' } }, markedText(value, marks)));
   // shown as the outputs will read it: a table read as a list (pipeline/tables.py) is a list here too; the code
   // (the engine's grid) stays below. Only for the version in force: other versions are compared as they are
-  const items = blk.list_items && value === currentValue(blk) ? blk.list_items : null;
-  const shown = items ? h('div', {},
-    h('div', { class: 'small mut' }, `Όπως μπαίνει στην έξοδο: ${blk.table_layout === 'rows' || (!blk.table_layout && blk.table_list?.order === 'rows') ? 'λίστα ανά γραμμές' : 'λίστα ανά στήλες'} (${items.length})`),
-    h('ul', { class: 'content-list' }, items.map(t => h('li', {}, textMathBox(t)))))
+  const lst = blk.list_items && value === currentValue(blk) ? blk.list_items : null;
+  const shown = lst ? h('div', {},
+    h('div', { class: 'small mut' }, `Όπως μπαίνει στην έξοδο: ${listName(blk)} (${lst.items.length})`),
+    lst.title ? h('div', { class: 'content-list-label' }, textMathBox(lst.title)) : null,
+    lst.label ? h('div', { class: 'content-list-label' }, textMathBox(lst.label + ':')) : null,
+    h('ul', { class: 'content-list' }, lst.items.map(t => typeof t === 'string' ? h('li', {}, textMathBox(t))
+      : h('li', {}, textMathBox(t.key + ':'), t.fields.length ? h('ul', { class: 'content-kv' }, t.fields.map(([k, v]) =>
+        h('li', {}, h('span', { class: 'mut' }, textMathBox(k + ':')), ' ', textMathBox(v)))) : null))))
     : latex ? mathBox(value) : textMathBox(value);
   // the output profile dropped the page's styling before review (pipeline/profile.py text_policy): say so
   const styled = blk.chosen?.profile_source && value === currentValue(blk)
@@ -226,10 +230,18 @@ export function segmentPanel(body, blk) {
 // Properties of the segment in the BOOK (not its content): one aligned row each — label · value (one line) · one
 // action; a row's editor opens UNDER the row (one at a time). Output is a quiet switch at the end.
 const LAYOUT_EL = { cols: 'λίστα ανά στήλες', rows: 'λίστα ανά γραμμές', table: 'πίνακας' };
+// a table read as a list (pipeline/tables.py): flat (one item per cell) or with levels, named by the key column / row
+export function listName(blk) {
+  const order = blk.table_layout === 'rows' || blk.table_layout === 'cols' ? blk.table_layout : blk.table_list?.order;
+  const key = blk.table_layout && blk.table_key != null ? blk.table_key : null;
+  if (key == null) return `${LAYOUT_EL[order] || 'λίστα'}${blk.table_layout ? ' (ένα στοιχείο ανά κελί)' : ''}`;
+  const lab = blk.table_axes?.[order]?.[key] ?? String(key + 1);
+  return `${LAYOUT_EL[order]} · κύρι${order === 'rows' ? 'α στήλη' : 'α γραμμή'} «${lab}»`;
+}
 // one request: the server records what the choice implies (an image adopts the engine reading; the reading is
 // confirmed) as one undoable step — the same from here, from the properties row and from a multi-selection
-function setTableLayout(blk, book, layout, msg) {
-  return act(() => api(`${B(book.id)}/decide`, { body: { block_id: blk.id, action: 'set_table_layout', layout } }), msg);
+function setTableLayout(blk, book, layout, msg, key = null) {
+  return act(() => api(`${B(book.id)}/decide`, { body: { block_id: blk.id, action: 'set_table_layout', layout, ...(key != null ? { key } : {}) } }), msg);
 }
 // a term grid kept as an image, while the engines read it and it looks like a list: offered where the decision is made
 function tableListSuggestion(blk, book) {
@@ -273,18 +285,28 @@ function propertiesCard(blk, book, decide, seg, rerender) {
     const asText = blk.chosen?.type === 'text';
     const ORD = LAYOUT_EL;
     const eff = over || (hint && !hint.candidate ? hint.order : 'table');
+    const listed = eff === 'rows' || eff === 'cols';
     const why = hint ? [hint.evidence.includes('alphabetical') ? `αλφαβητικά${hint.sorted != null ? ` (${Math.round(hint.sorted * 100)}%)` : ''}` : '',
       hint.evidence.some(e => e.startsWith('entity:')) ? 'κατηγορία «Βασικοί όροι»' : ''].filter(Boolean).join(' · ') : '';
     const val = !asText ? (hint?.candidate ? `εικόνα · προτείνεται ${ORD[hint.order]} (${hint.count} όροι) από ${hint.candidate}` : 'εικόνα')
-      : `${ORD[eff]}${over ? ' (δική σου επιλογή)' : hint ? ` · αυτόματα (${why})` : ''}`;
-    const send = (layout, msg) => setTableLayout(blk, book, layout, msg);
-    const opts = [['cols', 'Λίστα ανά στήλες'], ['rows', 'Λίστα ανά γραμμές'], ['table', 'Πίνακας'], ['auto', 'Αυτόματα']];
+      : `${listed ? listName(blk) : ORD[eff]}${over ? ' (δική σου επιλογή)' : hint ? ` · αυτόματα (${why})` : ''}`;
+    const send = (layout, msg, key = null) => setTableLayout(blk, book, layout, msg, key);
+    const ax = blk.table_axes || { rows: [], cols: [] };
+    const cut = s => (s.length > 28 ? s.slice(0, 27) + '…' : s);
+    const on = (layout, key) => over === layout && (blk.table_key ?? null) === key;
+    // per row: which COLUMN names each item (its other columns become the item's keys); per column: which ROW
+    const keyRow = (layout, title, what) => h('div', { class: 'row small wrap' }, h('b', {}, title), h('span', { class: 'mut' }, what),
+      ax[layout].map((lab, i) => h('button', { class: 'small' + (on(layout, i) ? ' primary' : ''), title: lab, onclick: () => send(layout, `Ανάγνωση: ${LAYOUT_EL[layout]}, κύριο «${lab}»`, i) }, cut(lab))),
+      h('button', { class: 'small ghost' + (on(layout, null) ? ' primary' : ''), title: 'Χωρίς επίπεδα: ένα στοιχείο ανά κελί (π.χ. «Βασικοί όροι»)', onclick: () => send(layout, `Ανάγνωση: ${LAYOUT_EL[layout]} (κελιά)`) }, 'ένα ανά κελί'));
+    const opts = [['table', 'Πίνακας'], ['auto', 'Αυτόματα']];
     return row('tbl', 'Ανάγνωση', h('span', { class: 'prop-line' + (asText ? '' : ' mut') }, val),
       !asText && hint?.candidate ? h('button', { class: 'small primary prop-btn', title: `Χρήση της ανάγνωσης ${hint.candidate} ως ${ORD[hint.order]}`, onclick: () => send(hint.order, `Λίστα όρων από ${hint.candidate}`) }, 'Ως λίστα')
         : act1('tbl', 'Αλλαγή ▾'),
       () => h('div', { class: 'col' },
-        h('div', { class: 'small mut' }, 'Λίστα = ένα στοιχείο ανά κελί, χωρίς πίνακα (π.χ. «Βασικοί όροι»). Ανά στήλες: κάθε στήλη από πάνω προς τα κάτω, μετά η επόμενη. Όρος που συνεχίζει σε εσοχή στην επόμενη γραμμή ενώνεται.'
+        h('div', { class: 'small mut' }, 'Λίστα ανά γραμμές: διάλεξε την κύρια στήλη — κάθε γραμμή γίνεται ένα στοιχείο με όνομα το κελί της σε αυτή τη στήλη, και οι άλλες στήλες γίνονται κλειδιά του (επικεφαλίδα: τιμή). Ανά στήλες: το ίδιο με κύρια γραμμή. «Ένα ανά κελί»: απλή λίστα των κελιών (π.χ. «Βασικοί όροι»· όρος που συνεχίζει σε εσοχή ενώνεται).'
           + (asText ? '' : ' Ο πίνακας είναι τώρα εικόνα: η λίστα χρησιμοποιεί την ανάγνωση της μηχανής.')),
+        keyRow('rows', 'Ανά γραμμές', '· κύρια στήλη:'),
+        keyRow('cols', 'Ανά στήλες', '· κύρια γραμμή:'),
         h('div', { class: 'row small' }, opts.map(([k, l]) => h('button', { class: 'small' + ((over || 'auto') === k ? ' primary' : ''), onclick: () => send(k, `Ανάγνωση: ${l}`) }, l)))));
   };
   const act1 = (k, label) => h('button', { class: 'small ghost prop-btn' + (seg.prop === k ? ' on' : ''), 'aria-expanded': String(seg.prop === k), onclick: () => toggle(k) }, seg.prop === k ? 'Κλείσιμο' : label);

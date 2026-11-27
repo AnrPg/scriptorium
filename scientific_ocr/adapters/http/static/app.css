@@ -486,6 +486,7 @@ button.view-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
 .bound-bar{background:#f3ecff;border:1px solid #d8c6fb;border-radius:8px;padding:6px 8px;gap:8px;flex-wrap:wrap;align-items:center}
 @media (prefers-color-scheme: dark){.bound-bar{background:#2a1f45;border-color:#5b3fa3}}
 .content-list{margin:4px 0 8px;padding-left:1.3em}.content-list li{margin:0}.content-list li>*{margin:0;padding:1px 0;border:0;background:none}
+.content-list li>ul.content-kv{list-style:none;padding:0 0 2px 1.1em}.content-kv li>*,.content-kv .math-view{display:inline}.content-kv .math-view,.content-list-label .math-view{margin:0;padding:0;border:0;background:none}.content-list-label{font-weight:600;margin:4px 0 0}.content-list-label .math-view{font-weight:600}
 /* collapsible sections of a tab (dom.js section()) */
 details.section{border:0;border-radius:0;margin:0;border-bottom:1px solid var(--line)}
 details.section>summary{font-size:15px;padding:12px 2px}
@@ -537,3 +538,4 @@ label.list-item{cursor:pointer}
 .canvas.drawing .ws-box:not(.draft){pointer-events:none;opacity:.55}
 .canvas.drawing .ws-box:not(.draft) .tag{display:none}
 .canvas.drawing .ws-box.draft{pointer-events:none}
+.row.wrap{flex-wrap:wrap}
