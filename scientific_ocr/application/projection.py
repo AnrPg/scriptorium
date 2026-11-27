@@ -45,6 +45,7 @@ from ..pipeline import (
     fills,
     flow,
     furniture,
+    glossary,
     groups,
     latex_check,
     markdown,
@@ -152,6 +153,7 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
     _entity_excursus(blocks, pages, struct, inp.human)   # historical notes / biographies: excursus (before the flow)
     _final_flow(blocks, struct, inp.human)
     tables.annotate(blocks, book_profile(inp.human).get('table_default'))   # term grids (hint) + the profile's default
+    struct['glossary'] = glossary.annotate(blocks, set(inp.human['dismissed']))   # entries: before the text policy
     struct['profile'] = _output_profile(blocks, struct, inp.human)
     struct['profile']['text_policy'] = profile.text_policy(blocks, book_profile(inp.human))   # before review + spelling
     lap('entities')
@@ -175,6 +177,7 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
                   'regions': inp.human['regions'], 'hidden': inp.human['hidden'], 'profiles': inp.human['profiles']},
         'pages': pages, **struct, **annotations, 'notation': notation_summary, 'blocks': blocks,
     }
+    canonical['glossary']['entries'] = glossary.entries(canonical)   # every term with its definition (pipeline.glossary)
     canonical['run']['signature'] = inp.human['signature']      # what this version saw (core.scopes)
     code = _publish(out, canonical, inp, spec, len(result['stale']), log, for_profile)
     lap('audit + render + write')
@@ -738,6 +741,7 @@ def _build_page(out: Path, page: int, log: Log, runner: SpecializedRunner) -> in
     old = {b['id']: b for b in prev.get('blocks', []) if b['page'] == page}
     merged = [_preview_block(b, old.get(b['id'])) for b in blocks]
     tables.annotate(merged, book_profile(inp.human).get('table_default'))   # entities kept from the full build
+    glossary.annotate(merged, pages=[p for p in ((prev.get('glossary') or {}).get('pages') or []) if p == page])
     profile.review_policy([b for b in merged if b.get('preview_changed') or b.get('preview_new')], book_profile(inp.human))
     latex_check.annotate(merged, latex_render.check)
     info = {**pages[0], **page_summary(merged)}
