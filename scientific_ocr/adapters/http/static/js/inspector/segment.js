@@ -49,7 +49,7 @@ export function contentView(blk, value, latex, { codeOpen = null, code: withCode
     lst.label ? h('div', { class: 'content-list-label' }, textMathBox(lst.label + ':')) : null,
     h('ul', { class: 'content-list' }, lst.items.map(t => typeof t === 'string' ? h('li', {}, textMathBox(t))
       : h('li', {}, textMathBox(t.key + ':'), t.fields.length ? h('ul', { class: 'content-kv' }, t.fields.map(([k, v]) =>
-        h('li', {}, h('span', { class: 'mut' }, textMathBox(k + ':')), ' ', textMathBox(v)))) : null))))
+        h('li', {}, k ? h('span', { class: 'mut' }, textMathBox(k + ':')) : null, k ? ' ' : null, textMathBox(v)))) : null))))
     : latex ? mathBox(value) : textMathBox(value);
   // the output profile dropped the page's styling before review (pipeline/profile.py text_policy): say so
   const styled = blk.chosen?.profile_source && value === currentValue(blk)
@@ -246,10 +246,19 @@ export function segmentPanel(body, blk) {
 // action; a row's editor opens UNDER the row (one at a time). Output is a quiet switch at the end.
 const LAYOUT_EL = { cols: 'λίστα ανά στήλες', rows: 'λίστα ανά γραμμές', table: 'πίνακας' };
 // a table read as a list (pipeline/tables.py): flat (one item per cell) or with levels, named by the key column / row
+// how a table reads when the reviewer did not choose (pipeline/tables.py layout/key): the term-grid hint, else the
+// output profile's default (RAG: every table a list by rows, its 1st column naming each item)
+export const tableAuto = blk => {
+  const hint = blk.table_list;
+  if (hint?.order) return hint.candidate ? { layout: 'table', key: null, from: 'hint' } : { layout: hint.order, key: null, from: 'hint' };
+  const d = blk.table_default;
+  return d?.layout ? { layout: d.layout, key: d.key ?? null, from: 'profile' } : { layout: 'table', key: null, from: null };
+};
 export function listName(blk) {
-  const order = blk.table_layout === 'rows' || blk.table_layout === 'cols' ? blk.table_layout : blk.table_list?.order;
-  const key = blk.table_layout && blk.table_key != null ? blk.table_key : null;
-  if (key == null) return `${LAYOUT_EL[order] || 'λίστα'}${blk.table_layout ? ' (ένα στοιχείο ανά κελί)' : ''}`;
+  const own = blk.table_layout === 'rows' || blk.table_layout === 'cols', auto = tableAuto(blk);
+  const order = own ? blk.table_layout : auto.layout;
+  const key = own ? (blk.table_key ?? null) : blk.table_layout ? null : auto.key;
+  if (key == null) return `${LAYOUT_EL[order] || 'λίστα'}${own ? ' (ένα στοιχείο ανά κελί)' : ''}`;
   const lab = blk.table_axes?.[order]?.[key] ?? String(key + 1);
   return `${LAYOUT_EL[order]} · κύρι${order === 'rows' ? 'α στήλη' : 'α γραμμή'} «${lab}»`;
 }
@@ -299,12 +308,12 @@ function propertiesCard(blk, book, decide, seg, rerender) {
     const hint = blk.table_list, over = blk.table_layout;
     const asText = blk.chosen?.type === 'text';
     const ORD = LAYOUT_EL;
-    const eff = over || (hint && !hint.candidate ? hint.order : 'table');
+    const auto = tableAuto(blk), eff = over || auto.layout;
     const listed = eff === 'rows' || eff === 'cols';
     const why = hint ? [hint.evidence.includes('alphabetical') ? `αλφαβητικά${hint.sorted != null ? ` (${Math.round(hint.sorted * 100)}%)` : ''}` : '',
       hint.evidence.some(e => e.startsWith('entity:')) ? 'κατηγορία «Βασικοί όροι»' : ''].filter(Boolean).join(' · ') : '';
     const val = !asText ? (hint?.candidate ? `εικόνα · προτείνεται ${ORD[hint.order]} (${hint.count} όροι) από ${hint.candidate}` : 'εικόνα')
-      : `${listed ? listName(blk) : ORD[eff]}${over ? ' (δική σου επιλογή)' : hint ? ` · αυτόματα (${why})` : ''}`;
+      : `${listed ? listName(blk) : ORD[eff]}${over ? ' (δική σου επιλογή)' : auto.from === 'hint' ? ` · αυτόματα (${why})` : auto.from === 'profile' ? ' · προεπιλογή του προφίλ εξόδου' : ''}`;
     const send = (layout, msg, key = null) => setTableLayout(blk, book, layout, msg, key);
     const ax = blk.table_axes || { rows: [], cols: [] };
     const cut = s => (s.length > 28 ? s.slice(0, 27) + '…' : s);
