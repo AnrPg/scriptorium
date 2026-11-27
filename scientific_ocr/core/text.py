@@ -72,6 +72,50 @@ def strip_markup(t: str) -> str:
     return re.sub(r'\s+', ' ', ''.join(p if i % 2 else _MARKUP.sub(' ', p) for i, p in enumerate(parts))).strip()
 
 
+# Emphasis = how the page STYLED a word (Markdown **bold** / *italic* / __bold__, HTML b/i/em/strong/u/span/font/…),
+# never what it says: an output profile may drop it (core.profiles strip_emphasis). ONE definition for every renderer
+# and stage (pipeline.profile.text_policy, pipeline.rag). Formula spans are never touched; '_' alone is never
+# emphasis (LaTeX subscripts); <sup>/<sub> are notation, not styling, and stay.
+_BOLD = re.compile(r'\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__', re.S)
+_ITALIC = re.compile(r'(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])', re.S)
+_EMPH_TAG = re.compile(r'</?(?:b|i|em|strong|u|span|font|small|big|mark)\b[^>]*>', re.I)
+MAX_TERM_WORDS = 6
+
+
+def _shield(text: str) -> tuple[str, list[str]]:
+    """Formulas replaced by placeholders, so emphasis AROUND a formula (**σταθερά, $K$**) is still one span and
+    nothing inside a formula is ever read as emphasis."""
+    spans: list[str] = []
+    def keep(m):
+        spans.append(m.group(0))
+        return f'\x00{len(spans) - 1}\x00'
+    return MATH_SPAN.sub(keep, text or ''), spans
+
+
+def _unshield(text: str, spans: list[str]) -> str:
+    return re.sub(r'\x00(\d+)\x00', lambda m: spans[int(m.group(1))], text)
+
+
+def strip_emphasis(text: str) -> str:
+    """The text without its styling (bold, italic, styling tags); formulas verbatim; nothing else changes. A lone
+    asterisk that does not enclose a word (a footnote mark: «* Περιλαμβάνουν…») is text and stays."""
+    x, spans = _shield(text)
+    x = _BOLD.sub(lambda m: m.group(1) or m.group(2), x)
+    x = _ITALIC.sub(r'\1', x)
+    return _unshield(_EMPH_TAG.sub('', x), spans)
+
+
+def emphasis_terms(text: str, max_words: int = MAX_TERM_WORDS) -> list[str]:
+    """The book's own bold terms (short phrases, not numbers or punctuation), in order, once each."""
+    x, spans = _shield(text)
+    terms = []
+    for m in _BOLD.finditer(x):
+        t = ' '.join(_unshield(m.group(1) or m.group(2) or '', spans).split()).strip(' .,:;·')
+        if t and len(t.split()) <= max_words and not re.fullmatch(r'[\d\W]+', t):
+            terms.append(t)
+    return list(dict.fromkeys(terms))
+
+
 def label_key(t: str) -> str:
     """Comparison key for labels and titles: no markup, no accents, case-folded (final sigma becomes σ)."""
     return ' '.join(strip_marks(strip_markup(t)).casefold().split())

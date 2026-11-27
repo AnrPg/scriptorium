@@ -25,26 +25,22 @@ import re
 import unicodedata
 
 from ..core.model import in_reader_output
-from ..core.text import MATH_SPAN
+from ..core.text import MATH_SPAN, MAX_TERM_WORDS, emphasis_terms, strip_emphasis
 from . import reading, tables
 
-_BOLD = re.compile(r'\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__', re.S)
-_ITALIC = re.compile(r'(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])', re.S)
-_TAG = re.compile(r'</?(?:b|i|em|strong|u|span|font|small|big|mark)\b[^>]*>', re.I)
 _BR = re.compile(r'<br\s*/?>', re.I)
 _SUP = re.compile(r'<sup>(.*?)</sup>', re.I | re.S)
 _SUB = re.compile(r'<sub>(.*?)</sub>', re.I | re.S)
 _LINE_HYPHEN = re.compile(r'(\w)[-‐]\n(\w)')
 _HEADING_MARKS = re.compile(r'^#+\s*')
 _SENTENCE_END = re.compile(r'(?<=[.;!?·…])\s+(?=[«"(\[]?[A-ZΑ-ΩΆΈΉΊΌΎΏ0-9])')
-MAX_TERM_WORDS = 6
 # headings that label a box or element (pipeline.sections: «Ερώτηση 1-2», a box's sub-heading) are not sections:
 # they lead their paragraph and never open a chunk or enter the heading path
 BOX_LABEL_SOURCES = {'labelled_element', 'box_heading'}
 
 
 # ---------------------------------------------------------------- text
-def clean(text: str, strip_emphasis: bool = True) -> tuple[str, list[str]]:
+def clean(text: str, strip: bool = True) -> tuple[str, list[str]]:
     """(plain text, bold terms). Formula spans are kept verbatim; HTML emphasis and Markdown emphasis removed;
     <sup>/<sub> become LaTeX scripts; NFC; soft hyphens and hyphenated line breaks repaired."""
     terms: list[str] = []
@@ -57,14 +53,9 @@ def clean(text: str, strip_emphasis: bool = True) -> tuple[str, list[str]]:
         x = _BR.sub('\n', x)
         x = _SUP.sub(lambda m: f'$^{{{m.group(1).strip()}}}$', x)
         x = _SUB.sub(lambda m: f'$_{{{m.group(1).strip()}}}$', x)
-        for m in _BOLD.finditer(x):
-            t = ' '.join((m.group(1) or m.group(2) or '').split()).strip(' .,:;·')
-            if t and len(t.split()) <= MAX_TERM_WORDS and not re.fullmatch(r'[\d\W]+', t):
-                terms.append(t)
-        if strip_emphasis:
-            x = _BOLD.sub(lambda m: m.group(1) or m.group(2), x)
-            x = _ITALIC.sub(r'\1', x)
-            x = _TAG.sub('', x)
+        terms += emphasis_terms(x)
+        if strip:
+            x = strip_emphasis(x)                         # core.text: one definition of "styling"
         x = _LINE_HYPHEN.sub(lambda m: m.group(1) + m.group(2) if m.group(2).islower() else m.group(0), x)
         out.append(x)
     s = ''.join(out)
