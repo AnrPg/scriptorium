@@ -110,9 +110,9 @@ def annotate(blocks: list[dict], inserts: frozenset = frozenset(), boxes: dict |
                 last.pop(key, None)                    # a heading starts new text in its own context only
             continue                                   # (a box's label «ΕΡΩΤΗΣΗ 6-2» is not a heading of the course
                                                        # text: the course paragraph it interrupts still continues)
-        if b['kind'] in NEVER_CONTINUES:
-            continue
-        prev = last.get(key)
+        if b['kind'] in NEVER_CONTINUES and not (b['kind'] == 'excerpt' and b['flow'] == 'main'):
+            continue                                   # an excerpt with text in the course text IS text: the text a
+        prev = last.get(key)                           # continuation resumes may be one (never skipped over)
         forced = b.get('continues_override')          # the reviewer's decision (set_continuation) beats the test
         if prev is not None and (forced if forced is not None else continues(_text(prev[0]), _text(b))):
             a = prev[0]

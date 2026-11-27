@@ -1456,6 +1456,21 @@ def test_reviewer_overrides_reading_flow_and_continuations():
     assert p3['relations'].get('continues_from') == 'q'                                  # forced by the reviewer
 
 
+def test_continuation_resumes_the_text_right_above_even_a_region_read_again():
+    """A region read again (an excerpt with text, in the course text) IS the text above: a continuation is never
+    linked over it to an earlier paragraph; an excerpt that is only an image stays an insert and is skipped."""
+    from scientific_ocr.pipeline import flow
+    def b(i, kind, text, ctype='text'):
+        return {'id': i, 'page': 1, 'kind': kind, 'chosen': {'type': ctype, 'text': text}, 'relations': {},
+                'reasons': [], 'review': 'not_needed'}
+    p1, ex, p2 = b('p1', 'paragraph', 'Χημική ένωση με άνθρακα και υ-'), b('x', 'excerpt', 'Δομή που σχηματίζεται από τον πολλαπλασια-'), b('p2', 'paragraph', 'σμό των κυττάρων.')
+    flow.annotate([p1, ex, p2])
+    assert ex['flow'] == 'main' and p2['relations'].get('continues_from') == 'x'
+    img = b('x', 'excerpt', '', 'image_only')
+    flow.annotate([p1, img, p2])
+    assert img['flow'] == 'insert' and p2['relations'].get('continues_from') == 'p1'
+
+
 def test_merging_images_into_a_figure_needs_no_text_but_a_text_merge_does():
     """Parts without text are what a Picture/Figure merge is made of (the merged entity is the crop of their union):
     no MERGE_PART_WITHOUT_TEXT, no review because of it. A merge meant to be text still flags the missing text."""
