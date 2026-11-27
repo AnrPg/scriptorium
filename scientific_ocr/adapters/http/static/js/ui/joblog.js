@@ -10,7 +10,7 @@ import { describePending } from './rebuild.js';
 // log stays one click away (folded) for debugging.
 
 const STAGE_EL = { load: 'Φόρτωση', 'compose pages': 'Σύνθεση σελίδων', 'specialised models (cache)': 'Ειδικά μοντέλα',
-  'reviewer decisions': 'Οι αποφάσεις σου', 'document structure': 'Δομή βιβλίου', entities: 'Κατηγορίες',
+  'reviewer decisions': 'Οι αποφάσεις σου', 'inputs of the structure (calibration, model votes, lexicon)': 'Λεξικό & βαθμονόμηση', 'document structure': 'Δομή βιβλίου', entities: 'Κατηγορίες', spelling: 'Ορθογραφία',
   annotations: 'Σημειώσεις', 'audit + render + write': 'Έλεγχος και αρχεία εξόδου' };
 const REVIEW_EL = { required: 'Τμήματα που απαιτούν έλεγχο', recommended: 'Τμήματα που συνιστάται να ελεγχθούν',
   omitted: 'Εκτός εξόδου (επιλογή σου)', furniture: 'Στοιχεία σελίδας (κεφαλίδες, αριθμοί σελίδας)' };

@@ -2,12 +2,13 @@ import { carefulPages, renderBook } from '../book/book.js';
 import { ENT, entName, famName, famOf } from '../book/entities.js';
 import { B, api } from '../core/api.js';
 import { refresh } from '../core/chrome.js';
-import { $, clear, h } from '../core/dom.js';
+import { $, clear, h, section } from '../core/dom.js';
 import { R, S, go } from '../core/state.js';
 import { EXPORT_EL, KIND_EL, STATE_EL, infoTip } from '../core/strings.js';
 import { act, modal, openDialog, toast } from '../ui/feedback.js';
 import { ensureFresh } from '../ui/rebuild.js';
 import { excursusDialog } from '../inspector/excursus.js';
+import { profileReviewCard } from '../book/profile.js';
 
 // ---------------------------------------------------------------- export wizard
 // Steps: 1 format · 2 content (exclusions) · 3 move to the end of each unit · 4 separators, preview, download.
@@ -18,7 +19,9 @@ export async function exportDialog() {
   if (!(await ensureFresh('Η «Εξαγωγή»'))) return;
   const book = S.book, KEY = 'ocr.export.' + book.id;
   const saved = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } })();
-  const st = { fmt: saved.fmt || 'markdown_images', exclude: new Set(saved.exclude || []), move: new Set(saved.move || []),
+  // the book's output profile decides which formats make sense: a RAG book offers only RAG text and the data
+  const formats = Object.keys(EXPORT_EL).filter(k => (book.output_profile === 'rag') === k.startsWith('rag_') || k.endsWith('_json'));
+  const st = { formats, fmt: formats.includes(saved.fmt) ? saved.fmt : formats[0], exclude: new Set(saved.exclude || []), move: new Set(saved.move || []),
     images: saved.images || 'keep', unit_level: saved.unit_level || 1,
     style: (S.meta.styles || []).includes(saved.style) ? saved.style : 'tags', step: 0, entities: null };
   const save = () => localStorage.setItem(KEY, JSON.stringify({ fmt: st.fmt, exclude: [...st.exclude], move: [...st.move], images: st.images, unit_level: st.unit_level, style: st.style }));
@@ -45,6 +48,7 @@ export async function exportDialog() {
     clear(foot).append(...[h('button', { class: 'ghost', onclick: () => d.close() }, 'Κλείσιμο'), h('span', { class: 'spacer' }),
       st.step > 0 ? h('button', { onclick: () => { st.step--; renderStep(); } }, '← Πίσω') : null,
       st.step < list.length - 1 ? h('button', { class: 'primary', onclick: () => { st.step++; renderStep(); } }, 'Επόμενο →')
+        : st.fmt.startsWith('rag_') && book.required ? h('button', { class: 'primary', onclick: () => { d.close(); openNextRequired(); } }, `Έλεγχος πρώτα (${book.required})`)
         : h('a', { class: 'btn primary', href: `${B(book.id)}/export/${st.fmt}?${qs()}`, download: '' }, '↓ Λήψη')].filter(Boolean));
   };
   d.showModal();
@@ -52,7 +56,7 @@ export async function exportDialog() {
 }
 export function wizFormat(body, st, qs, renderStep) {
   body.append(h('p', { class: 'small mut' }, 'Το Markdown και το PDF είναι το τελικό κείμενο του βιβλίου, χωρίς σημάνσεις ελέγχου ή προέλευσης. Τα JSON είναι δεδομένα, με όλη την προέλευση.'),
-    h('div', { class: 'wiz-cards' }, Object.entries(EXPORT_EL).map(([k, [t, dsc]]) => h('label', { class: 'wiz-card' + (st.fmt === k ? ' on' : '') },
+    h('div', { class: 'wiz-cards' }, Object.entries(EXPORT_EL).filter(([k]) => st.formats.includes(k)).map(([k, [t, dsc]]) => h('label', { class: 'wiz-card' + (st.fmt === k ? ' on' : '') },
       (() => { const r = h('input', { type: 'radio', name: 'fmt' }); r.checked = st.fmt === k; r.onchange = () => { st.fmt = k; st.step = 0; renderStep(); }; return r; })(),
       h('div', {}, h('b', {}, t), h('div', { class: 'small mut' }, dsc))))));
 }
@@ -125,6 +129,7 @@ export function wizMove(body, st, qs, renderStep, byType) {
   body.append(table);
 }
 export function wizFinish(body, st, qs, renderStep) {
+  if (st.fmt.startsWith('rag_')) return ragFinish(body, st);
   const reader = READER_FORMATS.has(st.fmt), md = st.fmt.startsWith('markdown');
   const pre = h('pre', { class: 'preview-pre', style: { maxHeight: '30vh' } }, 'Φόρτωση…');
   const lines = [h('div', {}, h('b', {}, 'Μορφή: '), EXPORT_EL[st.fmt][0])];
@@ -143,6 +148,24 @@ export function wizFinish(body, st, qs, renderStep) {
     body.append(h('h3', {}, 'Προεπισκόπηση (αρχή του αρχείου)'), pre);
     api(`${B(S.book.id)}/preview?${qs()}&images=${st.fmt === 'markdown_text' ? 0 : 1}`).then(t => { pre.textContent = t; }).catch(e => { pre.textContent = e.message; });
   }
+}
+/** RAG formats: nothing to choose (the output profile decided it); what the text leaves out, the review gate, a preview. */
+async function ragFinish(body, st) {
+  const book = S.book, pre = h('pre', { class: 'preview-pre', style: { maxHeight: '34vh' } }, 'Φόρτωση…');
+  const p = await api(`${B(book.id)}/profile`);
+  const s = (p.available.find(x => x.name === 'rag') || {}).settings || {};
+  body.append(...[h('div', { class: 'wiz-summary small' },
+    h('div', {}, h('b', {}, 'Μορφή: '), EXPORT_EL[st.fmt][0]),
+    h('div', {}, h('b', {}, 'Εκτός (προφίλ): '), `${p.excluded_segments} τμήματα — ${(s.exclude || []).map(x => entName(x)).join(', ')}`),
+    h('div', {}, h('b', {}, 'Εικόνες: '), 'όχι· οι λεζάντες μπαίνουν ως παράγραφοι μετά την πρώτη αναφορά στην εικόνα'),
+    h('div', {}, h('b', {}, 'Κομμάτια: '), `ανά ενότητα, ~${(s.chunk || {}).target_words} λέξεις (έως ${(s.chunk || {}).max_words}), με τη διαδρομή τίτλων στην αρχή`),
+    p.pending ? h('div', { class: 'note' }, `${p.pending} αυτόματες εξαιρέσεις δεν έχουν επιβεβαιωθεί (καρτέλα «Έλεγχος»)· το manifest το αναφέρει.`) : null,
+    book.required ? h('div', { class: 'note' }, `${book.required} τμήματα πρέπει να ελεγχθούν πριν την εξαγωγή RAG (π.χ. περιεχόμενο που υπάρχει μόνο ως εικόνα).`) : null),
+    S.meta.note_model ? h('div', { class: 'row small', style: { marginTop: '8px' } }, h('span', { class: 'grow mut' },
+      'Προαιρετικά: μία πρόταση πλαισίου ανά κομμάτι από το τοπικό μοντέλο (πεδίο «context», χωριστά από το κείμενο του βιβλίου). Αργό· η διαδρομή τίτλων υπάρχει ήδη σε κάθε κομμάτι.'),
+      h('button', { class: 'small', onclick: () => act(() => api(`${B(book.id)}/profile/context`, { body: {} }), 'Ξεκίνησε· η επόμενη εξαγωγή θα τις περιέχει') }, 'Προτάσεις πλαισίου')) : null,
+    h('h3', {}, 'Προεπισκόπηση (αρχή του κειμένου)'), pre].filter(Boolean));
+  api(`${B(book.id)}/preview?style=rag`).then(t => { pre.textContent = t; }).catch(e => { pre.textContent = e.message; });
 }
 export function processDialog(pages) {
   const b = S.book;
@@ -217,10 +240,13 @@ export function tabPages(body) {
 }
 
 export async function tabReview(body) {
+  await profileReviewCard(body);
+  const box = h('div'), n = S.book.required + S.book.recommended;
+  body.append(section(`Τμήματα προς έλεγχο (${n})`, box));
   const lv = h('div', { class: 'filters' }, [['required', `Απαιτείται (${S.book.required})`], ['recommended', `Συνιστάται (${S.book.recommended})`]].map(([k, l]) =>
     h('button', { class: S.level === k ? 'on' : '', onclick: () => { S.level = k; renderBook(); } }, l)));
-  body.append(lv, h('p', { class: 'small mut' }, 'Η σειρά είναι κατά σπουδαιότητα ', infoTip('priority'), '. Μπορείς επίσης να ανοίξεις οποιαδήποτε σελίδα και να ελέγξεις κάθε τμήμα, επισημασμένο ή όχι. Για πολλά όμοια τμήματα δες τον «Μαζικό έλεγχο».'));
-  const card = h('div', { class: 'card' }); body.append(card);
+  box.append(lv, h('p', { class: 'small mut' }, 'Η σειρά είναι κατά σπουδαιότητα ', infoTip('priority'), '. Μπορείς επίσης να ανοίξεις οποιαδήποτε σελίδα και να ελέγξεις κάθε τμήμα, επισημασμένο ή όχι. Για πολλά όμοια τμήματα δες τον «Μαζικό έλεγχο».'));
+  const card = h('div', { class: 'card' }); box.append(card);
   const q = await api(`${B(S.book.id)}/queue?level=${S.level}`);
   if (!q.length) { card.append(h('div', { class: 'empty', style: { border: 0 } }, 'Τίποτα εδώ. 🎉')); return; }
   card.before(acceptAllBar(q));

@@ -31,6 +31,9 @@ export const $ = s => document.querySelector(s);
 export const pctStyle = (bb, dims) => ({ left: (100 * bb[0] / dims[0]) + '%', top: (100 * bb[1] / dims[1]) + '%',
   width: (100 * (bb[2] - bb[0]) / dims[0]) + '%', height: (100 * (bb[3] - bb[1]) / dims[1]) + '%' });
 export const clear = el => { while (el.firstChild) el.firstChild.remove(); return el; };
+// a "Φόρτωση…" placeholder whose request failed: say so in place (never an endless "loading")
+export const loadFailed = (el, e) => clear(el).append(h('div', { class: 'badge-bad', role: 'alert' },
+  `Δεν φορτώθηκε: ${(e && e.message) || e}`));
 
 // Re-rendering rebuilds DOM; a reviewer who acted (closed a section, clicked in a panel, closed an overlay) must stay
 // where they were. keepScroll(root, render): remembers the scroll position of `root` and of every element marked
@@ -102,4 +105,11 @@ export function rememberDetails(root) {
     if (key in st) d.open = st[key];
     d.addEventListener('toggle', () => { st[key] = d.open; try { localStorage.setItem(DETAILS_KEY, JSON.stringify(st)); } catch { /* storage blocked */ } });
   }
+}
+
+/** A collapsible section of a tab (closed until the reviewer opens it; rememberDetails keeps the state). The title
+ *  carries the count; an ⓘ in it shows its tip without toggling the section. */
+export function section(title, ...kids) {
+  const sum = h('summary', { onclick: (e) => { if (e.target.closest('.info')) e.preventDefault(); } }, ...[title].flat());
+  return h('details', { class: 'section' }, sum, h('div', {}, ...kids));
 }

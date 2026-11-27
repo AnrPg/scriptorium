@@ -8,6 +8,7 @@ import { BOOK_TABS, RELEASE_EL, STEP_EL } from '../core/strings.js';
 import { ensureFresh, pendingOf } from '../ui/rebuild.js';
 import { exportDialog, openNextRequired, processDialog, tabPages, tabReview } from '../export/wizard.js';
 import { act } from '../ui/feedback.js';
+import { profileChip } from '../book/profile.js';
 
 // ------------------------------------------------------------------ Book
 export function renderBook() {                    // the same screen (book + tab) keeps its scroll; another tab starts at the top
@@ -24,7 +25,7 @@ function drawBook() {
     ? h('button', { class: 'primary', onclick: openNextRequired }, `Συνέχεια ελέγχου (${b.required})`)
     : h('button', { class: 'primary', onclick: () => processDialog() }, unprocessed ? 'Επεξεργασία σελίδων…' : 'Επανεπεξεργασία…');
   page.append(h('div', { class: 'book-head' },
-    h('div', { class: 'grow' }, h('div', { class: 'row' }, h('h1', {}, b.title), b.release_status ? h('span', { class: 'chip st-' + b.release_status }, RELEASE_EL[b.release_status]) : null),
+    h('div', { class: 'grow' }, h('div', { class: 'row' }, h('h1', {}, b.title), profileChip(b), b.release_status ? h('span', { class: 'chip st-' + b.release_status }, RELEASE_EL[b.release_status]) : null),
       h('div', { class: 'kpis' }, h('span', {}, h('b', {}, `${b.processed}/${b.page_count}`), ' σελίδες επεξεργασμένες'),
         h('span', {}, h('b', {}, b.required), ' απαιτούν έλεγχο'), h('span', {}, h('b', {}, b.recommended), ' συνιστάται'),
         b.critical.length ? h('span', { class: 'kpi-bad' }, h('b', {}, b.critical.length), ' κρίσιμα') : null)),

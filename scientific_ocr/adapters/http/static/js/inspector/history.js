@@ -1,5 +1,5 @@
 import { B, api } from '../core/api.js';
-import { $, clear, h } from '../core/dom.js';
+import { $, clear, h, loadFailed } from '../core/dom.js';
 import { S } from '../core/state.js';
 import { ACTION_EL } from '../core/strings.js';
 import { engChip } from '../inspector/lineage.js';
@@ -11,7 +11,8 @@ export function historyPanel(blk, latex) {
   const box = h('div', {}, h('div', { class: 'small mut' }, 'Φόρτωση…'));
   const det = h('details', { ontoggle: async () => {
     if (!det.open || det.dataset.loaded) return; det.dataset.loaded = 1;
-    const H = await api(`${B(S.book.id)}/blocks/${blk.id}/history`);
+    let H;
+    try { H = await api(`${B(S.book.id)}/blocks/${blk.id}/history`); } catch (e) { delete det.dataset.loaded; loadFailed(box, e); return; }
     const cur = currentValue(blk);
     const compare = (label, val) => modal(`Σύγκριση: ${label} ↔ τρέχουσα`, h('div', { class: 'cmp' },
       h('div', {}, h('b', {}, label), contentView(blk, val, latex)), h('div', {}, h('b', {}, 'Τρέχουσα'), contentView(blk, cur, latex))), [{ label: 'Κλείσιμο' }]);

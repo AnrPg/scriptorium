@@ -4,11 +4,12 @@ import { renderBook } from '../book/book.js';
 import { ruleEditor } from '../book/structure.js';
 import { B, api } from '../core/api.js';
 import { kickPoll } from '../core/chrome.js';
-import { $, clear, h, isActiveJob } from '../core/dom.js';
+import { $, clear, h, isActiveJob, section } from '../core/dom.js';
 import { R, S, go, sym } from '../core/state.js';
 import { SROLE_EL, infoTip } from '../core/strings.js';
 import { act, modal, toast } from '../ui/feedback.js';
 import { mathBox } from '../ui/math.js';
+import { spellingCard } from '../book/spelling.js';
 
 // ---------------------------------------------------------------- workload reduction: classes, bulk review, sampling
 export async function tabQuality(body) {
@@ -16,7 +17,8 @@ export async function tabQuality(body) {
   body.append(h('p', { class: 'small mut' }, 'Τα ανοιχτά τμήματα ομαδοποιημένα ανά τύπο επισήμανσης, με την ακρίβεια που μετρήθηκε από τις αποφάσεις σου. ',
     'Ελέγχεις μαζικά ', infoTip('bulk'), ' ή με δειγματοληψία ', infoTip('sampling'), '. Η διαλογή ', infoTip('triage'),
     ` έχει ήδη χαμηλώσει ${T.lowered || 0} τμήματα, και ${T.accepted || 0} έγιναν δεκτά στατιστικά.`));
-  const card = h('div', { class: 'card' }); body.append(card);
+  const card = h('div', { class: 'card' });
+  body.append(section(`Ανοιχτά τμήματα ανά επισήμανση (${C.classes.reduce((a, c) => a + c.required + c.recommended, 0)})`, card));
   if (!C.classes.length) card.append(h('div', { class: 'list-item mut' }, 'Δεν υπάρχουν ανοιχτά τμήματα. 🎉'));
   for (const c of C.classes) {
     const st = c.stats, tot = c.required + c.recommended;
@@ -29,9 +31,10 @@ export async function tabQuality(body) {
       c.critical ? h('span', { class: 'small mut', title: 'Οι κρίσιμες επισημάνσεις ελέγχονται πάντα μία-μία' }, 'χωρίς δειγματοληψία')
         : h('button', { class: 'small', onclick: () => samplingFlow(c) }, 'Δειγματοληψία')));
   }
+  await spellingCard(body);
   if ((C.rule_suggestions || []).length) {
-    body.append(h('h2', { style: { marginTop: '20px' } }, 'Προτεινόμενοι κανόνες ', infoTip('rules')));
-    const rc = h('div', { class: 'card' }); body.append(rc);
+    const rc = h('div', { class: 'card' });
+    body.append(section([`Προτεινόμενοι κανόνες (${C.rule_suggestions.length}) `, infoTip('rules')], rc));
     for (const r of C.rule_suggestions) rc.append(h('div', { class: 'list-item', style: { cursor: 'default' } },
       h('span', { class: 'grow' }, sym(r.find), ' → ', sym(r.replace), h('span', { class: 'small mut' }, `  · διορθώθηκε ${r.corrections} φορές · θα άλλαζε ${r.would_change} ακόμη εμφανίσεις`)),
       h('button', { class: 'small primary', onclick: () => ruleEditor({ find: r.find, replace: r.replace, context: '', exclude: [], note: `από ${r.corrections} διορθώσεις σου` }) }, 'Προεπισκόπηση & κανόνας')));

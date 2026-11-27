@@ -1,6 +1,6 @@
 import { B, api } from '../core/api.js';
 import { S, go } from '../core/state.js';
-import { toast } from '../ui/feedback.js';
+import { inFlight, toast } from '../ui/feedback.js';
 import { pendingOf } from '../ui/rebuild.js';
 import { selectBlock } from '../workspace/workspace.js';
 
@@ -21,7 +21,8 @@ async function bookQueue() {
   if (cache.key !== key) cache = { key, items: await api(`${B(S.book.id)}/queue?level=${loopLevel()}&order=book`) };
   return cache.items;
 }
-const decidedNow = () => new Set(pendingOf().events.filter(e => e.type === 'decision' || e.type === 'block_hide').map(e => e.block_id));
+// decided = recorded but not yet rebuilt (pending) or still being sent (feedback.inFlight: you moved on at once)
+const decidedNow = () => new Set([...pendingOf().events.filter(e => e.type === 'decision' || e.type === 'block_hide').map(e => e.block_id), ...inFlight]);
 
 /** The loop with already-decided segments removed (`keep`: a segment kept even if decided, e.g. the current one). */
 async function loop(keep) {

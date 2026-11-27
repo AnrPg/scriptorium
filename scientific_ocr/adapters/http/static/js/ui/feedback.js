@@ -24,26 +24,37 @@ async function reflected(bookId, before) {
     if (!r.rebuilding && (r.projection !== before || r.pending > 0 || Date.now() - t0 > 2500)) return r;
   }
 }
-// Actions started from a dialog run in the BACKGROUND after they are recorded: the dialog closes as soon as the
-// server accepted the action; waiting for the rebuild and the confirmation toast continue without blocking it.
-let dialogActs = 0;
+// Every action returns as soon as the server RECORDED it (an event): the reviewer has control back at once.
+// Waiting for its reflection (the rebuild) and the confirmation toast continue in the background; whatever is on
+// screen is reloaded by the poll when the book's revision changes (core/chrome.poll).
 export async function act(fn, okMsg, undoable = true) {
-  if (dialogActs > 0) {
-    const r = await actRecord(fn);                    // throws on rejection: the dialog stays open
-    actConfirm(r, okMsg, undoable);                   // not awaited
-    return r;
-  }
-  return actConfirm(await actRecord(fn), okMsg, undoable);
+  const rec = await actRecord(fn);                    // throws on rejection (a dialog stays open)
+  actConfirm(rec, okMsg, undoable);                   // not awaited
+  return rec.r;
 }
 async function actRecord(fn) {
   const book = S.book && S.book.id;
-  let rev0 = null;
-  if (book) { try { rev0 = await api(`/api/books/${encodeURIComponent(book)}/rev`); } catch { rev0 = null; } }
+  // the revision BEFORE the action, requested in parallel with it (it only words the confirmation toast)
+  const rev0 = book ? api(`/api/books/${encodeURIComponent(book)}/rev`).catch(() => null) : Promise.resolve(null);
   let r;
   try { r = await fn(); } catch (e) { toast(e.message, { error: true }); throw e; }
   return { r, book, rev0 };
 }
-async function actConfirm({ r, book, rev0 }, okMsg, undoable) {
+
+// Actions taken while LOOPING (↵ σωστό, A εγκρίνω … then the next item): queued and sent in the background in the
+// order they were taken, so the next item opens instantly. `key` (e.g. a segment id) is IN FLIGHT until the server
+// recorded it — loops skip in-flight items; `onError` lets the caller offer the item again.
+let chain = Promise.resolve();
+export const inFlight = new Set();
+export function actLater(fn, okMsg, { undoable = true, key = null, onError = null } = {}) {
+  if (key) inFlight.add(key);
+  chain = chain.then(() => act(fn, okMsg, undoable))
+    .catch((e) => { onError && onError(e); })
+    .finally(() => { if (key) inFlight.delete(key); });
+  return chain;
+}
+async function actConfirm({ r, book, rev0: rev0P }, okMsg, undoable) {
+  const rev0 = await rev0P;
   const before = rev0 ? rev0.projection : null;
   S.recentEdit = Date.now(); kickPoll();
   const after = book && before !== null ? await reflected(book, before) : null;
@@ -84,10 +95,9 @@ export function modal(title, body, actions) {
     const btn = e.currentTarget;
     if (btn.disabled) return;                        // no double submit
     buttons.forEach(b => { b.disabled = true; }); btn.classList.add('busy');
-    dialogActs++;
     let res;
     try { res = await a.run(); } catch { res = false; }   // a rejected action keeps the dialog (and what was typed)
-    finally { dialogActs--; buttons.forEach(b => { b.disabled = false; }); btn.classList.remove('busy'); }
+    finally { buttons.forEach(b => { b.disabled = false; }); btn.classList.remove('busy'); }
     if (res !== false) d.close();
   } }, a.label));
   d.append(h('h2', {}, title), body, h('div', { class: 'row end' }, buttons));

@@ -5,7 +5,7 @@ import { B, api } from '../core/api.js';
 import { $, clear, h } from '../core/dom.js';
 import { K } from '../core/keyboard.js';
 import { render } from '../core/nav.js';
-import { R, S, kindLabel } from '../core/state.js';
+import { R, S, kindLabel, outOfOutput } from '../core/state.js';
 import { ACTION_EL, REVIEW_EL, SRC_EL, infoTip } from '../core/strings.js';
 import { captionPanel } from '../inspector/captions.js';
 import { excursusEditor, excursusValue } from '../inspector/excursus.js';
@@ -15,7 +15,7 @@ import { queueNeighbours, renderInspector } from '../inspector/inspector.js';
 import { engChip, lineageDialog, nextPageWithWork, reportWrong, sourceLabel } from '../inspector/lineage.js';
 import { groupsPanel } from '../inspector/multi.js';
 import { notePanel, proposalCard } from '../inspector/note.js';
-import { act } from '../ui/feedback.js';
+import { act, actLater } from '../ui/feedback.js';
 import { currentLabels, labelPicker, mathBox, stripMathDelims, textMathBox } from '../ui/math.js';
 import { renderWorkspace, selectBlock, setSelection } from '../workspace/workspace.js';
 
@@ -36,7 +36,14 @@ export function contentView(blk, value, latex, { codeOpen = null } = {}) {   // 
   const open = codeOpen ?? (marks.length > 0 || latex);
   const code = h('details', { class: 'code-box', open: open || null }, h('summary', { class: 'small mut' }, latex ? 'Κώδικας LaTeX' : 'Κώδικας (Markdown/LaTeX)', marks.length ? ` · ${marks.length} σημείο(α) διαφωνίας μηχανών` : ''),
     h('pre', { class: 'preview-pre', style: { maxHeight: '260px' } }, markedText(value, marks)));
-  return h('div', { class: 'content-view' }, latex ? mathBox(value) : textMathBox(value), code);
+  // shown as the outputs will read it: a table read as a list (pipeline/tables.py) is a list here too; the code
+  // (the engine's grid) stays below. Only for the version in force: other versions are compared as they are
+  const items = blk.list_items && value === currentValue(blk) ? blk.list_items : null;
+  const shown = items ? h('div', {},
+    h('div', { class: 'small mut' }, `Όπως μπαίνει στην έξοδο: ${blk.table_layout === 'rows' || (!blk.table_layout && blk.table_list?.order === 'rows') ? 'λίστα ανά γραμμές' : 'λίστα ανά στήλες'} (${items.length})`),
+    h('ul', { class: 'content-list' }, items.map(t => h('li', {}, textMathBox(t)))))
+    : latex ? mathBox(value) : textMathBox(value);
+  return h('div', { class: 'content-view' }, shown, code);
 }
 const NEEDS_REVIEW = ['required', 'recommended', 'unresolved'];
 const DECIDING = new Set();                     // block ids whose decision request is in flight
@@ -54,17 +61,17 @@ export function segmentPanel(body, blk) {
   // act() waits for the rebuild (up to 120 s): the reviewer may have moved on meanwhile, so the follow-up (reset the
   // panel, advance to the next item) only applies if this block on this page is still the one shown. A block with a
   // decision in flight ignores further decisions (double click, repeated A / ⌘↵).
+  const ADVANCES = new Set(['approve', 'replace_text', 'replace_latex', 'approve_candidate', 'mark_image_only', 'mark_unreadable']);
   const decide = (action, extra = {}, msg) => {
     if (DECIDING.has(blk.id)) return Promise.resolve();
     const id = blk.id, page = S.page.page, bookId = book.id;
     const here = () => S.route?.view === 'ws' && S.book?.id === bookId && S.page?.page === page && S.sel === id;
-    DECIDING.add(id); rerender();
-    return act(() => api(`${B(book.id)}/decide`, { body: { block_id: id, action, ...extra } }), msg || ACTION_EL[action])
-      .then(() => {
-        if (!here()) return;
-        S.seg = null; if (['approve', 'replace_text', 'replace_latex', 'approve_candidate', 'mark_image_only', 'mark_unreadable'].includes(action)) stepReview(1);   // next anywhere in the book
-      }, () => { /* act() already reported the error */ })
+    DECIDING.add(id);
+    const done = actLater(() => api(`${B(book.id)}/decide`, { body: { block_id: id, action, ...extra } }), msg || ACTION_EL[action], { key: id })
       .finally(() => { DECIDING.delete(id); if (here()) renderWorkspace(); });   // re-enable the actions
+    if (ADVANCES.has(action)) { S.seg = null; stepReview(1); }   // the next one opens AT ONCE; the decision is sent behind
+    else rerender();
+    return done;
   };
   const pending = DECIDING.has(blk.id);
   S.segActions = {};                              // what the keyboard may do in the current state (see keydown)
@@ -92,6 +99,7 @@ export function segmentPanel(body, blk) {
   body.append(h('div', { class: 'version ' + status[0] }, h('b', {}, status[1]),
     h('div', { class: 'small mut' }, decided ? (decided.via ? `από σημείωση: «${decided.via.note}» · πρόταση ${decided.via.proposed_by}` : 'περιεχόμενο: εσύ')
       : `περιεχόμενο: μηχανή (${sourceLabel(blk.content_source) || '—'})`)));
+  { const sug = tableListSuggestion(blk, book); if (sug) body.append(sug); }
   if (blk.merged_from) body.append(h('div', { class: 'note' }, h('b', {}, `Ενωμένο από ${blk.merged_from.length} κομμάτια`),
     blk.merged_from.map((m, i) => h('div', { class: 'small' }, `${i + 1}. ${(m.text || '[εικόνα]').slice(0, 70)}`)),
     h('button', { class: 'small', style: { marginTop: '6px' }, onclick: () => act(() => api(`${B(book.id)}/merges/${blk.merge_id}/remove`, { body: {} }), 'Το τμήμα διασπάστηκε στα κομμάτια του') }, 'Διάσπαση')));
@@ -167,10 +175,15 @@ export function segmentPanel(body, blk) {
     const imageOnly = blk.chosen.type === 'image_only';
     const approve = () => decide('approve');
     if (decided) {
+      // your decision is asked again (taken under other conditions, e.g. before a text-only output profile):
+      // confirming it as it is is one action (A), and the review moves on
+      const again = NEEDS_REVIEW.includes(blk.review);
       area.append(h('div', { class: 'actions' },
-        h('button', { class: 'primary', onclick: edit }, 'Επεξεργασία', h('kbd', {}, 'E')),
+        again ? h('button', { class: 'good', disabled: pending, onclick: approve, title: 'Η απόφασή σου ισχύει όπως είναι· καταγράφεται ξανά με τη σημερινή ημερομηνία' },
+          imageOnly ? '✓ Εγκρίνω ως έχει — μένει εικόνα' : '✓ Εγκρίνω ως έχει', h('kbd', {}, 'A')) : null,
+        h('button', { class: again ? '' : 'primary', onclick: edit }, imageOnly ? 'Γράψε το κείμενο' : 'Επεξεργασία', h('kbd', {}, 'E')),
         h('button', { onclick: () => decide('revert', {}, 'Επέστρεψε στο μηχανικό αποτέλεσμα') }, 'Επαναφορά στο μηχανικό')));
-      S.segActions = { edit };
+      S.segActions = { edit, approve: again && !pending ? approve : null };
     } else if (needs) {                           // something is asked: confirm, correct, or keep the image
       area.append(h('div', { class: 'actions' },
         h('button', { class: 'good', disabled: pending, onclick: approve }, imageOnly ? '✓ Εγκρίνω — η εικόνα είναι το περιεχόμενο' : '✓ Εγκρίνω αυτή την εκδοχή', h('kbd', {}, 'A')),
@@ -209,6 +222,22 @@ export function segmentPanel(body, blk) {
 }
 // Properties of the segment in the BOOK (not its content): one aligned row each — label · value (one line) · one
 // action; a row's editor opens UNDER the row (one at a time). Output is a quiet switch at the end.
+const LAYOUT_EL = { cols: 'λίστα ανά στήλες', rows: 'λίστα ανά γραμμές', table: 'πίνακας' };
+// one request: the server records what the choice implies (an image adopts the engine reading; the reading is
+// confirmed) as one undoable step — the same from here, from the properties row and from a multi-selection
+function setTableLayout(blk, book, layout, msg) {
+  return act(() => api(`${B(book.id)}/decide`, { body: { block_id: blk.id, action: 'set_table_layout', layout } }), msg);
+}
+// a term grid kept as an image, while the engines read it and it looks like a list: offered where the decision is made
+function tableListSuggestion(blk, book) {
+  const s = blk.kind === 'table' && blk.chosen?.type !== 'text' ? blk.table_list : null;
+  if (!s?.candidate) return null;
+  return h('div', { class: 'note' }, h('b', {}, `Προτείνεται: ${LAYOUT_EL[s.order]} (${s.count} όροι, ανάγνωση ${s.candidate})`),
+    h('div', { class: 'small mut' }, 'Ως εικόνα ο πίνακας δεν φτάνει σε έξοδο μόνο κειμένου (RAG). Ως λίστα: ένας όρος ανά γραμμή, οι όροι που συνεχίζουν σε εσοχή ενώνονται.'),
+    h('div', { class: 'row', style: { marginTop: '6px' } },
+      h('button', { class: 'small primary', onclick: () => setTableLayout(blk, book, s.order, `Λίστα όρων από ${s.candidate}`) }, `Ως ${LAYOUT_EL[s.order]}`),
+      h('button', { class: 'small', onclick: () => setTableLayout(blk, book, s.order === 'cols' ? 'rows' : 'cols', `Λίστα όρων από ${s.candidate}`) }, `Ως ${LAYOUT_EL[s.order === 'cols' ? 'rows' : 'cols']}`)));
+}
 function propertiesCard(blk, book, decide, seg, rerender) {
   const toggle = (k) => { seg.prop = seg.prop === k ? null : k; rerender(); };
   // reading flow (pipeline/flow.py): body text or an insert placed into the text; a paragraph may CONTINUE the
@@ -233,6 +262,28 @@ function propertiesCard(blk, book, decide, seg, rerender) {
         : h('div', { class: 'small mut' }, 'Συνέχεια παραγράφου: μόνο για κείμενο (όχι σχήματα, πίνακες, εξισώσεις, λεζάντες, τίτλους).'),
       textual ? h('div', { class: 'small mut' }, 'Η συνέχεια αναζητείται στο ίδιο πλαίσιο: κυρίως κείμενο με κυρίως κείμενο (και πάνω από παρεκβάσεις), κείμενο ενός πλαισίου/παρέκβασης με το ίδιο πλαίσιο/παρέκβαση.') : null));
   };
+  // how a TABLE is read (pipeline/tables.py): a table, or a list of its cells by rows / by columns. A grid of terms
+  // («Βασικοί όροι») is a list: automatic when the cells look like terms and independent evidence agrees
+  const tableRow = () => {
+    if (blk.kind !== 'table') return null;
+    const hint = blk.table_list, over = blk.table_layout;
+    const asText = blk.chosen?.type === 'text';
+    const ORD = LAYOUT_EL;
+    const eff = over || (hint && !hint.candidate ? hint.order : 'table');
+    const why = hint ? [hint.evidence.includes('alphabetical') ? `αλφαβητικά${hint.sorted != null ? ` (${Math.round(hint.sorted * 100)}%)` : ''}` : '',
+      hint.evidence.some(e => e.startsWith('entity:')) ? 'κατηγορία «Βασικοί όροι»' : ''].filter(Boolean).join(' · ') : '';
+    const val = !asText ? (hint?.candidate ? `εικόνα · προτείνεται ${ORD[hint.order]} (${hint.count} όροι) από ${hint.candidate}` : 'εικόνα')
+      : `${ORD[eff]}${over ? ' (δική σου επιλογή)' : hint ? ` · αυτόματα (${why})` : ''}`;
+    const send = (layout, msg) => setTableLayout(blk, book, layout, msg);
+    const opts = [['cols', 'Λίστα ανά στήλες'], ['rows', 'Λίστα ανά γραμμές'], ['table', 'Πίνακας'], ['auto', 'Αυτόματα']];
+    return row('tbl', 'Ανάγνωση', h('span', { class: 'prop-line' + (asText ? '' : ' mut') }, val),
+      !asText && hint?.candidate ? h('button', { class: 'small primary prop-btn', title: `Χρήση της ανάγνωσης ${hint.candidate} ως ${ORD[hint.order]}`, onclick: () => send(hint.order, `Λίστα όρων από ${hint.candidate}`) }, 'Ως λίστα')
+        : act1('tbl', 'Αλλαγή ▾'),
+      () => h('div', { class: 'col' },
+        h('div', { class: 'small mut' }, 'Λίστα = ένα στοιχείο ανά κελί, χωρίς πίνακα (π.χ. «Βασικοί όροι»). Ανά στήλες: κάθε στήλη από πάνω προς τα κάτω, μετά η επόμενη. Όρος που συνεχίζει σε εσοχή στην επόμενη γραμμή ενώνεται.'
+          + (asText ? '' : ' Ο πίνακας είναι τώρα εικόνα: η λίστα χρησιμοποιεί την ανάγνωση της μηχανής.')),
+        h('div', { class: 'row small' }, opts.map(([k, l]) => h('button', { class: 'small' + ((over || 'auto') === k ? ' primary' : ''), onclick: () => send(k, `Ανάγνωση: ${l}`) }, l)))));
+  };
   const act1 = (k, label) => h('button', { class: 'small ghost prop-btn' + (seg.prop === k ? ' on' : ''), 'aria-expanded': String(seg.prop === k), onclick: () => toggle(k) }, seg.prop === k ? 'Κλείσιμο' : label);
   const row = (k, label, value, action, editor) => [h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, label), h('span', { class: 'prop-v' }, value), h('span', { class: 'prop-a' }, action || '')),
     seg.prop === k && editor ? h('div', { class: 'prop-edit' }, editor()) : null];
@@ -248,7 +299,7 @@ function propertiesCard(blk, book, decide, seg, rerender) {
     const sel = h('select', { class: 'prop-select', 'aria-label': 'Επίπεδο στη δομή', onchange: () => decide('set_heading_level', { level: +sel.value }, 'Η δομή ενημερώθηκε') },
       h('option', { value: 0 }, 'Κείμενο'), [1, 2, 3, 4, 5, 6].map(n => h('option', { value: n }, `Τίτλος H${n}`)));
     sel.value = blk.kind === 'heading' ? String(blk.heading_level || 1) : '0'; return sel; })() : null;
-  const out = h('input', { type: 'checkbox', role: 'switch', checked: !blk.omitted || null, 'aria-label': 'Στην έξοδο',
+  const out = h('input', { type: 'checkbox', role: 'switch', checked: !outOfOutput(blk) || null, 'aria-label': 'Στην έξοδο',
     onchange: () => act(() => api(`${B(book.id)}/output`, { body: { blocks: [blk.id], include: out.checked } }), out.checked ? 'Ξανά στην έξοδο' : 'Εκτός εξόδου') });
   return h('div', { class: 'props card' }, h('div', { class: 'prop-title' }, 'Ιδιότητες στο βιβλίο'),
     row('cat', 'Κατηγορία', ents.length ? ents.map(e => h('span', { class: `chip ent fam-${e.family || 'x'}${e.verified ? ' ent-ok' : ''}` }, entName(e.type))) : h('span', { class: 'mut' }, '—'),
@@ -262,6 +313,7 @@ function propertiesCard(blk, book, decide, seg, rerender) {
         : mayBeCaption ? 'όχι — μήπως είναι;' : `${(blk.relations?.captions || []).length} λεζάντα(ες)`),
       act1('cap', mayBeCaption ? 'Σύνδεση ▾' : 'Αλλαγή ▾'), () => unwrap(captionPanel(blk))) : null,
     flowRow(),
+    tableRow(),
     blk.flow !== 'furniture' ? row('exc', 'Παρέκβαση', excursusValue(blk), act1('exc', 'Επιλογές ▾'), () => excursusEditor(blk)) : null,
     row('label', 'Ετικέτα μηχανής', h('span', { class: 'prop-line' }, (blk.engine_label || '—').replace(':', ' · ')), act1('label', 'Αλλαγή ▾'), () => labelStructure(blk)),
     h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, 'Στην έξοδο'),

@@ -10,6 +10,7 @@ import { extentReviewPanel, headingReviewCard, outlineCard } from '../book/hiera
 import { docStructureCard } from '../inspector/suggestions.js';
 import { excursusCard } from '../inspector/excursus.js';
 import { act, modal } from '../ui/feedback.js';
+import { profileSettingsCard } from '../book/profile.js';
 
 export function tabStructure(body) {
   const rules = h('div', { class: 'card', style: { padding: '14px 16px', marginBottom: '16px' } });
@@ -87,6 +88,7 @@ export async function tabHistory(body) {
 }
 export async function tabSettings(body) {
   const b = S.book;
+  await profileSettingsCard(body);
   if (!S.books.length) S.books = await api('/api/books');
   const t = h('input', { type: 'text', value: b.title }), l = h('input', { type: 'text', value: b.ocr_lang });
   const who = h('input', { type: 'text', value: actor() });

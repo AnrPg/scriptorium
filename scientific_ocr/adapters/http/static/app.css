@@ -471,3 +471,17 @@ button.view-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
 .sel-palette-body{overflow:auto;padding:4px 8px 8px}
 .sel-palette-body .props.card{border:0;box-shadow:none;padding:0;margin:0}
 .sel-palette-body .prop-title{display:none}
+
+/* the output profile's exclusion being checked (inspector/boundloop.js): hatched, unlike any accepted segment */
+.ws-box.bound{border:2px dashed #7c3aed;background:repeating-linear-gradient(-45deg,rgba(124,58,237,.16) 0 7px,rgba(124,58,237,.03) 7px 14px);cursor:pointer;z-index:2}
+.ws-box.bound-start{border-top-width:4px;border-top-style:solid} .ws-box.bound-end{border-bottom-width:4px;border-bottom-style:solid}
+.ws-box.bound .bound-tag{position:absolute;left:-2px;font-size:10px;font-weight:700;background:#7c3aed;color:#fff;padding:0 5px;border-radius:3px;white-space:nowrap}
+.ws-box.bound-start .bound-tag{top:-17px} .ws-box.bound-end .bound-tag{bottom:-17px}
+.bound-bar{background:#f3ecff;border:1px solid #d8c6fb;border-radius:8px;padding:6px 8px;gap:8px;flex-wrap:wrap;align-items:center}
+@media (prefers-color-scheme: dark){.bound-bar{background:#2a1f45;border-color:#5b3fa3}}
+.content-list{margin:4px 0 8px;padding-left:1.3em}.content-list li{margin:0}.content-list li>*{margin:0;padding:1px 0;border:0;background:none}
+/* collapsible sections of a tab (dom.js section()) */
+details.section{border:0;border-radius:0;margin:0;border-bottom:1px solid var(--line)}
+details.section>summary{font-size:15px;padding:12px 2px}
+details.section>div{padding:0 0 14px}
+label.list-item{cursor:pointer}
