@@ -23,7 +23,9 @@ export function selectionProps(ids, state) {
   const btn = (k, label) => h('button', { class: 'small ghost prop-btn' + (state.prop === k ? ' on' : ''), 'aria-expanded': String(state.prop === k), onclick: () => toggle(k) }, state.prop === k ? 'Κλείσιμο' : label);
   const row = (k, label, value, action, editor) => [h('div', { class: 'prop-row' }, h('span', { class: 'prop-k' }, label), h('span', { class: 'prop-v' }, value), h('span', { class: 'prop-a' }, action || '')),
     state.prop === k && editor ? h('div', { class: 'prop-edit' }, editor()) : null];
-  const choices = (label, opts, run) => h('div', { class: 'row small' }, label, opts.map(([k, l]) => h('button', { class: 'small', onclick: () => run(k, l) }, l)));
+  // a question on its own line, its choices on the line under it (they wrap as a group, never cut)
+  const choices = (label, opts, run) => h('div', { class: 'prop-choice', role: 'group', 'aria-label': label.replace(/:$/, '') },
+    h('div', { class: 'prop-choice-q small' }, label), h('div', { class: 'prop-choice-opts' }, opts.map(([k, l]) => h('button', { class: 'small', onclick: () => run(k, l) }, l))));
   // what the selection currently has (segments of this page; others are on other pages)
   const here = ids.map(id => S.page.blocks.find(b => b.id === id)).filter(Boolean);
   const summary = (f) => { const vals = [...new Set(here.map(f))]; return here.length < ids.length ? 'διάφορα' : vals.length === 1 ? vals[0] : 'διάφορα'; };
@@ -33,12 +35,19 @@ export function selectionProps(ids, state) {
   const groups = (S.book.groups || []).filter(g => g.members.some(m => S.page.blocks.some(b => b.id === m)) && !g.members.some(m => ids.includes(m)));
   // merge needs one page (an unknown page counts as another one); grouping may span pages
   const pages = new Set(ids.map(id => S.multi.get(id)?.page ?? null)), multiPage = pages.size > 1 || pages.has(null);
+  // grouped by subtask (organise · role in the text · reading and output); every label and value wraps, never cut
+  const section = (title, ...rows) => h('section', { class: 'prop-sec' }, h('h4', { class: 'prop-sec-title' }, title), ...rows);
+  const outNow = summary(b => b.omitted ? 'όχι' : 'ναι');
   return h('div', { class: 'props card' }, h('div', { class: 'prop-title' }, `Ιδιότητες επιλογής (${ids.length})`),
+    section('Οργάνωση',
     row('join', 'Μαζί', h('span', { class: 'mut small' }, 'σημείωση ομάδας / ένα νέο τμήμα'), h('span', { class: 'row' },
       h('button', { class: 'small', title: 'Τα τμήματα μένουν ως έχουν· σημειώνεται ότι ανήκουν μαζί (και σε πολλές σελίδες) — G', onclick: (e) => openGroupMenu(e.currentTarget) }, 'Ομαδοποίηση…'),
       h('button', { class: 'small', disabled: multiPage, title: multiPage ? 'Η συγχώνευση γίνεται μέσα σε μία σελίδα· σε πολλές σελίδες: ομαδοποίηση' : 'Ένα νέο τμήμα με τα κείμενά τους, με τη σειρά της επιλογής — M',
         onclick: (e) => openMergeMenu(e.currentTarget) }, 'Συγχώνευση σε ένα…'))),
     row('cat', 'Κατηγορία', h('span', { class: 'mut small' }, 'όλα μαζί = μία οντότητα'), assignSelectionButton(ids)),
+    row('exc', 'Παρέκβαση', h('span', { class: 'mut small' }, 'από το πρώτο έως το τελευταίο επιλεγμένο'),
+      h('button', { class: 'small', onclick: () => excursusDialog({ blocks: ids }, `${ids.length} επιλεγμένα (και ό,τι υπάρχει ανάμεσα)`) }, 'Σήμανση…'))),
+    section('Ρόλος στο κείμενο',
     row('lvl', 'Δομή', h('span', { class: 'mut prop-line' }, summary(b => b.kind === 'heading' ? `H${b.heading_level || 1}` : 'κείμενο')), levelSel),
     row('cap', 'Λεζάντα', h('span', { class: 'prop-line' }, summary(b => b.kind === 'caption' ? 'λεζάντα' : 'όχι')), btn('cap', 'Αλλαγή ▾'), () => h('div', { class: 'col' },
       h('div', { class: 'small mut' }, 'Όλα τα επιλεγμένα γίνονται λεζάντες του ίδιου σχήματος ή της ίδιας ομάδας (σχήματα/πίνακες της επιλογής παραλείπονται).'),
@@ -57,16 +66,15 @@ export function selectionProps(ids, state) {
       h('div', { class: 'small mut' }, 'Μόνο για πίνακες με κείμενο (τα άλλα τμήματα παραλείπονται). Λίστα με επίπεδα: κύρια η 1η στήλη (ανά γραμμές) ή η 1η γραμμή (ανά στήλες) — άλλη κύρια στήλη/γραμμή διαλέγεται σε κάθε πίνακα χωριστά. «Ένα ανά κελί» = απλή λίστα των κελιών.'),
       choices('Λίστα:', [['rows:0', 'Ανά γραμμές (1η στήλη κύρια)'], ['cols:0', 'Ανά στήλες (1η γραμμή κύρια)'], ['rows', 'Ανά γραμμές, ένα ανά κελί'], ['cols', 'Ανά στήλες, ένα ανά κελί']],
         (k, l) => { const [layout, key] = k.split(':'); many('set_table_layout', { layout, ...(key != null ? { key: +key } : {}) }, `Ανάγνωση: ${l}`); }),
-      choices('Ή:', [['table', 'Πίνακας'], ['auto', 'Αυτόματα']], (k, l) => many('set_table_layout', { layout: k }, `Ανάγνωση: ${l}`)))) : null,
+      choices('Ή:', [['table', 'Πίνακας'], ['auto', 'Αυτόματα']], (k, l) => many('set_table_layout', { layout: k }, `Ανάγνωση: ${l}`)))) : null),
+    section('Ανάγνωση και έξοδος',
     row('label', 'Ετικέτα μηχανής', h('span', { class: 'prop-line' }, summary(b => (b.engine_label || '—').replace(':', ' · '))), btn('label', 'Αλλαγή ▾'), () => h('div', {},
       h('div', { class: 'small mut' }, 'Κάθε επιλεγμένο τμήμα ξαναγίνεται OCR με τη νέα ετικέτα.'),
       labelPicker([], (l) => many('relabel', { label: l }, 'Νέα ετικέτα· τρέχει νέο OCR')))),
-    row('out', 'Στην έξοδο', h('span', { class: 'prop-line' }, summary(b => b.omitted ? 'όχι' : 'ναι')), h('span', { class: 'row' },
-      h('button', { class: 'small', onclick: () => act(() => api(`${B(S.book.id)}/output`, { body: { blocks: ids, include: true } }), `Στην έξοδο (${ids.length})`) }, 'Ναι'),
-      h('button', { class: 'small', onclick: () => act(() => api(`${B(S.book.id)}/output`, { body: { blocks: ids, include: false } }), `Εκτός εξόδου (${ids.length})`) }, 'Όχι'))),
-    row('exc', 'Παρέκβαση', h('span', { class: 'mut small' }, 'από το πρώτο έως το τελευταίο επιλεγμένο'),
-      h('button', { class: 'small', onclick: () => excursusDialog({ blocks: ids }, `${ids.length} επιλεγμένα (και ό,τι υπάρχει ανάμεσα)`) }, 'Σήμανση…')),
+    row('out', 'Στην έξοδο', h('span', { class: 'prop-line' }, outNow), h('span', { class: 'seg-toggle', role: 'group', 'aria-label': 'Στην έξοδο' },
+      h('button', { class: 'small' + (outNow === 'ναι' ? ' on' : ''), 'aria-pressed': String(outNow === 'ναι'), onclick: () => act(() => api(`${B(S.book.id)}/output`, { body: { blocks: ids, include: true } }), `Στην έξοδο (${ids.length})`) }, 'Ναι'),
+      h('button', { class: 'small' + (outNow === 'όχι' ? ' on' : ''), 'aria-pressed': String(outNow === 'όχι'), onclick: () => act(() => api(`${B(S.book.id)}/output`, { body: { blocks: ids, include: false } }), `Εκτός εξόδου (${ids.length})`) }, 'Όχι'))),
     row('content', 'Περιεχόμενο', h('span', { class: 'mut small' }, 'όπως είναι / ως εικόνα'), h('span', { class: 'row' },
       h('button', { class: 'small good', onclick: () => many('approve', {}, 'Εγκρίθηκαν') }, 'Έγκριση'),
-      h('button', { class: 'small', onclick: () => many('mark_image_only', {}, 'Μόνο εικόνα') }, 'Μόνο εικόνα'))));
+      h('button', { class: 'small', onclick: () => many('mark_image_only', {}, 'Μόνο εικόνα') }, 'Μόνο εικόνα')))));
 }

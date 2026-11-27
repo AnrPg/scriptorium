@@ -477,6 +477,34 @@ button.view-btn:hover{background:var(--acc);color:#fff;border-color:var(--acc)}
 .sel-palette-body{overflow:auto;padding:4px 8px 8px}
 .sel-palette-body .props.card{border:0;box-shadow:none;padding:0;margin:0}
 .sel-palette-body .prop-title{display:none}
+/* palette rows: label | value (wrapping, never cut), the actions on their own line under the value; one button size */
+.sel-palette{width:min(400px,calc(100vw - 16px))}
+.sel-palette-body{padding:2px 12px 12px}
+.prop-sec+.prop-sec{margin-top:6px}
+.prop-sec-title{margin:10px 0 2px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)}
+.sel-palette .prop-row{grid-template-columns:104px minmax(0,1fr);grid-template-areas:"k v" ". a";column-gap:12px;row-gap:6px;
+  align-items:start;min-height:0;padding:9px 0}
+.sel-palette .prop-sec-title+.prop-row{border-top:0}
+.sel-palette .prop-k{grid-area:k;font-size:12.5px;color:var(--fg);font-weight:500;line-height:1.35;overflow-wrap:anywhere}
+.sel-palette .prop-v{grid-area:v;white-space:normal;overflow:visible;flex-wrap:wrap;font-size:12.5px;line-height:1.35}
+.sel-palette .prop-v .prop-line,.sel-palette .prop-v>span{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+.sel-palette .prop-a{grid-area:a;width:auto;justify-self:stretch;justify-content:flex-start;display:flex;flex-wrap:wrap;gap:6px}
+.sel-palette .prop-a>.row{gap:6px}
+.sel-palette .prop-a button{font-size:12px;min-height:30px;padding:4px 12px;white-space:normal;text-align:left;line-height:1.25}
+.sel-palette .prop-a button.ghost{border-color:var(--line2);background:var(--panel)}
+.sel-palette .prop-a button.prop-btn{width:auto}
+.sel-palette .prop-a button.prop-btn.on{background:var(--acc-weak);color:var(--acc);border-color:var(--acc)}
+.sel-palette .prop-a button.good{border-color:var(--ok)}
+.sel-palette .prop-select{width:100%;min-height:30px;font-size:12.5px}
+.sel-palette .prop-a:has(> .prop-select){flex:1}
+.sel-palette .prop-edit{padding:8px 0 10px 116px}
+.sel-palette .prop-edit button{font-size:12px;padding:4px 10px;white-space:normal}
+/* a two-state choice as one segmented control: the state in force is marked */
+.seg-toggle{display:inline-flex}
+.seg-toggle>button{border-radius:0;min-width:56px;justify-content:center;text-align:center}
+.seg-toggle>button:first-child{border-radius:6px 0 0 6px}.seg-toggle>button:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
+.seg-toggle>button.on{background:var(--acc-weak);color:var(--acc);border-color:var(--acc);position:relative;z-index:1;font-weight:600}
+.sel-palette .seg-toggle>button{text-align:center}
 
 /* the output profile's exclusion being checked (inspector/boundloop.js): hatched, unlike any accepted segment */
 .ws-box.bound{border:2px dashed #7c3aed;background:repeating-linear-gradient(-45deg,rgba(124,58,237,.16) 0 7px,rgba(124,58,237,.03) 7px 14px);cursor:pointer;z-index:2}
@@ -546,3 +574,7 @@ label.list-item{cursor:pointer}
 .draft-preview .math-view{background:transparent;border:0;color:inherit}
 @media (prefers-color-scheme: dark){.draft-preview{border-color:#8a6d1f;background:#2b2412;color:#f1e2b8}.draft-preview-tag{color:#e0b84a}}
 .draft-preview-body{max-height:340px;overflow:auto}.draft-editor>.small.mut:first-child{margin:2px 0 4px}
+.prop-choice{margin:6px 0}.prop-choice-q{color:var(--mut);margin-bottom:4px}
+.prop-choice-opts{display:flex;flex-wrap:wrap;gap:6px}
+.sel-palette .prop-edit .actions{display:flex;flex-wrap:wrap;gap:6px}
+.sel-palette .prop-edit button.ghost{border-color:var(--line2);background:var(--panel)}
