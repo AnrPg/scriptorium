@@ -11,7 +11,7 @@ import { moveBySteps, nextPageWithWork } from '../inspector/lineage.js';
 import { toggleSelectMode } from '../inspector/multi.js';
 import { dialogOpen, modal } from '../ui/feedback.js';
 import { EMBED } from '../ui/page_overlay.js';
-import { VIEWS, clearSelection, omitTargets, renderWorkspace, selectBlock, setView, removeSegments, toggleDraw, toggleOmit, toolOn } from '../workspace/workspace.js';
+import { VIEWS, clearSelection, omitTargets, renderWorkspace, selectBlock, setView, removeSegments, toggleContinuation, toggleDraw, toggleOmit, toolOn } from '../workspace/workspace.js';
 
 // ------------------------------------------------------------------ keyboard: only what the current state allows
 // One declarative table drives the handler AND the help: each shortcut names its key, exact modifiers, when it is
@@ -50,6 +50,7 @@ export const SHORTCUTS = [
   { keys: 'Esc', label: 'Πίσω / καθαρισμός επιλογής / ακύρωση / απόρριψη πρόχειρου', group: 'segment', match: K('Escape'), when: inWs, run: (e, c) => escapeKey(e, c) },
   { keys: '1 / 2 / 3', label: 'Σάρωση / Αποτέλεσμα / Markdown σελίδας', group: 'page', match: K(['1', '2', '3']), when: c => free(c) && S.page?.info?.state, run: (e) => setView(VIEWS[+e.key - 1][0]) },
   { keys: 'O', label: 'Εκτός εξόδου / ξανά στην έξοδο (το επιλεγμένο ή τα επιλεγμένα· μένουν στο βιβλίο)', group: 'multi', match: K('o'), when: c => free(c) && toolOn('omit') && omitTargets().length > 0, run: () => toggleOmit() },
+  { keys: 'F', label: 'Συνέχεια της προηγούμενης παραγράφου (το επιλεγμένο ή τα επιλεγμένα κείμενα· ξανά: αυτόματα)', group: 'multi', match: K(['f', 'φ']), when: c => free(c) && omitTargets().length > 0, run: () => toggleContinuation() },
   { keys: '⌫', label: 'Αφαίρεση λάθος τμήματος (το επιλεγμένο ή τα επιλεγμένα· ⌘Z για αναίρεση)', group: 'multi', match: K(['Delete', 'Backspace']), when: c => free(c) && toolOn('omit') && omitTargets().length > 0, run: () => removeSegments() },
   { keys: 'S', label: 'Λειτουργία επιλογής (κλικ = προσθήκη/αφαίρεση) — στη Σάρωση', group: 'multi', match: K('s'), when: c => free(c) && toolOn('select'), run: () => toggleSelectMode() },
   { keys: '↵', label: 'Ομαδοποίηση/συγχώνευση των επιλεγμένων →', group: 'multi', match: K('Enter'), when: (c, e) => free(c) && S.multi.size >= 2 && !S.multiOpen && !enterOwnedBy(e), run: () => openMultiPanel() },

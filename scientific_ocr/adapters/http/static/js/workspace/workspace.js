@@ -3,7 +3,7 @@ import { refresh } from '../core/chrome.js';
 import { loopLevel, setLoopLevel, stepReview } from '../inspector/reviewloop.js';
 import { $, clear, h, keepScroll, pctStyle } from '../core/dom.js';
 import { NAV, navSave } from '../core/nav.js';
-import { R, S, go, kindLabel, outOfOutput, parseRoute, profileHidden } from '../core/state.js';
+import { R, S, continuable, go, kindLabel, outOfOutput, parseRoute, profileHidden } from '../core/state.js';
 import { REVIEW_EL, STATE_EL } from '../core/strings.js';
 import { finishLink } from '../inspector/captions.js';
 import { queueNeighbours, renderInspector } from '../inspector/inspector.js';
@@ -58,6 +58,20 @@ export function toggleOmit() {
   if (!ids.length) return toast('Διάλεξε πρώτα τμήμα(τα)', { error: true });
   const include = omitState();
   act(() => api(`${B(S.book.id)}/output`, { body: { blocks: ids, include } }), include ? `Ξανά στην έξοδο: ${ids.length}` : `Εκτός εξόδου: ${ids.length} (μένουν στο μοντέλο)`);
+}
+// F: the selected text segment(s) CONTINUE the previous paragraph (set_continuation true: one paragraph in linear
+// outputs, across an insert or a page break). Pressed again on segments already set so by you: back to automatic.
+// Segments that cannot continue a paragraph (figures, tables, equations, captions, titles) are left as they are.
+export function toggleContinuation() {
+  // members on other pages (a selection may span pages) are not visible here: sent as they are (pipeline/flow.py
+  // never continues visual content anyway); only segments seen to be non-text on this page are left out
+  const all = omitTargets(), seen = all.map(id => [id, blockById(id)]);
+  const ids = seen.filter(([, b]) => !b || continuable(b)).map(([id]) => id), skipped = all.length - ids.length;
+  if (!ids.length) return toast(all.length ? 'Συνέχεια παραγράφου: μόνο για κείμενο (όχι σχήματα, πίνακες, εξισώσεις, λεζάντες, τίτλους)' : 'Διάλεξε πρώτα τμήμα(τα)', { error: true });
+  const back = seen.every(([, b]) => !b || !continuable(b) || b.continues_override === true) && seen.some(([, b]) => b && continuable(b));
+  const continues = back ? 'auto' : true;
+  const msg = `${back ? 'Συνέχεια: αυτόματα' : 'Συνεχίζει την προηγούμενη παράγραφο'}${ids.length > 1 ? ` (${ids.length} τμήματα)` : ''}${skipped ? ` · ${skipped} μη κειμενικά έμειναν ως είχαν` : ''}`;
+  act(() => api(`${B(S.book.id)}/decide-many`, { body: { blocks: ids, action: 'set_continuation', continues } }), msg);
 }
 // Delete / ⌫: remove WRONG segments (noise, duplicates, bad boxes) — the selected one or all selected, one undo.
 // Right content that should not be in the text is "out of the output" (O), not this.

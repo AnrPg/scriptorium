@@ -12,6 +12,10 @@ export const R = (code) => (S.meta && S.meta.reasons[code]) || { el: code, revie
 export const profileHidden = b => !!(b && b.profile_omitted && !b.kept);
 /** Out of the reader output for any reason (the reviewer's choice or the output profile). */
 export const outOfOutput = b => !!(b && (b.omitted || profileHidden(b)));
+// a paragraph may CONTINUE the previous one (pipeline/flow.py): every TEXT segment, also inside a box or an excursus;
+// never visual content (figures, tables, equations, captions), titles or page furniture
+const NOT_CONTINUABLE = ['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table', 'math', 'chemical_reaction', 'nuclear_reaction', 'caption', 'heading'];
+export const continuable = b => !!b && b.flow !== 'furniture' && !NOT_CONTINUABLE.includes(b.kind) && !(b.kind === 'excerpt' && b.chosen?.type !== 'text');
 export const kindLabel = b => ROLE_EL[b.role] || KIND_EL[b.original_kind || b.kind] || b.kind;
 export function scriptTag(ch) {             // show the alphabet when glyphs look identical (Α vs A)
   const c = (ch || '').codePointAt(0) || 0;

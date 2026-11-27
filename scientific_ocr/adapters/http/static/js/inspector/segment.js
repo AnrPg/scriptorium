@@ -5,7 +5,7 @@ import { B, api } from '../core/api.js';
 import { $, clear, h } from '../core/dom.js';
 import { K } from '../core/keyboard.js';
 import { render } from '../core/nav.js';
-import { R, S, kindLabel, outOfOutput } from '../core/state.js';
+import { R, S, continuable, kindLabel, outOfOutput } from '../core/state.js';
 import { ACTION_EL, REVIEW_EL, SRC_EL, infoTip } from '../core/strings.js';
 import { captionPanel } from '../inspector/captions.js';
 import { excursusEditor, excursusValue } from '../inspector/excursus.js';
@@ -286,8 +286,7 @@ function propertiesCard(blk, book, decide, seg, rerender) {
     const cont = blk.relations?.continues_from, forced = blk.continues_override;
     // continuation applies to every TEXT segment, also inside a box or an excursus (it continues text of the same
     // box / excursus); only visual content (figures, tables, equations, captions) never continues a paragraph
-    const textual = !['figure', 'chart', 'molecular_structure', 'reaction_scheme', 'lewis_structure', 'table', 'math', 'chemical_reaction', 'nuclear_reaction', 'caption', 'heading'].includes(blk.kind)
-      && !(blk.kind === 'excerpt' && blk.chosen?.type !== 'text');
+    const textual = continuable(blk);
     const ctx = blk.relations?.continues_strand && blk.relations.continues_strand !== 'main' ? ' (μέσα στο ίδιο πλαίσιο/παρέκβαση)' : '';
     const val = [blk.flow === 'insert' ? 'παρεμβολή' : 'κείμενο', cont ? ` · ↳ συνεχίζει προηγούμενη παράγραφο${ctx}` : '',
       blk.flow_override || forced != null ? ' (δική σου επιλογή)' : ''].join('');
@@ -296,7 +295,7 @@ function propertiesCard(blk, book, decide, seg, rerender) {
       h('div', { class: 'small mut' }, 'Παρεμβολή = σχήμα/πίνακας/εξίσωση μέσα στο κείμενο. Συνέχεια = η παράγραφος συνεχίζει την προηγούμενη, που διακόπηκε από παρεμβολή ή αλλαγή σελίδας· στην εξαγωγή ενώνονται σε μία.'),
       h('div', { class: 'row small' }, 'Ρόλος:', [['main', 'Κείμενο'], ['insert', 'Παρεμβολή'], ['auto', 'Αυτόματα']].map(([k, l]) =>
         h('button', { class: 'small' + ((blk.flow_override || 'auto') === k ? ' primary' : ''), onclick: () => send('set_flow', { flow: k }, `Ροή: ${l}`) }, l))),
-      textual ? h('div', { class: 'row small' }, 'Συνέχεια της προηγούμενης παραγράφου:', [[true, 'Ναι'], [false, 'Όχι'], ['auto', 'Αυτόματα']].map(([k, l]) =>
+      textual ? h('div', { class: 'row small', title: 'Πλήκτρο F: Συνέχεια «Ναι» (ξανά: αυτόματα)' }, 'Συνέχεια της προηγούμενης παραγράφου (F):', [[true, 'Ναι'], [false, 'Όχι'], ['auto', 'Αυτόματα']].map(([k, l]) =>
         h('button', { class: 'small' + ((forced == null ? 'auto' : forced) === k ? ' primary' : ''), onclick: () => send('set_continuation', { continues: k }, `Συνέχεια: ${l}`) }, l)))
         : h('div', { class: 'small mut' }, 'Συνέχεια παραγράφου: μόνο για κείμενο (όχι σχήματα, πίνακες, εξισώσεις, λεζάντες, τίτλους).'),
       textual ? h('div', { class: 'small mut' }, 'Η συνέχεια αναζητείται στο ίδιο πλαίσιο: κυρίως κείμενο με κυρίως κείμενο (και πάνω από παρεκβάσεις), κείμενο ενός πλαισίου/παρέκβασης με το ίδιο πλαίσιο/παρέκβαση.') : null));
