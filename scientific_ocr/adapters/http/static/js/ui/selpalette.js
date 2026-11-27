@@ -22,7 +22,10 @@ function place() {
   const F = window.FloatingUIDOM;
   if (!F) { el.style.left = Math.min(anchor.x + OFFSET, innerWidth - el.offsetWidth - 8) + 'px'; el.style.top = Math.min(anchor.y + OFFSET, innerHeight - el.offsetHeight - 8) + 'px'; return; }
   F.computePosition(virtualAt(anchor), el, { strategy: 'fixed', placement: 'bottom-start',
-    middleware: [F.offset(OFFSET), F.flip({ padding: 8 }), F.shift({ padding: 8 })] })
+    // kept inside the viewport on BOTH axes (shift's cross axis is the vertical one for a bottom placement), and never
+    // taller than the room there is (it scrolls inside)
+    middleware: [F.offset(OFFSET), F.flip({ padding: 8 }), F.shift({ padding: 8, crossAxis: true }),
+      F.size({ padding: 8, apply: ({ availableHeight }) => { el.style.maxHeight = `${Math.max(220, Math.min(560, availableHeight))}px`; } })] })
     .then(({ x, y }) => { el.style.left = `${x}px`; el.style.top = `${y}px`; });
 }
 function distanceToBox(p) {
