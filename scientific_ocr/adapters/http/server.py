@@ -614,6 +614,19 @@ class Handler(BaseHTTPRequestHandler):
     def profile(self, bid, n):
         self._json(200, self.app.set_profile(bid, int(n), self._body().get('profile', 'diligent'), self._actor()))
 
+    # ---------------------------------------------------------------- health (application.health)
+    @route('POST', r'/api/health/check')
+    def health_check(self):
+        self._json(200, self.app.health_check())
+
+    @route('GET', r'/api/health')
+    def health(self):
+        self._json(200, self.app.health_reports())
+
+    @route('POST', r'/api/health/seen')
+    def health_seen(self):
+        self._json(200, self.app.health_seen(self._body().get('ids')))
+
     # ---------------------------------------------------------------- jobs
     @route('GET', r'/api/jobs')
     def jobs(self):

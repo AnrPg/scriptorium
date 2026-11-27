@@ -57,7 +57,9 @@ def main(argv=None) -> int:
         from .application.jobs import JobQueue
         from .application.services import App
         lib = Library(a.library)
-        serve(App(lib, JobQueue(lib.root)), a.port)
+        app = App(lib, JobQueue(lib.root))
+        app.health.start()                       # stuck job processes: at start and every 2 hours
+        serve(app, a.port)
         return 0
     if a.cmd in ('process', 'run'):
         from .application import processing

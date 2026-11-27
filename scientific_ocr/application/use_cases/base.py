@@ -10,6 +10,7 @@ from ... import config
 from ...core.decisions import page_of
 from ...adapters import local_llm
 from ...adapters.storage import Book, Library
+from ..health import Health
 from ..jobs import JobQueue
 
 
@@ -26,6 +27,7 @@ PROFILES = ('standard', 'diligent')
 class ServiceBase:
     def __init__(self, library: Library, jobs: JobQueue, interpreter=None):
         self.lib, self.jobs = library, jobs
+        self.health = Health(library.root, jobs)  # started by the ui command (cli): at start and every 2 h
         self._interpreter = interpreter          # ports.NoteInterpreter; None -> resolved lazily from config
 
     def interpreter(self):

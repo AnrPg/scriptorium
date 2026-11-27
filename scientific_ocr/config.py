@@ -62,6 +62,8 @@ OCR_MAX_DPI = 600
 # rebuilds — explicitly, or when a view that needs book-wide results asks for it.
 AUTO_REBUILD_MAX_S = 15
 BUILD_HISTORY_KEEP = 2                   # previous full builds kept (hard links) so undo/redo can restore one at once
+HEALTH_INTERVAL_S = 2 * 3600            # the app's health check (application.health): also at start and on browser open
+HEALTH_EXIT_GRACE_S = 120                # a job process alive this long after printing @@exit is stuck in its exit
 PAGE_PREVIEW_MAX_PAGES = 8               # more changed pages than this: a full rebuild (~17 s) beats page previews
 BUILD_SECONDS_PER_PAGE_GUESS = 1.0      # until a book's first measured rebuild (cache/build.json)
 MARKER_DEFAULT_OCR_DPI = 192

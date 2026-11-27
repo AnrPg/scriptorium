@@ -126,6 +126,27 @@ class JobQueue:
             j = self._active(book_id, lane)
             return dict(j) if j else None
 
+    def running(self) -> dict[int, dict]:
+        """pid -> job, for the jobs whose process this app runs now (application.health)."""
+        with self.lock:
+            return {p.pid: dict(self.jobs[i]) for i, p in self.procs.items() if i in self.jobs}
+
+    def report_exit(self, job_id: str, code: int):
+        """The job's command finished with `code` but its process hangs (application.health stops it): the job ends
+        as the command did, not as the stop signal would say."""
+        with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id]['exit_reported'] = code
+
+    def find(self, book_id: str | None, command: str, age_s: float, now: float) -> dict | None:
+        """The history entry of a job process this app no longer runs (an orphan): same book and command, started
+        when the process did (±2 min)."""
+        started = now - age_s
+        with self.lock:
+            hits = [j for j in self.jobs.values() if j['book'] == book_id and j['args'][:1] == [command]
+                    and j.get('started') and abs(j['started'] - started) < 120]
+            return dict(min(hits, key=lambda j: abs(j['started'] - started))) if hits else None
+
     def log_path(self, job: dict) -> Path:
         return self.root / job['book'] / 'logs' / f'job-{job["id"]}.log'
 
@@ -174,6 +195,9 @@ class JobQueue:
             code = p.wait()
         with self.lock:
             self.procs.pop(job['id'], None)
+            if 'exit_reported' in job:                 # stopped by the health check after its work was done
+                code = job.pop('exit_reported')
+                job['note'] = 'stuck_after_finish'
             state = 'cancelled' if job.get('cancel_requested') else ('done' if code == 0 or code in WARNING_EXITS else 'failed')
             job.update(state=state, code=code, finished=time.time())
             if state == 'done' and code in WARNING_EXITS:

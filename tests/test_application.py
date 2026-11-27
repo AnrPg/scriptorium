@@ -1530,3 +1530,52 @@ def test_findings_keep_the_build_they_first_appeared_in(tmp_path):
     c = {'run': {'built_utc': 't2'}, 'findings': [{'id': 'Fold'}, {'id': 'Fnew'}]}
     projection._mark_first_seen(c, tmp_path)
     assert [f['first_seen'] for f in c['findings']] == ['t1', 't2']
+
+
+def test_health_check_stops_only_processes_that_can_never_finish(tmp_path):
+    """A job alive after printing @@exit (stuck in its exit) and a job orphaned by a dead app are stopped and
+    reported once; a long-running job, a command typed in a terminal and the app itself are never touched."""
+    from types import SimpleNamespace
+
+    from scientific_ocr import config
+    from scientific_ocr.application.health import Health, exit_reported
+    from scientific_ocr.application.jobs import JobQueue
+    now = 2_000_000_000.0
+    q = JobQueue(tmp_path)
+    py = '/x/.venvs/docling/bin/python -W ignore -m scientific_ocr'
+    hung = {'id': 'hung', 'book': 'b1', 'kind': 'pages', 'label': 'Σελίδα 438: ενημέρωση', 'lane': 'light',
+            'args': ['reproject-pages', '--book', '/lib/b1'], 'state': 'running', 'created': now - 9e4, 'started': now - 9e4}
+    slow = {**hung, 'id': 'slow', 'kind': 'process', 'lane': 'heavy', 'args': ['process', '--book', '/lib/b1']}
+    gone = {**hung, 'id': 'gone', 'book': 'b2', 'state': 'interrupted', 'args': ['reproject', '--book', '/lib/b2'],
+            'started': now - 3600}
+    q.jobs.update({j['id']: j for j in (hung, slow, gone)})
+    q.procs.update({'hung': SimpleNamespace(pid=101), 'slow': SimpleNamespace(pid=102)})
+    for j, text in ((hung, 'page 438 preview: 10 segments\n'), (slow, 'page 12 of 400\n')):
+        q.log_path(j).parent.mkdir(parents=True, exist_ok=True)
+        q.log_path(j).write_text(text + (f'@@exit 0 {now - config.HEALTH_EXIT_GRACE_S - 5:.0f}\n' if j is hung else ''))
+    procs = [
+        {'pid': 101, 'ppid': 50, 'pgid': 101, 'age_s': 9e4, 'cpu': 100.0, 'command': f'{py} reproject-pages --book /lib/b1'},
+        {'pid': 102, 'ppid': 50, 'pgid': 102, 'age_s': 9e4, 'cpu': 99.0, 'command': f'{py} process --book /lib/b1'},
+        {'pid': 103, 'ppid': 1, 'pgid': 103, 'age_s': 3600, 'cpu': 0.0, 'command': f'{py} reproject --book /lib/b2'},
+        {'pid': 104, 'ppid': 1, 'pgid': 104, 'age_s': 99, 'cpu': 0.0, 'command': '/x/python -m scientific_ocr process --book /lib/b3'},
+        {'pid': 105, 'ppid': 1, 'pgid': 105, 'age_s': 99, 'cpu': 0.0, 'command': f'{py} ui --port 8765'},
+    ]
+    stopped = []
+    h = Health(tmp_path, q, procs=lambda: procs, stop=lambda pid, pgid: stopped.append(pid) or True, now=lambda: now,
+               reap=lambda log: [])
+    rep = h.check('periodic')
+    assert stopped == [101, 103]
+    got = {x['pid']: x for x in rep['stopped']}
+    assert got[101]['reason'] == 'finished_hung' and got[101]['code'] == 0 and q.jobs['hung']['exit_reported'] == 0
+    assert got[101]['last_log'].startswith('page 438') and got[101]['label'] == 'Σελίδα 438: ενημέρωση'
+    assert got[103]['reason'] == 'orphan' and got[103]['job'] == 'gone' and got[103]['book'] == 'b2'
+    assert [r['id'] for r in h.unseen()] == [rep['id']] and h.mark_seen([rep['id']]) == 1 and h.unseen() == []
+    assert exit_reported(q.log_path(slow)) is None
+    reaped = []
+    h._reap = lambda log: reaped.append(1) or [777]
+    procs[:] = procs[1:2]                                     # only the long job is left: nothing to do, no report
+    assert h.check('browser') is None and stopped == [101, 103] and reaped == []   # it may use the engine servers
+    procs[:] = [{'pid': 9, 'ppid': 1, 'pgid': 9, 'age_s': 5, 'cpu': 50.0, 'command': '/x/marker_single a.pdf --page_range 0'}]
+    assert h.check('browser') is None and reaped == []        # an extraction elsewhere: its servers are in use
+    procs[:] = []
+    assert h.check('periodic')['stopped'] == [{'reason': 'engine_server', 'pid': 777, 'stopped': True}]

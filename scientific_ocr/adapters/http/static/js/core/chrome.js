@@ -6,6 +6,7 @@ import { S, go } from '../core/state.js';
 import { renderLibrary } from '../library/library.js';
 import { act, dialogOpen, modal, toast } from '../ui/feedback.js';
 import { EMBED } from '../ui/page_overlay.js';
+import { healthPoll } from '../ui/health.js';
 import { fmtEstimate, startRebuild } from '../ui/rebuild.js';
 import { renderWorkspace } from '../workspace/workspace.js';
 
@@ -65,6 +66,7 @@ export async function poll() {
     const finished = S.jobs.filter(j => isActiveJob(j) && !active.find(a => a.id === j.id));
     S.jobs = jobs;
     renderJobsPill(); renderPendingPill();
+    if (!EMBED) healthPoll();
     for (const j of finished) { const now = jobs.find(x => x.id === j.id); if (now && now.state === 'failed') toast(`Απέτυχε: ${now.label}`, { error: true });
       else if (now && now.warning === 'integrity') integrityToast(now); }
     // Every view of the book is derived from its projection: when the book's revision changed (an edit was

@@ -29,6 +29,17 @@ class LibraryService(ServiceBase):
         """A path in the upload staging area (the adapter streams the upload body into it)."""
         return self.lib.staging() / Path(name).name
 
+    def health_check(self) -> dict:
+        """Run the health check now (the app was opened in a browser); the reports not yet seen."""
+        self.health.check('browser')
+        return {'reports': self.health.unseen()}
+
+    def health_reports(self) -> dict:
+        return {'reports': self.health.unseen()}
+
+    def health_seen(self, ids: list[str]) -> dict:
+        return {'seen': self.health.mark_seen(list(ids or []))}
+
     def jobs_list(self, limit: int = 50) -> list[dict]:
         return self.jobs.list()[:limit]
 

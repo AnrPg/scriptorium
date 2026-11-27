@@ -588,3 +588,8 @@ label.list-item{cursor:pointer}
 .ref-list{display:flex;flex-direction:column;gap:10px}
 .ref-item{display:flex;flex-direction:column;gap:4px}
 .ref-cand{gap:2px}
+/* health check report (ui/health.js) */
+.health-report{max-width:620px;max-height:60vh;overflow:auto}
+.health-list{margin:6px 0 12px;padding-left:18px;display:flex;flex-direction:column;gap:10px}
+.health-log{font-family:ui-monospace,Menlo,monospace;overflow-wrap:anywhere}
+.health-item .bad{color:var(--bad)}

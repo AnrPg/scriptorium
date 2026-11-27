@@ -3,7 +3,8 @@
 import { doRedo, doUndo, poll, renderJobsPop } from './core/chrome.js';
 import { boundResync } from './inspector/boundloop.js';
 import { $, installOverflowTitles } from './core/dom.js';
-import { EMBED } from './ui/page_overlay.js';     // embedded page mode (?embed=1) before the first render
+import { EMBED } from './ui/page_overlay.js';
+import { healthOnOpen } from './ui/health.js';     // embedded page mode (?embed=1) before the first render
 import { onKeydown, showHelp } from './core/keyboard.js';
 import { navStep, render } from './core/nav.js';
 import { installDropZone } from './library/upload.js';
@@ -43,5 +44,5 @@ $('#btn-help').onclick = showHelp;
 document.addEventListener('click', (e) => { const p = $('#jobs-pop'); if (!p.hidden && !p.contains(e.target) && e.target !== $('#jobs-pill') && !$('#jobs-pill').contains(e.target)) p.hidden = true; });
 
 installDropZone(); render();
-if (!EMBED) poll();                              // the overlay's parent already polls; the iframe polls only after its own edits (kickPoll)
+if (!EMBED) { poll(); healthOnOpen(); }     // health: stuck job processes stopped (reported in a dialog)                              // the overlay's parent already polls; the iframe polls only after its own edits (kickPoll)
 installOverflowTitles();                         // full text of anything cut with an ellipsis, on hover

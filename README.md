@@ -121,6 +121,10 @@ scientific_ocr/
 - **Unit of work.** A bulk action is one event group, i.e. one undo step (`ServiceBase._batch`).
 - **Job queue (producer/consumer).** A *heavy* lane runs one extraction at a time; a *light* lane per book coalesces
   many clicks into one re-projection. Jobs run in subprocesses (cancellable process groups) and are resumable.
+- **Health check** (`application/health.py`). At server start, every 2 hours and whenever the app is opened in a
+  browser, processes that can never finish are stopped: a job still alive 2 min after printing `@@exit` (its work done,
+  stuck in a native library's exit), a job orphaned by an app that stopped, and engine servers nothing can be using.
+  Slow jobs are never touched. What was stopped is shown once in a dialog (`library/.health.json`).
 - **Content-addressed caches.** Every expensive step is keyed by the hash of its inputs (PDF, page, engine version,
   arguments), so re-runs resume where they stopped and settings changes recompute only what they affect.
 
