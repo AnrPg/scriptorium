@@ -16,6 +16,12 @@ class ExcursusService(ServiceBase):
         """Book reading order of every segment the reviewer sees (page previews included); furniture excluded."""
         return {x['id']: (x['page'], x.get('reading_order') or 0) for x in self._seen_list(b) if not x.get('excluded')}
 
+    def _auto(self, b, excursus_id: str | None) -> dict | None:
+        """An automatic excursus of the last build (pipeline.excursus.from_entities): changing it makes it yours."""
+        return next(({k: x[k] for k in ('id', 'first', 'last', 'type', 'name', 'placement')}
+                     for x in (b.canonical() or {}).get('excursus') or []
+                     if excursus_id and x['id'] == excursus_id and x.get('source') == 'entity'), None)
+
     def set_excursus(self, book_id: str, first: str | None = None, last: str | None = None, pages: list | None = None,
                      type: str = 'other', name: str = '', placement: str = 'inplace', excursus_id: str | None = None,
                      actor: str = 'reviewer', blocks: list | None = None) -> dict:
@@ -23,7 +29,7 @@ class ExcursusService(ServiceBase):
         [first page, last page], or over a selection (its first to its last segment in reading order)."""
         b = self._book(book_id)
         st = {x['id']: x for x in b.events.state()['excursus']}
-        old = st.get(excursus_id) if excursus_id else None
+        old = (st.get(excursus_id) or self._auto(b, excursus_id)) if excursus_id else None
         if excursus_id and old is None:
             raise ServiceError('no such excursus')
         order = self._order(b)
@@ -61,7 +67,7 @@ class ExcursusService(ServiceBase):
     def update_excursus(self, book_id: str, excursus_id: str, actor: str = 'reviewer', **fields) -> dict:
         """Change type / name / placement / one end of an existing excursus."""
         b = self._book(book_id)
-        old = next((x for x in b.events.state()['excursus'] if x['id'] == excursus_id), None)
+        old = next((x for x in b.events.state()['excursus'] if x['id'] == excursus_id), None) or self._auto(b, excursus_id)
         if old is None:
             raise ServiceError('no such excursus')
         merged = {**old, **{k: v for k, v in fields.items() if k in ('first', 'last', 'type', 'name', 'placement') and v is not None}}
@@ -71,7 +77,11 @@ class ExcursusService(ServiceBase):
     def remove_excursus(self, book_id: str, excursus_id: str, actor: str = 'reviewer') -> dict:
         b = self._book(book_id)
         if not any(x['id'] == excursus_id for x in b.events.state()['excursus']):
-            raise ServiceError('no such excursus')
+            if self._auto(b, excursus_id) is None:
+                raise ServiceError('no such excursus')
+            ev = self._append(b, {'type': 'suggestion_dismiss', 'key': excursus_id}, actor=actor)[0]   # automatic: not one
+            self._reproject(b, 'Η παρέκβαση αφαιρέθηκε')
+            return ev
         ev = self._append(b, {'type': 'excursus_remove', 'excursus_id': excursus_id}, actor=actor)[0]
         self._reproject(b, 'Η παρέκβαση αφαιρέθηκε')
         return ev
@@ -81,8 +91,11 @@ class ExcursusService(ServiceBase):
         if placement not in EXCURSUS_PLACEMENTS:
             raise ServiceError('unknown placement')
         b = self._book(book_id)
+        own = b.events.state()['excursus']
+        autos = [self._auto(b, x['id']) for x in (b.canonical() or {}).get('excursus') or [] if x.get('source') == 'entity']
         evs = [{'type': 'excursus_set', 'excursus': {**x, 'placement': placement}}
-               for x in b.events.state()['excursus'] if x.get('type') == type and x.get('placement') != placement]
+               for x in own + [a for a in autos if a and a['id'] not in {o['id'] for o in own}]
+               if x.get('type') == type and x.get('placement') != placement]
         if evs:
             self._append(b, *evs, actor=actor)
             self._reproject(b, f'Θέση για {len(evs)} παρεκβάσεις')
