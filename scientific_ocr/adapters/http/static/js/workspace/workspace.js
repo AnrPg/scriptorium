@@ -268,7 +268,9 @@ export function buildWorkspace() {
   if (S.showBoxes) canvas.append(svg);
   if (S.linking) canvas.classList.add('linking');
   (info.suggestions || []).forEach((s, i) => s.bbox && canvas.append(h('div', { class: 'ws-box sugg', style: pct(s.bbox) },
-    h('button', { class: 'primary', onclick: (e) => { e.stopPropagation(); act(() => api(`${B(b.id)}/pages/${n}/suggestions/${s.key}/accept`, { body: {} }), 'Συγχώνευση πλαισίων· τρέχει νέο OCR για την περιοχή'); } }, 'Συγχώνευση & νέο OCR'))));
+    h('button', { class: 'primary', onclick: (e) => { e.stopPropagation(); act(() => api(`${B(b.id)}/pages/${n}/suggestions/${s.key}/accept`, { body: {} }), 'Συγχώνευση πλαισίων· τρέχει νέο OCR για την περιοχή'); } }, 'Συγχώνευση & νέο OCR'),
+    h('button', { class: 'sugg-x', title: 'Απόρριψη πρότασης συγχώνευσης (αναιρείται)', 'aria-label': 'Απόρριψη πρότασης συγχώνευσης',
+      onclick: (e) => { e.stopPropagation(); act(() => api(`${B(b.id)}/suggestions/${s.key}/dismiss`, { body: {} }), 'Η πρόταση συγχώνευσης απορρίφθηκε'); } }, '×'))));
   if (S.draft) drawDraft(canvas, dims, pct);
   canvas.addEventListener('mousedown', (e) => { if (S.drawing && e.button === 0 && e.target.closest('.draft-menu') === null) startDraw(e, canvas, dims); });
   canvas.addEventListener('click', (e) => { if (!S.drawing && (e.target === canvas.querySelector('img') || e.target === canvas)) { S.draft = null; deselectBlock(); } });

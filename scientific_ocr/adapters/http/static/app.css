@@ -103,6 +103,8 @@ main{flex:1;overflow:auto;min-height:0} main.fill{overflow:hidden}
 .ws-box.sel .tag{display:block} .hideboxes .ws-box:not(.sel){display:none}
 .ws-box.sugg{border:2px dashed var(--acc);background:rgba(36,87,214,.06);cursor:default}
 .ws-box.sugg button{position:absolute;right:-2px;bottom:-30px;font-size:12px;padding:3px 8px}
+.ws-box.sugg button.sugg-x{left:auto;bottom:auto;top:-13px;right:-13px;width:24px;height:24px;padding:0;border-radius:50%;font-size:16px;line-height:1;background:var(--panel);color:var(--fg);border:1px solid var(--line2);box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:pointer;z-index:3}
+.ws-box.sugg button.sugg-x:hover{color:var(--bad);border-color:var(--bad)}
 .ws-box.draft{border:2px dashed var(--acc);background:rgba(36,87,214,.08)}
 .handle{position:absolute;width:10px;height:10px;background:#fff;border:2px solid var(--acc);border-radius:2px}
 .handle.nw{left:-6px;top:-6px;cursor:nwse-resize}.handle.ne{right:-6px;top:-6px;cursor:nesw-resize}
