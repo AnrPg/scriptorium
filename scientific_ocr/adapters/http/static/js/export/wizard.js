@@ -284,7 +284,14 @@ function criticalFindings(body) {
   body.append(sec);
   if (focus) {
     sec.open = true; sec.dataset.remembered = '1';      // opened for this visit, whatever was remembered
-    requestAnimationFrame(() => (card.querySelector('.new-finding') || sec).scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    // the findings this build added are brought into view and FLASHED for 5 s (a pulsing frame); with none new
+    // (they were all there before: the toast says so) the section's title flashes, at the top of the list
+    const fresh = [...card.querySelectorAll('.new-finding')], flash = fresh.length ? fresh : [sec.querySelector('summary') || sec];
+    requestAnimationFrame(() => {
+      flash[0].scrollIntoView({ block: fresh.length ? 'center' : 'start', behavior: 'smooth' });
+      flash.forEach(el => el.classList.add('flash-new'));
+      setTimeout(() => flash.forEach(el => el.classList.remove('flash-new')), 5000);
+    });
   }
 }
 

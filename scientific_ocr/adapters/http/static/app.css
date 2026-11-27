@@ -132,6 +132,11 @@ details>div{padding:0 10px 10px} .cand{border-top:1px dashed var(--line);padding
 .toast{background:#1c1c1e;color:#fff;border-radius:8px;padding:10px 14px;display:flex;gap:14px;align-items:center;box-shadow:var(--sh);font-size:13px}
 .toast.link{cursor:pointer} .toast.link:hover{filter:brightness(1.1)}
 .list-item.new-finding{background:var(--bad-weak);box-shadow:inset 3px 0 0 var(--bad)}
+/* arriving from the "critical finding" toast: the new findings pulse for 5 s (a static frame without motion) */
+.flash-new{position:relative;z-index:1;border-radius:6px;animation:flash-new 1.25s ease-in-out 4}
+@keyframes flash-new{0%,100%{box-shadow:inset 3px 0 0 var(--bad),0 0 0 0 rgba(220,38,38,0)}
+  50%{box-shadow:inset 3px 0 0 var(--bad),0 0 0 4px rgba(220,38,38,.55),0 0 18px 4px rgba(220,38,38,.35)}}
+@media (prefers-reduced-motion: reduce){.flash-new{animation:none;outline:3px solid var(--bad);outline-offset:1px}}
 .toast button{background:transparent;color:#9ec1ff;border:0;padding:0;font-weight:600} .toast.err{background:var(--bad)}
 dialog{border:1px solid var(--line);border-radius:12px;box-shadow:var(--sh);padding:20px;width:min(520px,92vw)}
 dialog::backdrop{background:rgba(0,0,0,.25)} dialog .row.end{justify-content:flex-end;margin-top:16px}
