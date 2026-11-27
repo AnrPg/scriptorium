@@ -65,9 +65,14 @@ export async function removeSegments() {
   const ids = omitTargets();
   if (!ids.length) return toast('Διάλεξε πρώτα τμήμα(τα)', { error: true });
   const n = ids.length;
-  const r = await act(() => api(`${B(S.book.id)}/segments/remove`, { body: { blocks: ids } }),
-    n > 1 ? `Αφαιρέθηκαν ${n} λάθος τμήματα (⌘Z για αναίρεση)` : 'Αφαιρέθηκε το λάθος τμήμα (⌘Z για αναίρεση)');
-  if (r) { clearSelection(); S.sel = null; S.seg = null; renderWorkspace(); }
+  // the loop you are in goes on to its next item (inspector/afterremove.js); imported when used: no import cycle
+  const { removeAndContinue } = await import('../inspector/afterremove.js');
+  await removeAndContinue(ids, async () => {
+    const r = await act(() => api(`${B(S.book.id)}/segments/remove`, { body: { blocks: ids } }),
+      n > 1 ? `Αφαιρέθηκαν ${n} λάθος τμήματα (⌘Z για αναίρεση)` : 'Αφαιρέθηκε το λάθος τμήμα (⌘Z για αναίρεση)');
+    if (r) { clearSelection(); S.sel = null; S.seg = null; renderWorkspace(); }
+    return r;
+  });
 }
 export const TOOLS = {
   zoom: () => h('div', { class: 'seg-ctl tool-zoom' }, h('button', { onclick: () => zoom(-0.15), title: 'Σμίκρυνση' }, '−'),

@@ -10,6 +10,7 @@ import { ACTION_EL, REVIEW_EL, SRC_EL, infoTip } from '../core/strings.js';
 import { captionPanel } from '../inspector/captions.js';
 import { excursusEditor, excursusValue } from '../inspector/excursus.js';
 import { loopPosition, stepReview } from '../inspector/reviewloop.js';
+import { removeAndContinue } from '../inspector/afterremove.js';
 import { historyPanel } from '../inspector/history.js';
 import { referencePanel, referenceSummary } from '../inspector/references.js';
 import { queueNeighbours, renderInspector } from '../inspector/inspector.js';
@@ -229,8 +230,8 @@ export function segmentPanel(body, blk) {
         menuItem('◌', 'Δυσανάγνωστο', 'U', () => decide('mark_unreadable'), 'Το απόσπασμα μένει ως εικόνα'),
         h('div', { class: 'menu-sep', role: 'separator' }),
         blk.source === 'region'
-          ? menuItem('✕', 'Αφαίρεση περιοχής', '⌫', () => act(() => api(`${B(book.id)}/regions/${blk.region_id}/remove`, { body: {} }), 'Η περιοχή αφαιρέθηκε'), '', true)
-          : menuItem('✕', 'Αφαίρεση λάθος πλαισίου', '⌫', () => act(() => api(`${B(book.id)}/blocks/${blk.id}/hide`, { body: {} }), 'Το λάθος πλαίσιο αφαιρέθηκε'),
+          ? menuItem('✕', 'Αφαίρεση περιοχής', '⌫', () => removeAndContinue([blk.id], () => act(() => api(`${B(book.id)}/regions/${blk.region_id}/remove`, { body: {} }), 'Η περιοχή αφαιρέθηκε')), '', true)
+          : menuItem('✕', 'Αφαίρεση λάθος πλαισίου', '⌫', () => removeAndContinue([blk.id], () => act(() => api(`${B(book.id)}/blocks/${blk.id}/hide`, { body: {} }), 'Το λάθος πλαίσιο αφαιρέθηκε')),
               'Για πλαίσιο που είναι ΛΑΘΟΣ (θόρυβος, διπλό, λάθος περίγραμμα). Για σωστό περιεχόμενο που δεν θέλεις στο κείμενο: «Στην έξοδο» στις Ιδιότητες.', true)) },
     ].filter(Boolean);
     body.append(toolStrip(tools, seg, rerender));

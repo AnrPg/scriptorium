@@ -25,7 +25,12 @@ async function bookQueue() {
   return cache.items;
 }
 // decided = recorded but not yet rebuilt (pending) or still being sent (feedback.inFlight: you moved on at once)
-const decidedNow = () => new Set([...pendingOf().events.filter(e => e.type === 'decision' || e.type === 'block_hide').map(e => e.block_id), ...inFlight]);
+// removed (a wrong box, a region of yours): until the rebuild it is still in the server's queue
+const gone = new Set();
+export function markGone(ids) { ids.forEach(id => gone.add(id)); }
+const decidedNow = () => new Set([...pendingOf().events.filter(e => e.type === 'decision' || e.type === 'block_hide').map(e => e.block_id), ...inFlight, ...gone]);
+/** Some of these segments are items of the review loop (as it stands now). */
+export async function inReviewLoop(ids) { try { return (await bookQueue()).some(x => ids.includes(x.id)); } catch { return false; } }
 
 /** The loop with already-decided segments removed (`keep`: a segment kept even if decided, e.g. the current one). */
 async function loop(keep) {
@@ -33,27 +38,28 @@ async function loop(keep) {
   return (await bookQueue()).filter(x => x.id === keep || !done.has(x.id));
 }
 
-/** Where the current segment (or page) sits in the loop: index of the item at or after it. */
-function position(q, dir) {
-  const cur = S.sel && S.page ? S.page.blocks.find(b => b.id === S.sel) : null;
+/** Where the current segment (or page) sits in the loop: index of the item at or after it. `from`: a segment that
+ *  is no longer on the page (just removed) — the loop goes on from where it was. */
+function position(q, dir, from = null) {
+  const cur = from || (S.sel && S.page ? S.page.blocks.find(b => b.id === S.sel) : null);
   const i = cur ? q.findIndex(x => x.id === cur.id) : -1;
   if (i >= 0) return i + dir;
-  const page = S.page ? S.page.page : 0, ro = cur ? cur.reading_order : -1;
+  const page = from ? from.page : S.page ? S.page.page : 0, ro = cur ? cur.reading_order : -1;
   const after = q.findIndex(x => x.page > page || (x.page === page && x.reading_order > ro));
   if (dir > 0) return after < 0 ? q.length : after;
   return (after < 0 ? q.length : after) - 1;
 }
 
 /** Go to the next (dir 1) or previous (dir -1) segment that needs review, anywhere in the book. */
-export async function stepReview(dir = 1) {
+export async function stepReview(dir = 1, from = null) {
   if (!S.book) return;
   let q;
-  try { q = await loop(S.sel); } catch (e) { toast(e.message, { error: true }); return; }
+  try { q = await loop(from ? from.id : S.sel); } catch (e) { toast(e.message, { error: true }); return; }
   const open = q.filter(x => x.id !== S.sel || !decidedNow().has(x.id));
   if (!open.length || (open.length === 1 && open[0].id === S.sel && decidedNow().has(S.sel))) {
     return toast(pendingOf().count ? 'Δεν έμεινε τίποτα για έλεγχο (κάποιες αποφάσεις περιμένουν την ενημέρωση του βιβλίου) 🎉' : 'Ο έλεγχος ολοκληρώθηκε 🎉');
   }
-  let i = position(q, dir);
+  let i = position(q, dir, from);
   if (i >= q.length) { i = 0; toast('Τέλος του βιβλίου· συνέχεια από την αρχή'); }
   if (i < 0) { i = q.length - 1; toast('Αρχή του βιβλίου· συνέχεια από το τέλος'); }
   const t = q[i];
