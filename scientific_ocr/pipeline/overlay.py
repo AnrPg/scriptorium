@@ -142,7 +142,9 @@ def _set_output(b, d, ctx):
     """In or out of the READER exports (core.model.in_reader_output); the segment stays in the model."""
     if d['include']:
         b.pop('omitted', None)
+        b['kept'] = {'seq': d.get('seq'), 'actor': d.get('actor')}   # also overrides the output profile's exclusion
     else:
+        b.pop('kept', None)
         b['omitted'] = {'seq': d.get('seq'), 'actor': d.get('actor'), 'note': d.get('note', '')}
 
 
@@ -156,6 +158,46 @@ def _v_flow(blk, p, find):
     if p.get('flow') not in ('main', 'insert', 'auto'):
         raise CommandError('flow must be main, insert or auto')
     return {'flow': p['flow']}
+
+
+def _set_table_layout(b, d, ctx):
+    """How a table is read (pipeline.tables): 'rows' / 'cols' = a list of its cells by rows / by columns, 'table'
+    = a table, 'auto' = the automatic hint."""
+    b['table_layout'] = None if d['layout'] == 'auto' else d['layout']
+
+
+def _v_table_layout(blk, p, find):
+    if p.get('layout') not in ('rows', 'cols', 'table', 'auto'):
+        raise CommandError('layout must be rows, cols, table or auto')
+    if blk.get('kind') != 'table':
+        raise CommandError('only a table can be read as a list')
+    return {'layout': p['layout']}
+
+
+def _table_reading(blk) -> str | None:
+    """The engine whose reading has a table grid (the one the list hint was computed on, else Marker first)."""
+    hint = (blk.get('table_list') or {}).get('candidate')
+    engines = [c['engine'] for c in blk.get('candidates') or [] if '<table' in (c.get('text') or '').lower()]
+    return hint if hint in engines else next((e for e in engines if e == 'marker'), engines[0] if engines else None)
+
+
+def _i_table_layout(blk, p):
+    """Choosing how a table READS is a judgement of its content: a list needs text (a table kept as an image adopts
+    the engine reading first), and the reading in force is confirmed (it is what the reviewer just judged).
+    'auto' hands the choice back to the machine and confirms nothing."""
+    layout = p.get('layout')
+    if layout == 'auto':
+        return (), ()
+    if (blk.get('chosen') or {}).get('type') != 'text':
+        if layout == 'table':
+            return (), ()                                  # stays an image: nothing to read
+        eng = _table_reading(blk)
+        if eng is None:
+            raise CommandError('no engine read this table as text: it can only stay an image')
+        return [('approve_candidate', {'engine': eng})], ()     # a value decision: approves what it sets
+    if blk.get('review') != 'approved' and not has_human_value(blk):
+        return (), [('approve', {})]
+    return (), ()
 
 
 def _set_continuation(b, d, ctx):
@@ -279,9 +321,13 @@ def _v_report(blk, p, find):
 @dataclass(frozen=True)
 class Command:
     """One reviewer action: `validate(block, params, find) -> event fields` (raises CommandError) records it;
-    `apply(block, event, ctx)` replays it on every build (raises Stale when the machine output changed)."""
+    `apply(block, event, ctx)` replays it on every build (raises Stale when the machine output changed);
+    `implies(block, params) -> (before, after)`: decisions the action entails, as [(action, params)] recorded with it
+    as ONE step (one undo), whatever the entry point (one segment, a selection, any button). The server, not the
+    interface, expands them, so every path behaves alike."""
     apply: Callable
     validate: Callable = _v_none
+    implies: Callable = lambda blk, p: ((), ())
 
     def __call__(self, b, d, ctx):
         return self.apply(b, d, ctx)
@@ -298,6 +344,7 @@ COMMANDS: dict[str, Command] = {
     'set_caption_role': Command(_set_caption_role, _v_role), 'link_reference': Command(_link_reference, _v_link),
     'set_output': Command(_set_output, _v_output),
     'set_flow': Command(_set_flow, _v_flow), 'set_continuation': Command(_set_continuation, _v_continuation),
+    'set_table_layout': Command(_set_table_layout, _v_table_layout, _i_table_layout),
     'associate_group_caption': Command(_associate_group_caption, _v_group_caption),
 }
 
@@ -313,6 +360,37 @@ def decision_event(action: str, blk: dict, params: dict, find) -> dict:
     if params.get('via'):
         ev['via'] = params['via']                     # natural-language note + the model that proposed it
     return ev
+
+
+def reconfirm_event(blk: dict, find) -> dict:
+    """«Approve as it is» on a segment whose content is the reviewer's OWN decision: that decision is recorded again,
+    unchanged, now. A decision is asked again when it was taken under other conditions (e.g. an image kept for an
+    output with pictures, before a text-only profile); confirming it must be one action, and replaying the same
+    command keeps every rule of the overlay (stale detection, what it sets) exactly as for the original."""
+    d = next((x for x in reversed(blk.get('decisions') or []) if x.get('action') in VALUE_DECISIONS), None)
+    if d is None:
+        raise CommandError('no decision of yours to confirm')
+    ch = blk.get('chosen') or {}
+    params = {'replace_text': {'value': ch.get('text')}, 'replace_latex': {'value': ch.get('latex')},
+              'approve_candidate': {'engine': d.get('engine')}}.get(d['action'], {})
+    if any(v is None for v in params.values()):
+        raise CommandError('this decision cannot be confirmed as it is (its value is not available): edit it instead')
+    return {**decision_event(d['action'], blk, params, find), 'reconfirm': True}
+
+
+def decision_events(action: str, blk: dict, params: dict, find) -> list[dict]:
+    """The validated events of `action` on `blk` WITH the decisions it implies (Command.implies), in order: what
+    every entry point records, as one step."""
+    cmd = COMMANDS.get(action)
+    if cmd is None:
+        raise CommandError(f'unknown action {action!r}')
+    if action == 'approve' and has_human_value(blk) and blk.get('review') in ('required', 'recommended', 'unresolved'):
+        return [reconfirm_event(blk, find)]          # your decision is asked again: confirm it as it is
+    # (a decision of yours that is NOT asked again cannot be "approved over": _v_approve refuses it)
+    main = decision_event(action, blk, params, find)
+    before, after = cmd.implies(blk, params)
+    return ([decision_event(a, blk, p, find) for a, p in before] + [main]
+            + [decision_event(a, blk, p, find) for a, p in after])
 
 
 def select_content(decisions: list[dict]) -> tuple[dict, list[dict]]:
@@ -360,7 +438,9 @@ def apply(blocks: list[dict], decisions: list[dict], superseded=lambda d: False)
             if d['action'] in CONTENT_ACTIONS and d.get('prev_hash') and d['prev_hash'] != b.get('machine_hash'):
                 raise Stale('machine output changed since the decision')
             COMMANDS[d['action']](b, d, ctx)
-            b.setdefault('decisions', []).append({k: d[k] for k in ('seq', 'ts', 'actor', 'action', 'via') if k in d})
+            b.setdefault('decisions', []).append({k: d[k] for k in ('seq', 'ts', 'actor', 'action', 'via', 'engine', 'reconfirm',
+                                                                   'scope')
+                                                  if k in d})
             applied.append(d['seq'])
         except Stale as exc:
             rec = {'seq': d['seq'], 'block_id': d['block_id'], 'action': d['action'], 'why': str(exc)}

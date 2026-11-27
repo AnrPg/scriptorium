@@ -13,9 +13,10 @@ from pathlib import Path
 
 import jsonschema
 
-from ..core.model import KINDS, RELEASE, REVIEW_STATES, chosen_text, in_output
+from ..core.model import KINDS, RELEASE, REVIEW_STATES, chosen_text, in_output, in_reader_output
 from ..core.reasons import REASONS
 from ..core.text import match_norm, strip_markup
+from . import tables
 
 
 def finding(ftype, severity, page, block_ids, reason, action, evidence=None) -> dict:
@@ -33,12 +34,16 @@ def from_reasons(blocks: list[dict]) -> list[dict]:
     F = []
     for b in blocks:
         settled = b['review'] in HUMAN_SETTLED and (b.get('decisions') or b['relations'].get('resolved_by'))
+        waived = set(b.get('waived') or ())             # by the book's engine policy (pipeline.profile)
+        out_of_text = in_output(b) and not in_reader_output(b)     # left out by the reviewer or the profile
         for code in b['reasons']:
             r = REASONS.get(code)
             if r and r.finding:
-                f = finding(r.finding[0], 'info' if settled else r.finding[1], b['page'], [b['id']], r.en,
-                            'resolved by reviewer' if settled else 'review in app', (b.get('evidence') or {}).get(code))
-                f['resolved'] = bool(settled)
+                quiet = settled or code in waived or out_of_text
+                f = finding(r.finding[0], 'info' if quiet else r.finding[1], b['page'], [b['id']], r.en,
+                            'resolved by reviewer' if settled else 'waived by the book policy' if code in waived
+                            else 'not in the output' if out_of_text else 'review in app', (b.get('evidence') or {}).get(code))
+                f['resolved'] = bool(quiet)
                 F.append(f)
         if b['review'] == 'required':
             F.append(finding('REVIEW_REQUIRED', 'warning', b['page'], [b['id']], ','.join(b['reasons']), 'review in app'))
@@ -132,13 +137,13 @@ def _norm(t: str) -> str:
     return strip_markup(html.unescape(t or ''))
 
 
-def _snippet(t: str) -> str | None:
+def _snippet(t: str, size: int = 20) -> str | None:
     """A stretch from the middle of the text: joins and hyphen repairs only touch the ends of a part."""
     n = _norm(t)
-    if len(n) < 24:
+    if len(n) < size + 4:
         return n or None
     i = len(n) // 3
-    return n[i:i + 20]
+    return n[i:i + size]
 
 
 def post_render(c: dict, md: str, out: Path, images: bool = True) -> list[dict]:
@@ -154,10 +159,17 @@ def post_render(c: dict, md: str, out: Path, images: bool = True) -> list[dict]:
                 F.append(finding('INTEGRITY_EXCLUSION_UNRECORDED', 'critical', b['page'], [b['id']],
                                  'excluded without evidence or crop', 'fix furniture stage'))
             continue
-        if b.get('flow') == 'furniture' or b.get('omitted') or by_id.get(b['relations'].get('caption_for'), {}).get('omitted'):
-            continue                                       # the reviewer left it out of the text: not a loss
+        cap_of = by_id.get(b['relations'].get('caption_for'))
+        if b.get('flow') == 'furniture' or not in_reader_output(b) or (cap_of is not None and not in_reader_output(cap_of)):
+            continue                                       # the reviewer (or the output profile) left it out: not a loss
         ch = b['chosen']
-        if ch['type'] == 'text':
+        items = tables.as_list(b, chosen_text(b)) if ch['type'] == 'text' and b['kind'] == 'table' else None
+        if items:                                          # a term grid read as a list: EVERY item must be there
+            lost = [t for t in items if (sn := _norm(t).strip()) and sn not in flat]
+            if lost:
+                F.append(finding('INTEGRITY_CONTENT_NOT_EXPORTED', 'critical', b['page'], [b['id']],
+                                 f'list items not in the export: {lost[:3]!r}', 'fix renderer'))
+        elif ch['type'] == 'text':
             sn = _snippet(chosen_text(b))                  # the exported notation (pipeline.notation)
             if sn and sn not in flat:
                 F.append(finding('INTEGRITY_CONTENT_NOT_EXPORTED', 'critical', b['page'], [b['id']],
@@ -176,15 +188,25 @@ def post_render(c: dict, md: str, out: Path, images: bool = True) -> list[dict]:
         F.append(finding('EXPORT_INTERNAL_MARKUP', 'critical', None, [], f'internal marker in the export: {m.group(0)}',
                          'fix renderer'))
         break
-    outside = _norm(re.sub(r'<figure>.*?</figure>|<!-- figure -->.*?<!-- /figure -->', ' ', md, flags=re.S))
+    # Text outside every figure. Figures may NEST (a group of figures with its own caption) and carry attributes,
+    # so innermost figures are removed repeatedly; a non-greedy <figure>.*?</figure> would stop at the inner
+    # figure's end and leave the rest of the group "outside".
+    outside, prev = md, None
+    while outside != prev:
+        prev = outside
+        outside = re.sub(r'<figure\b[^>]*>(?:(?!<figure\b).)*?</figure>|<!-- figure -->(?:(?!<!-- figure -->).)*?<!-- /figure -->',
+                         ' ', outside, flags=re.S)
+    outside = _norm(outside)
     for b in c['blocks']:
         if b['kind'] == 'caption' and in_output(b) and b['relations'].get('caption_for'):
-            sn = _snippet(b['chosen'].get('text'))
-            if sn and len(sn) >= 20 and sn in outside:
+            sn = _snippet(b['chosen'].get('text'), 60)     # long enough not to be an ordinary phrase of the body
+            if sn and len(sn) >= 40 and sn in outside:
                 F.append(finding('CAPTION_BLEED', 'critical', b['page'], [b['id']], 'caption outside its figure', 'fix renderer'))
-    for o, e in (('<figure>', '</figure>'), ('<aside>', '</aside>'), ('<!-- figure -->', '<!-- /figure -->')):
-        if md.count(o) != md.count(e):
-            F.append(finding('INTEGRITY_UNBALANCED_BOUNDARY', 'critical', None, [], f'{o}: {md.count(o)} vs {md.count(e)}', 'fix'))
+    for tag, o, e in (('figure', r'<figure\b[^>]*>', '</figure>'), ('aside', r'<aside\b[^>]*>', '</aside>'),
+                      ('<!-- figure -->', r'<!-- figure -->', '<!-- /figure -->')):
+        n_open, n_close = len(re.findall(o, md)), md.count(e)          # openings may carry attributes
+        if n_open != n_close:
+            F.append(finding('INTEGRITY_UNBALANCED_BOUNDARY', 'critical', None, [], f'{tag}: {n_open} vs {n_close}', 'fix'))
     return F
 
 

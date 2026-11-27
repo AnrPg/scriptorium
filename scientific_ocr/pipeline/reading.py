@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import re
 
-from ..core.model import CAPTIONABLE_KINDS, FIGURE_KINDS, chosen_text, in_reader_output
+from ..core.model import CAPTIONABLE_KINDS, FIGURE_KINDS, chosen_text, in_output, in_reader_output
+from . import tables
 from ..core.vocabulary import entity_label, family_of
 from .entities import excluded_blocks, is_captioned_visual
 from .groups import gaps, is_figure_group
@@ -64,7 +65,7 @@ def excerpt(n: dict) -> str | None:
 def nodes(c: dict, pages: set | None = None, options: dict | None = None) -> list[dict]:
     opt = options or {}
     gone = excluded_blocks(c.get('entities') or [], set(opt.get('exclude') or ()))
-    omitted = {b['id'] for b in c['blocks'] if b.get('omitted')}
+    omitted = {b['id'] for b in c['blocks'] if in_output(b) and not in_reader_output(b)}
     exc = {x['id']: x for x in c.get('excursus') or []}
     gone |= {b['id'] for b in c['blocks'] if exc.get(b.get('excursus'), {}).get('placement') == 'remove'}
     blocks = [b for b in c['blocks'] if in_reader_output(b) and b.get('flow') != 'furniture'
@@ -271,6 +272,8 @@ def _node(b, by_id) -> dict | None:
             body = {'latex': ch['latex']}
         elif ch['type'] == 'text' and b['kind'] != 'caption':
             body = {'text': chosen_text(b)}
+            if b['kind'] == 'table' and (items := tables.as_list(b, body['text'])):
+                body = {'text': '\n'.join(f'- {t}' for t in items), 'items': items}   # a term grid read as a list
         cap_blocks = caps if b['kind'] != 'caption' else [b]
         return {'t': 'figure', 'kind': 'table' if b['kind'] == 'table' else 'figure',
                 'image': None if body or b['kind'] == 'caption' else _image(b), 'body': body,
