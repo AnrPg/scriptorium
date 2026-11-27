@@ -70,28 +70,50 @@ def words(s: str) -> int:
 
 # ---------------------------------------------------------------- tables
 def table_text(html_or_text: str) -> str:
-    """An engine table (HTML) as Markdown: a pipe table when it has a header row and a regular grid; otherwise
-    one line per row — 'Header: value; …' when headers exist, 'a: b' for two columns, cells joined by ' | ' else."""
+    """An engine table (HTML) as Markdown, EVERY cell kept. Spanned cells are spread over the cells they cover
+    (pipeline.tables.matrix); leading rows that are one cell across the width are the table's title (a line of their
+    own); the leading <th> rows are the header (a column's label joins its header cells: «Πυρήνας / Z»). With a
+    header: a pipe table up to 8 columns whose body has no spanned cell, else one line per row 'Header: value; …'
+    where a cell spanning columns is said once under their joined labels ('A / B: x'); without a header: 'a: b'
+    for two columns, cells joined by ' | ' else."""
     if '<t' not in (html_or_text or '').lower():
         return clean(html_or_text)[0]
-    p = tables.Grid()
-    p.feed(html_or_text)
-    rows = [[clean(c)[0].replace('|', '/') for c, _ in r] for r in p.rows]
-    if not rows:
+    g = tables.grid(html_or_text)
+    if g is None:
         return clean(re.sub(r'<[^>]+>', ' ', html_or_text))[0]
-    head = rows[0] if all(h for _, h in p.rows[0]) else None
-    body = rows[1:] if head else rows
-    width = max(len(r) for r in rows)
-    regular = not p.spans and all(len(r) == width for r in rows)
-    if head and regular and width <= 8:
-        lines = ['| ' + ' | '.join(head) + ' |', '|' + '---|' * width]
-        lines += ['| ' + ' | '.join(r) + ' |' for r in body]
-        return '\n'.join(lines)
-    if head:
-        return '\n'.join('- ' + '; '.join(f'{h}: {v}' for h, v in zip(head, r) if v) for r in body)
-    if width == 2:
-        return '\n'.join(f'- {r[0]}: {r[1]}' if len(r) == 2 else '- ' + ' | '.join(r) for r in body)
-    return '\n'.join('- ' + ' | '.join(x for x in r if x) for r in body)
+    m = [[(clean(t)[0].replace('|', '/'), th) for t, th in r] for r in tables.matrix(g)]
+    n_rows = len(m)
+    titles = []
+    while len(m) > 1 and len(m[0]) > 1 and len({t for t, _ in m[0]}) == 1 and m[0][0][0]:
+        titles.append(m.pop(0)[0][0])
+    nh = 0
+    while nh < len(m) - 1 and all(th for _, th in m[nh]) and any(t for t, _ in m[nh]):
+        nh += 1
+    width = len(m[0]) if m else 0
+    head = [' / '.join(dict.fromkeys(m[r][c][0] for r in range(nh) if m[r][c][0])) for c in range(width)] if nh else None
+    body = [[t for t, _ in r] for r in m[nh:]]
+    first_body = n_rows - len(body)                    # grid row of the first body row (titles + header above it)
+    body_spans = any(r >= first_body and cs > 1 for (r, _), (_, cs) in g.span_of.items())
+    if head and width <= 8 and not body_spans:
+        lines = ['| ' + ' | '.join(head) + ' |', '|' + '---|' * width] + ['| ' + ' | '.join(r) + ' |' for r in body]
+    elif head:
+        def pairs(r):                                  # neighbouring columns with one (spanned) value: said once
+            out, c = [], 0
+            while c < width:
+                e = c
+                while e + 1 < width and r[e + 1] == r[c]:
+                    e += 1
+                hs = ' / '.join(dict.fromkeys(h for h in head[c:e + 1] if h))
+                if r[c]:
+                    out.append(f'{hs}: {r[c]}' if hs else r[c])
+                c = e + 1
+            return out
+        lines = ['- ' + '; '.join(pairs(r)) for r in body if any(r)]
+    elif width == 2:
+        lines = [f'- {r[0]}: {r[1]}' if r[0] and r[1] else '- ' + (r[0] or r[1]) for r in body if r[0] or r[1]]
+    else:
+        lines = ['- ' + ' | '.join(x for x in r if x) for r in body if any(r)]
+    return '\n'.join(titles + lines)
 
 
 # ---------------------------------------------------------------- units
@@ -104,6 +126,17 @@ def _caption(cap: dict, credits: list[re.Pattern], strip: bool) -> tuple[str, li
     for rx in credits:
         text = rx.sub('', text).rstrip()
     return text, terms
+
+
+def _caption_above(n: dict) -> bool:
+    """Every caption of a figure node is printed above its element (on its page): a table's title, mostly."""
+    blocks = n.get('blocks') or []
+    if not blocks or not blocks[0].get('geometry'):
+        return False
+    el = blocks[0]
+    caps = [b for b in blocks[1:] if b.get('geometry')]
+    return bool(caps) and all(c['page'] == el['page'] and c['geometry']['bbox'][3] <= el['geometry']['bbox'][1] + 2
+                              for c in caps)
 
 
 def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
@@ -130,6 +163,25 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
         for fid in list(held):
             out.extend(held.pop(fid, []))
 
+    def put(u: dict) -> None:
+        """Emit a unit; pending titles (lead) go in front of it, whatever it is: a paragraph takes them inline
+        ('Title. Text'), a table / list / equation / caption on their own line above it. A title is never dropped."""
+        if lead:
+            head = ' — '.join(lead)
+            lead.clear()
+            if u['t'] == 'text':
+                u['text'] = head + ('' if head.endswith(('.', ':', ';', '?', '!')) else '.') + ' ' + u['text']
+            else:
+                u['lead'] = head
+                u['text'] = head + '\n' + u['text']
+        out.append(u)
+
+    def flush_lead() -> None:
+        """Titles that nothing followed (the section or the document ends): a text unit of their own."""
+        if lead:
+            out.append({'t': 'text', 'text': ' — '.join(lead), 'pages': [], 'ids': [], 'terms': [], 'labels': []})
+            lead.clear()
+
     for i, n in enumerate(nodes):
         t = n['t']
         if t == 'heading':
@@ -138,8 +190,8 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
                 continue
             src = ((n.get('blocks') or [{}])[0]).get('heading_level_source')
             if n.get('level', 1) <= depth and src not in BOX_LABEL_SOURCES:
+                flush_lead()                              # a deeper title nothing followed: kept, as text
                 flush_held(all_=True)                     # the section ends: its picture captions, then the title
-                lead.clear()
                 out.append({'t': 'heading', 'level': n.get('level', 1), 'text': title, 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': []})
             else:
                 lead.append(title)
@@ -149,14 +201,10 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
             text, terms = (table_text(n['text']), []) if '<table' in n['text'].lower() else clean(n['text'], strip)
             if not text:
                 continue
-            if lead:
-                head = ' — '.join(lead)
-                text = head + ('' if head.endswith(('.', ':', ';', '?', '!')) else '.') + ' ' + text
-                lead.clear()
-            out.append({'t': 'text', 'text': text, 'pages': pages(n), 'ids': ids(n), 'terms': list(dict.fromkeys(terms + kept_terms(n))),
+            put({'t': 'text', 'text': text, 'pages': pages(n), 'ids': ids(n), 'terms': list(dict.fromkeys(terms + kept_terms(n))),
                         'labels': []})
         elif t == 'equation':
-            out.append({'t': 'equation', 'text': f'$$ {n["latex"].strip()} $$', 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': []})
+            put({'t': 'equation', 'text': f'$$ {n["latex"].strip()} $$', 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': []})
         elif t in ('figure', 'group_caption'):
             caps, terms, labels = [], [], []
             for cap in n.get('captions') or []:
@@ -167,30 +215,76 @@ def units(c: dict, profile: dict, pages: set | None = None) -> list[dict]:
                     if cap.get('label'):
                         labels.append(clean(cap['label'], True)[0])
             body = n.get('body') if t == 'figure' else None
+            body_units = []
             if body and 'latex' in body:
-                out.append({'t': 'equation', 'text': f'$$ {body["latex"].strip()} $$', 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': labels})
+                body_units.append({'t': 'equation', 'text': f'$$ {body["latex"].strip()} $$', 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': labels})
             elif body and body.get('items'):                  # a table read as a list (pipeline.tables)
                 lst = tables.clean_list(body['list'], lambda s: clean(s, strip)[0])
                 if lst:
                     flat = [x for x in lst['items'] if isinstance(x, str)]
-                    out.append({'t': 'list', 'text': tables.markdown(lst), 'list': lst, 'pages': pages(n), 'ids': ids(n),
-                                'terms': [x for x in flat if len(x.split()) <= MAX_TERM_WORDS], 'labels': labels})
+                    body_units.append({'t': 'list', 'text': tables.markdown(lst), 'list': lst, 'pages': pages(n), 'ids': ids(n),
+                                       'terms': [x for x in flat if len(x.split()) <= MAX_TERM_WORDS], 'labels': labels})
             elif body and body.get('text'):
                 kind = 'table' if n.get('kind') == 'table' else 'text'
                 txt = table_text(body['text']) if kind == 'table' else clean(body['text'], strip)[0]
                 if txt:
-                    out.append({'t': kind, 'text': txt, 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': labels})
-            if not caps:
-                continue
-            unit = {'t': 'caption', 'text': '\n\n'.join(caps), 'pages': pages(n), 'ids': ids(n), 'terms': terms, 'labels': labels}
+                    body_units.append({'t': kind, 'text': txt, 'pages': pages(n), 'ids': ids(n), 'terms': [], 'labels': labels})
+            unit = {'t': 'caption', 'text': '\n\n'.join(caps), 'pages': pages(n), 'ids': ids(n), 'terms': terms, 'labels': labels} if caps else None
             fig = (n.get('blocks') or [{}])[0]
-            fid = fig.get('id') or f'n{i}'
-            if not body:                                  # a picture's caption: at the end of its section
-                held.setdefault(fid, []).append(unit)
-            else:                                         # a table's / equation's caption stays with it
-                out.append(unit)
+            if unit and not body:                         # a picture's caption: at the end of its section
+                held.setdefault(fig.get('id') or f'n{i}', []).append(unit)
+                unit = None
+            # a table's / equation's caption stays with it, where it is printed: above it (a table's title) or below
+            first = [unit] if unit and _caption_above(n) else []
+            for u in first + body_units + ([unit] if unit and not first else []):
+                put(u)
         # 'image' (an untranscribed crop the reviewer kept as an image), box_start/box_end: nothing for a text reader
+    flush_lead()
     flush_held(all_=True)
+    return out
+
+
+def expected(c: dict, profile: dict) -> list[tuple[str, int, str]]:
+    """What the RAG output must contain, piece by piece: (segment id, page, text as the RAG shapes it). The same
+    reading model and cleaning as units(), WITHOUT its arrangement (leads, held captions, chunking) — the audit
+    (pipeline.audit.rag_export) checks the arrangement against this: nothing the reader keeps may get lost."""
+    strip = profile.get('strip_emphasis', True)
+    credits = [re.compile(p, re.I) for p in profile.get('caption_credits') or ()]
+    out: list[tuple[str, int, str]] = []
+
+    def add(n_or_b, text):
+        b = n_or_b if 'chosen' in n_or_b else ((n_or_b.get('blocks') or [None])[0])
+        if b is not None and (text or '').strip():
+            out.append((b['id'], b['page'], text))
+
+    def cells(html_text):                            # a table: every cell, as table_text writes it
+        g = tables.grid(html_text)
+        return [clean(t)[0].replace('|', '/') for r in g.rows for t, _ in r] if g else [table_text(html_text)]
+
+    for n in reading.nodes(c):
+        t = n['t']
+        if t == 'heading' and not n.get('generated'):
+            add(n, clean(_HEADING_MARKS.sub('', n['text']), True)[0])
+        elif t == 'para':
+            for x in (cells(n['text']) if '<table' in n['text'].lower() else [clean(n['text'], strip)[0]]):
+                add(n, x)
+        elif t == 'equation':
+            add(n, n['latex'].strip())
+        elif t in ('figure', 'group_caption'):
+            body = n.get('body') if t == 'figure' else None
+            if body and 'latex' in body:
+                add(n, body['latex'].strip())
+            elif body and body.get('items'):
+                lst = tables.clean_list(body['list'], lambda s: clean(s, strip)[0])
+                for x in tables.texts(lst) if lst else []:
+                    add(n, x)
+            elif body and body.get('text'):
+                for x in (cells(body['text']) if n.get('kind') == 'table' else [clean(body['text'], strip)[0]]):
+                    add(n, x)
+            caps = n.get('captions') or []
+            cap_blocks = [b for b in n.get('blocks') or [] if b.get('kind') == 'caption'] or n.get('blocks') or []
+            for i, cap in enumerate(caps):
+                add(cap_blocks[min(i, len(cap_blocks) - 1)] if cap_blocks else n, _caption(cap, credits, strip)[0])
     return out
 
 
@@ -207,6 +301,9 @@ def html(c: dict, profile: dict, pages: set | None = None) -> str:
         seg = (u.get('ids') or [''])[0]
         a = f' class="pv-seg" data-seg="{escape(seg)}"' if seg else ''
         t, text = u['t'], u['text']
+        if u.get('lead'):                                # titles in front of a table / list / equation / caption
+            out.append(f'<div{a}><p class="pv-text pv-lead"><b>{inline_html(u["lead"])}</b></p></div>')
+            text = text[len(u['lead']) + 1:]
         lines = text.split('\n')
         if t == 'heading':
             lv = max(1, min(6, u.get('level') or 1))
