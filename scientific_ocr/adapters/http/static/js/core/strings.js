@@ -48,6 +48,7 @@ export const EV_EL = { decision: e => `${({ approve: 'Έγκριση', approve_c
   rule_add: e => `Κανόνας ${e.rule.find} → ${e.rule.replace}`, rule_remove: e => `Αφαίρεση κανόνα ${e.rule_id}`,
   region_add: e => `Νέα περιοχή (${REGION_EL[e.region.kind] || e.region.kind}) σελ. ${e.region.page}`, region_remove: e => `Αφαίρεση περιοχής ${e.region_id}`,
   block_hide: e => `Απόκρυψη πλαισίου ${e.block_id}`, block_show: e => `Επαναφορά πλαισίου ${e.block_id}`, page_profile: e => `Προσεκτική επανεξέταση σελ. ${e.page}`,
+  glossary_page: e => `Σελ. ${e.pages.join(', ')}: ${e.glossary ? 'γλωσσάριο' : 'όχι γλωσσάριο'}`,
   page_remove: e => `Αφαίρεση σελ. ${e.pages.join(', ')} από το βιβλίο`, page_restore: e => `Επαναφορά σελ. ${e.pages.join(', ')}`,
   output_profile: e => `Προφίλ εξόδου: ${({ reading: 'Ανάγνωση', rag: 'RAG' })[e.profile] || e.profile}`,
   undo: e => `Αναίρεση (${(e.targets || []).length})`, redo: e => `Επανάληψη (${(e.targets || []).length})` };

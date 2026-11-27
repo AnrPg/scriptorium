@@ -18,6 +18,7 @@ import { engChip, lineageDialog, nextPageWithWork, reportWrong, sourceLabel } fr
 import { groupsPanel } from '../inspector/multi.js';
 import { notePanel, proposalCard } from '../inspector/note.js';
 import { act, actLater } from '../ui/feedback.js';
+import { glossaryToggle } from './glossary.js';
 import { currentLabels, labelPicker, mathBox, stripMathDelims, textMathBox } from '../ui/math.js';
 import { renderWorkspace, selectBlock, setSelection } from '../workspace/workspace.js';
 
@@ -402,17 +403,13 @@ export function labelStructure(blk) {
 }
 
 // A glossary page (pipeline.glossary): the entry's term(s) as the outputs read them; the reviewer may say the page is
-// not a glossary (a dismissed hint, undoable; applies with the next book update)
-export function glossaryDismiss(page) {
-  return h('button', { class: 'small ghost', title: 'Οι παράγραφοι της σελίδας διαβάζονται ως απλό κείμενο (αναιρείται· ισχύει με την επόμενη ενημέρωση)',
-    onclick: () => act(() => api(`${B(S.book.id)}/suggestions/glossary:${page}/dismiss`, { body: {} }), 'Η σελίδα δεν θα διαβάζεται ως γλωσσάριο μετά την ενημέρωση') }, 'Δεν είναι γλωσσάριο');
-}
+// not a glossary (inspector/glossary.js)
 function glossaryRow(blk, row) {
   if (!blk.glossary && !blk.glossary_letter) return null;
   const terms = blk.glossary?.terms || [];
   const value = blk.glossary_letter ? h('span', { class: 'prop-line' }, 'γράμμα-ενότητα του γλωσσαρίου')
     : terms.length ? h('span', { class: 'prop-line' }, terms.length > 1 ? `${terms.length} λήμματα: ` : 'Λήμμα: ', terms.map((t, i) => [i ? ', ' : '', h('b', {}, t)]))
     : h('span', { class: 'prop-line mut' }, 'συνέχεια του προηγούμενου λήμματος');
-  return row('gl', 'Γλωσσάριο', value, glossaryDismiss(blk.page));
+  return row('gl', 'Γλωσσάριο', value, glossaryToggle(S.page));
 }
 

@@ -17,6 +17,7 @@ import { updateSelectionPalette } from '../ui/selpalette.js';
 import { boundActive, boundBar, boundMembers, startBoundLoop } from '../inspector/boundloop.js';
 import { honourReveal, revealPending } from '../workspace/reveal.js';
 import { startTypoLoop, typoActive, typoBar } from '../inspector/typoloop.js';
+import { glossaryToggle } from '../inspector/glossary.js';
 
 // ------------------------------------------------------------------ Page workspace
 // ------------------------------------------------------------------ page views and the tools each one supports
@@ -24,7 +25,7 @@ import { startTypoLoop, typoActive, typoBar } from '../inspector/typoloop.js';
 // neither shown nor reachable by its key there.
 export const VIEWS = [['scan', 'Σάρωση', 'Η σάρωση με τα πλαίσια', 'Σάρωση'], ['output', 'Αποτέλεσμα', 'Πώς διαβάζεται η σελίδα στην έξοδο (προσέγγιση)', 'Έξοδος'],
   ['markdown', 'Markdown', 'Το ακριβές κομμάτι του αρχείου εξόδου', 'MD']];
-export const VIEW_TOOLS = { scan: ['zoom', 'boxes', 'region', 'select', 'omit', 'diligent'], output: ['zoom', 'omit', 'diligent'], markdown: ['zoom', 'diligent'] };
+export const VIEW_TOOLS = { scan: ['zoom', 'boxes', 'region', 'select', 'omit', 'glossary', 'diligent'], output: ['zoom', 'omit', 'glossary', 'diligent'], markdown: ['zoom', 'glossary', 'diligent'] };
 export const toolsFor = (view) => VIEW_TOOLS[view] || VIEW_TOOLS.scan;
 export const toolOn = (t) => !!S.page?.info?.state && toolsFor(S.leftView).includes(t);
 // Selection transitions: the ONLY places that change the multi-selection and its modes.
@@ -97,6 +98,7 @@ export const TOOLS = {
   omit: () => h('button', { class: omitState() ? 'on' : '', disabled: !omitTargets().length, onclick: toggleOmit,
     title: 'Το επιλεγμένο (ή τα επιλεγμένα) δεν μπαίνουν στο Markdown/PDF· μένουν στο βιβλίο, στον έλεγχο και στα JSON. Για λάθος πλαίσιο χρησιμοποίησε «Αφαίρεση λάθος πλαισίου».' },
     omitState() ? 'Στην έξοδο' : 'Εκτός εξόδου', h('kbd', {}, 'O')),
+  glossary: () => glossaryToggle(S.page, ''),
   diligent: () => h('button', { onclick: diligentDialog, title: 'Νέα εξαγωγή της σελίδας με υψηλότερη ανάλυση και πλήρες OCR' }, 'Προσεκτική επανεξέταση'),
 };
 
