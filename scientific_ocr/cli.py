@@ -29,6 +29,9 @@ def main(argv=None) -> int:
     p.add_argument('pdf', type=Path)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--pages', default=None)
+    p = sub.add_parser('variants', help='build the versions of the output profiles not shown (background)')
+    p.add_argument('--book', type=Path, required=True)
+    p.add_argument('--all', action='store_true', help='every profile, also up-to-date ones')
     for name in ('reproject', 'render', 'reproject-pages', 'ocr-regions'):
         p = sub.add_parser(name)
         p.add_argument('--book', '--output', dest='book', type=Path, required=True)
@@ -66,6 +69,9 @@ def main(argv=None) -> int:
     if a.cmd == 'ocr-regions':
         from .application import processing
         return processing.ocr_region_pages(a.book.resolve())
+    if a.cmd == 'variants':
+        from .application import processing
+        return processing.build_variants(a.book.resolve(), force=a.all)
     if a.cmd == 'reproject':
         from .application import processing
         return processing.reproject(a.book.resolve())

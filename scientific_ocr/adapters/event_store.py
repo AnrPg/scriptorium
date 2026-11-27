@@ -107,12 +107,13 @@ class EventStore:
         return self._transact(make, actor)
 
     # ---------------------------------------------------------------- read side
-    def state(self) -> dict:
-        return fold(self.load())
+    def state(self, profile: str | None = None) -> dict:
+        return fold(self.load(), profile)
 
 
-def fold(evs: list[dict]) -> dict:
-    """Pure fold of the log into the effective human input + undo/redo targets."""
+def fold(evs: list[dict], profile: str | None = None) -> dict:
+    """Pure fold of the log into the effective human input + undo/redo targets. `profile`: the input as it applies
+    in that output profile (to build its version while another one is shown); default the profile in force."""
     active, by_seq, redo_stack = {}, {}, []
     for ev in evs:
         by_seq[ev['seq']] = ev
@@ -135,7 +136,8 @@ def fold(evs: list[dict]) -> dict:
     # when their profile is back in force.
     counts = scopes.summary(live)
     not_undone = {e['seq'] for e in live}
-    live, current, scope_of = scopes.visible(live)
+    all_live = live
+    live, current, scope_of = scopes.visible(live, profile)
     live = [{**ev, 'scope': scope_of[ev['seq']]} if ev['seq'] in scope_of and 'scope' not in ev else ev for ev in live]
     rules, regions, profiles, hidden, merges, groups, dismissed, accepts = {}, {}, {}, set(), {}, {}, set(), {}
     entities, assigned, removed, excursus = {}, {}, set(), {}
@@ -182,8 +184,10 @@ def fold(evs: list[dict]) -> dict:
             excursus[ev['excursus']['id']] = ev['excursus']
         elif t == 'excursus_remove':
             excursus.pop(ev['excursus_id'], None)
-        elif t == 'output_profile':                     # the last one in force wins
+        elif t == 'output_profile' and (profile is None or ev['profile'] == profile):   # the last one in force wins
             output_profile = {'profile': ev['profile'], 'overrides': ev.get('overrides') or {}, 'seq': ev['seq']}
+    if profile is not None and output_profile is None:  # a profile never chosen yet: its name, default settings
+        output_profile = {'profile': profile, 'overrides': {}, 'seq': 0}
     # The reviewer's undo steps through the reviewer's own actions: events written by the system itself (e.g. the
     # automatic careful re-examination after processing) are never the target of Ctrl-Z.
     undo_targets = []
@@ -199,7 +203,8 @@ def fold(evs: list[dict]) -> dict:
             'removed_pages': sorted(removed), 'excursus': list(excursus.values()), 'output_profile': output_profile,
             'undo_targets': undo_targets, 'redo_targets': redo_stack[-1] if redo_stack else [],
             'history': evs, 'active': not_undone, 'applies': {e['seq'] for e in live},
-            'scope': current, 'scope_counts': counts, 'scope_of': scope_of}
+            'scope': current, 'scope_counts': counts, 'scope_of': scope_of,
+            'signature': scopes.signature(all_live, current)}
 
 
 # ---------------------------------------------------------------- net effect since a build

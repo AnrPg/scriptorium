@@ -248,6 +248,25 @@ def ocr_region_pages(out: Path, log: Log | None = None) -> int:
     return code
 
 
+def build_variants(out: Path, log: Log | None = None, force: bool = False) -> int:
+    """The versions of the output profiles NOT shown (build_history.variant_dir), each with its own decisions and
+    settings, so a profile switch shows its version at once. Only versions whose key changed are built (new OCR,
+    another profile's decisions, settings, code); `force`: all of them (the manual «Προεπεξεργασία»). Runs after
+    the shown book's build (it waits for it) and never holds the shown book: the reviewer never waits for it."""
+    from ..core import profiles
+    from . import build_history
+    log = log or file_logger(out)
+    with book_lock(out):                             # after the shown build that queued this one
+        shown = EventStore(out).state()['scope']
+    todo = [p for p in profiles.names() if p != shown and (force or build_history.variant_state(out, p) != 'current')]
+    log(f'profile versions to build: {todo or "none (all up to date)"}')
+    code = 0
+    for p in todo:
+        c = projection.build(out, log, profile=p)
+        code = code or (0 if c in (0, 5) else c)
+    return code
+
+
 def reproject(out: Path, log: Log | None = None, with_regions: bool = True) -> int:
     """Cheap path after human input: OCR new reviewer regions (if any), then rebuild outputs."""
     log = log or file_logger(out)

@@ -15,7 +15,7 @@ from ...pipeline.overlay import (
     decision_events,
     heading_level_events,
 )
-from .base import PROFILES, ServiceBase, ServiceError, _now  # noqa: F401
+from .base import PROFILES, ServiceBase, ServiceError, _now, variants_job  # noqa: F401
 from .structure import _pad
 
 
@@ -191,7 +191,7 @@ class ReviewService(ServiceBase):
         pages = sorted({int(e['page']) for e in b.events.load() if e['seq'] in targets and e['type'] == 'page_profile'})
         if pages:
             self.jobs.submit(b.id, 'process', ['process', '--book', str(b.dir), '--pages', ','.join(map(str, pages))],
-                             f'{label}: επανεξέταση σελ. {", ".join(map(str, pages))}')
+                             f'{label}: επανεξέταση σελ. {", ".join(map(str, pages))}', then=variants_job(b))
             return
         from ..build_history import restore        # lazy, like the projection
         # back to the exact state of a kept build (nothing else changed): its outputs, at once; or nothing left
@@ -313,7 +313,8 @@ class ReviewService(ServiceBase):
             raise ServiceError(f'profile must be one of {PROFILES}')
         b.events.append({'type': 'page_profile', 'page': int(page), 'profile': profile}, actor=actor)
         return self.jobs.submit(b.id, 'process', ['process', '--book', str(b.dir), '--pages', str(page)],
-                                f'Προσεκτική επανεξέταση σελ. {page}' if profile == 'diligent' else f'Επανεξέταση σελ. {page}')
+                                f'Προσεκτική επανεξέταση σελ. {page}' if profile == 'diligent' else f'Επανεξέταση σελ. {page}',
+                                then=variants_job(b))
 
 
 def _segment_context(blk: dict) -> dict:

@@ -19,8 +19,9 @@ class FakeJobs:
     def __init__(self):
         self.submitted = []
 
-    def submit(self, book_id, kind, args, label, lane='heavy'):
+    def submit(self, book_id, kind, args, label, lane='heavy', then=None):
         self.submitted.append((kind, lane))
+        self.then = getattr(self, 'then', []) + ([then] if then else [])
         return {'id': 'j1', 'book': book_id, 'kind': kind, 'state': 'queued'}
 
     def busy(self, book_id):

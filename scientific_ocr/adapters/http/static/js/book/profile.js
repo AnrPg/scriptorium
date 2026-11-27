@@ -37,6 +37,10 @@ export async function profileSettingsCard(body) {
         h('div', { style: { flex: '1', minWidth: '0' } }, h('b', {}, p.el), h('div', { class: 'mut' }, what)));
     }),
     decisionsByProfile(st),
+    h('div', { class: 'row small', style: { marginTop: '10px', alignItems: 'flex-start' } },
+      h('div', { style: { flex: '1', minWidth: '0' } }, h('b', {}, 'Προεπεξεργασία ανά προφίλ'),
+        h('div', { class: 'mut' }, 'Κάθε προφίλ έχει έτοιμη τη δική του εκδοχή (π.χ. RAG: χωρίς μορφοποίηση, λεζάντες στο τέλος της ενότητας)· ο έλεγχος δείχνει την εκδοχή του τρέχοντος. Γίνεται μόνη της μετά το OCR και μετά από κάθε ενημέρωση· εδώ την ξανατρέχεις για όλα.')),
+      h('button', { class: 'small', onclick: () => act(() => api(`${B(b.id)}/profile/preprocess`, { body: {} }), 'Προεπεξεργασία όλων των προφίλ: το τρέχον πρώτο, τα άλλα στο παρασκήνιο', false) }, 'Ξανά για όλα')),
     enginePolicy(st),
     st.awaiting_rebuild ? h('p', { class: 'note small' }, 'Η αλλαγή εφαρμόζεται με την επόμενη «Ενημέρωση βιβλίου».') : null,
     st.built === 'rag' ? h('p', { class: 'small mut' }, `Εκτός εξόδου λόγω προφίλ: ${st.excluded_segments} τμήματα · `,

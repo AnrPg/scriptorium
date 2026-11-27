@@ -7,6 +7,13 @@ build saw, and nothing else changed since (same inputs fingerprint: raw OCR, sou
 calibration books, dictionaries, code), that build's outputs ARE what a rebuild would produce: they are put back
 in place instead of rebuilding. Any doubt (no key, other inputs, a build running) -> nothing is restored and the
 normal rebuild path runs. The kept builds swap with the current one, so redo can come back the same way.
+
+The events a build saw = the SIGNATURE of the output profile it was built for (core.scopes.signature: the events
+that apply in it + its settings), so a profile switch or another profile's decisions never invalidate it.
+
+Profile versions (profiles/<name>/): every output profile keeps its LAST built outputs with their key. Showing
+another profile puts its version in place at once (activate); a version whose key is out of date is shown while it
+is rebuilt (application.processing.build_variants runs after the shown profile's build, in the background).
 """
 from __future__ import annotations
 
@@ -60,12 +67,14 @@ def keep_previous(out: Path) -> None:
         _shelve(out, meta)
 
 
-def record(out: Path, canonical: dict, human: dict) -> None:
-    """After a build wrote its outputs: their key (the active events it saw + the inputs fingerprint)."""
-    atomic_write(out / CURRENT, json.dumps({
+def record(out: Path, canonical: dict, human: dict, meta_file: Path | None = None) -> None:
+    """After a build wrote its outputs: their key (the events of its profile it saw + the inputs fingerprint).
+    `out` is the book; `meta_file`: where to write it for a profile version built aside (default: the shown one)."""
+    book = out if meta_file is None else out.parent.parent          # cache/.variant-<p> lives in the book
+    atomic_write(meta_file or out / CURRENT, json.dumps({
         'built_utc': canonical['run']['built_utc'], 'last_seq': canonical['human']['last_seq'],
-        'allow_inference': canonical['run']['allow_inference'], 'active': sorted(human['active']),
-        'fingerprint': fingerprint(out)}))
+        'allow_inference': canonical['run']['allow_inference'], 'signature': human['signature'],
+        'fingerprint': fingerprint(book)}))
 
 
 def restore(out: Path) -> bool:
@@ -78,16 +87,16 @@ def restore(out: Path) -> bool:
         if not locked:
             return False
         try:
-            active = sorted(fold(EventStore(out).load())['active'])
+            active = fold(EventStore(out).load())['signature']
         except Exception:                                    # an invalid log is reported by the build
             return False
         cur = read_json(out / CURRENT) or {}
-        if cur.get('active') == active:
+        if cur.get('signature') == active:
             return False                                     # the outputs already are that state
         fp = None
         for slot in slots:
             meta = read_json(slot / 'meta.json') or {}
-            if meta.get('active') != active or meta.get('allow_inference') != cur.get('allow_inference', True) \
+            if meta.get('signature') != active or meta.get('allow_inference') != cur.get('allow_inference', True) \
                     or not all((slot / f).exists() for f in OUTPUTS):
                 continue
             fp = fp or fingerprint(out)
@@ -108,6 +117,76 @@ def restore(out: Path) -> bool:
                     p.unlink(missing_ok=True)
             return True
     return False
+
+
+# ---------------------------------------------------------------- one version per output profile
+VARIANTS = Path('profiles')
+
+
+def variant_dir(out: Path, profile: str) -> Path:
+    return out / VARIANTS / profile
+
+
+def keep_variant(out: Path, profile: str, src: Path | None = None) -> None:
+    """After a build of `profile` wrote its outputs (into `src`, default the book itself): they become that profile's
+    kept version, with the key the build recorded (hard links; replaced atomically)."""
+    src = src or out
+    meta = read_json(out / CURRENT if src == out else src / 'meta.json')
+    if not meta or not all((src / f).exists() for f in OUTPUTS):
+        return
+    dest = variant_dir(out, profile)
+    tmp = dest.with_name(f'.{profile}.{os.getpid()}.tmp')
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    for f in OUTPUTS:
+        try:
+            os.link(src / f, tmp / f)
+        except OSError:
+            shutil.copy2(src / f, tmp / f)
+    (tmp / 'meta.json').write_text(json.dumps(meta))
+    old = dest.with_name(f'.{profile}.{os.getpid()}.old')
+    if dest.exists():
+        os.replace(dest, old)
+    os.replace(tmp, dest)
+    shutil.rmtree(old, ignore_errors=True)
+
+
+def variant_state(out: Path, profile: str) -> str:
+    """'current' (up to date: same inputs, same events of that profile), 'stale', or 'missing'."""
+    d = variant_dir(out, profile)
+    meta = read_json(d / 'meta.json') or {}
+    if not meta or not all((d / f).exists() for f in OUTPUTS):
+        return 'missing'
+    try:
+        sig = fold(EventStore(out).load(), profile)['signature']
+    except Exception:
+        return 'stale'
+    return 'current' if meta.get('signature') == sig and meta.get('fingerprint') == fingerprint(out) else 'stale'
+
+
+def activate(out: Path, profile: str) -> str:
+    """Show `profile`'s kept version at once (the shown build is kept, so undoing the switch comes back the same
+    way). Returns its variant_state — 'stale' means shown but to be rebuilt —, 'missing', or 'busy' (a build holds
+    the book: the caller rebuilds instead)."""
+    state = variant_state(out, profile)
+    if state == 'missing':
+        return state
+    with try_book_lock(out) as locked:
+        if not locked:
+            return 'busy'
+        d = variant_dir(out, profile)
+        keep_previous(out)
+        for f in OUTPUTS:
+            tmp = out / f'.{f}.activate.tmp'
+            tmp.unlink(missing_ok=True)
+            os.link(d / f, tmp)
+            os.replace(tmp, out / f)
+            os.utime(out / f)                                # a new revision for the views (Book.revision)
+        atomic_write(out / CURRENT, (d / 'meta.json').read_text())
+        with book_lock(out, 'preview'):                      # previews were made from the replaced build
+            for p in (out / PREVIEW_DIR).glob('p*.json'):
+                p.unlink(missing_ok=True)
+    return state
 
 
 def _slots(out: Path) -> list[Path]:

@@ -25,11 +25,12 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..core import profiles, scopes
 from ..core.decisions import NEEDS_OCR
 from .. import config
 from ..core.model import page_summary
 from . import pdf as pdfio
-from .event_store import EventStore, net_pending
+from .event_store import EventStore, fold, net_pending
 
 ID_RE = re.compile(r'^[a-z0-9][a-z0-9_.-]{0,63}$')
 
@@ -282,10 +283,20 @@ class Book:
         event log, not yet in the outputs). NET of undo: an action undone before any rebuild saw it is not pending
         — the outputs already show the book without it (event_store.net_pending). `ocr`: how many of them need
         new OCR, done by the rebuild."""
-        last = ((self.canonical() or {}).get('human') or {}).get('last_seq', 0)
+        c = self.canonical() or {}
+        last = (c.get('human') or {}).get('last_seq', 0)
         applied = self.preview_applied()
         try:
-            evs = net_pending(self.events.load(), last, applied)
+            log = self.events.load()
+            by_seq = {e['seq']: e for e in log}
+            built = (c.get('profile') or {}).get('name') or profiles.DEFAULT
+            # only what changes the profile these outputs show (core.scopes): another profile's decisions, or a
+            # switch to a profile whose built version is in place, are not pending here
+            evs = [e for e in net_pending(log, last, applied) if scopes.concerns(e, by_seq, built)]
+            sig = ((c.get('run') or {}).get('signature') or {})
+            now = fold(log)['signature']
+            if sig and now.get('profile') == built and sig.get('overrides') != now.get('overrides'):
+                evs.append(next(e for e in reversed(log) if e['type'] == 'output_profile'))   # its settings changed
         except Exception:                      # an invalid log is reported by the projection, not here
             evs = []
         return {'count': len(evs), 'ocr': sum(e['type'] in NEEDS_OCR for e in evs), 'events': evs[-200:],

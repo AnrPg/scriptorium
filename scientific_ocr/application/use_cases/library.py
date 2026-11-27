@@ -17,7 +17,7 @@ from ...pipeline import engine_json, markdown, references
 from ...pipeline.overlay import COMMANDS
 from .. import exports
 from ...adapters.storage import NotFound, natural_key, page_order
-from .base import PROFILES, ServiceBase, ServiceError, _now  # noqa: F401
+from .base import PROFILES, ServiceBase, ServiceError, _now, variants_job  # noqa: F401
 from .export import _entity_types
 
 
@@ -301,7 +301,8 @@ class LibraryService(ServiceBase):
             spec = ','.join(map(str, want))
         n = len(want)
         args = ['process', '--book', str(b.dir)] + (['--pages', spec] if spec else [])
-        return self.jobs.submit(b.id, 'process', args, f'Επεξεργασία {n} σελίδων' if n != 1 else f'Επεξεργασία σελ. {spec}')
+        return self.jobs.submit(b.id, 'process', args, f'Επεξεργασία {n} σελίδων' if n != 1 else f'Επεξεργασία σελ. {spec}',
+                                then=variants_job(b))      # after OCR: every profile's pre-processed version
 
     def cancel(self, job_id: str) -> dict:
         return self.jobs.cancel(job_id)

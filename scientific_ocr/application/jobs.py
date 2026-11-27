@@ -46,16 +46,21 @@ class JobQueue:
         threading.Thread(target=self._heavy_worker, daemon=True, name='jobs-heavy').start()
 
     # ---------------------------------------------------------------- public API
-    def submit(self, book_id: str, kind: str, args: list[str], label: str, lane: str = 'heavy') -> dict:
+    def submit(self, book_id: str, kind: str, args: list[str], label: str, lane: str = 'heavy',
+               then: dict | None = None) -> dict:
+        """`then`: a follow-up job (submit's own arguments) submitted when this one ENDS WELL — work that must come
+        after it but must not delay it (e.g. the other output profiles' versions after the shown book's build)."""
         with self.lock:
             if lane == 'light':
                 running = self._active(book_id, 'light', kind)
                 if running:                                   # coalesce: rerun once when the current one ends
                     self.light_dirty.add((book_id, kind))
+                    if then:
+                        running['then'] = then
                     return running
             job = {'id': uuid.uuid4().hex[:10], 'book': book_id, 'kind': kind, 'label': label, 'lane': lane,
                    'args': args, 'state': 'queued', 'created': time.time(), 'started': None, 'finished': None,
-                   'code': None}
+                   'code': None, **({'then': then} if then else {})}
             self.jobs[job['id']] = job
             if lane == 'heavy':
                 self.heavy.append(job['id'])
@@ -178,6 +183,8 @@ class JobQueue:
         if idle and state != 'done':
             # an interrupted engine may have left helper servers behind (see extraction.reap_engine_servers)
             extraction.reap_engine_servers(log=lambda m: _append_line(logf, m))
+        if state == 'done' and job.get('then'):
+            self.submit(job['book'], **job['then'])
 
     def _persist(self):
         keep = sorted(self.jobs.values(), key=lambda j: j['created'])[-HISTORY:]

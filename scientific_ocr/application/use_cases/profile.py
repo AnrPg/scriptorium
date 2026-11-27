@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from ...core import profiles, scopes
 from ...pipeline import entities
-from .base import ServiceBase, ServiceError
+from .. import build_history
+from .base import ServiceBase, ServiceError, variants_job
 
 
 class ProfileService(ServiceBase):
@@ -44,8 +45,27 @@ class ProfileService(ServiceBase):
             raise ServiceError(f'changing the profile: choose carry = {" or ".join(scopes.CARRY)}')
         ev = self._append(b, {'type': 'output_profile', 'profile': profile, **({'overrides': overrides} if overrides else {}),
                               **({'carry': carry} if profile != current else {})}, actor=actor)[0]
-        self._reproject(b, f'Προφίλ εξόδου: {profiles.PROFILES[profile]["el"]}')
-        return ev
+        label = f'Προφίλ εξόδου: {profiles.PROFILES[profile]["el"]}'
+        if profile == current:                          # its settings changed: its version is rebuilt
+            self._reproject(b, label, force=True)
+            return ev
+        # every profile keeps its pre-processed version (build_history.activate): shown at once; rebuilt only when
+        # it is out of date (then shown meanwhile), missing, or a build holds the book
+        state = build_history.activate(b.dir, profile)
+        if state != 'current':
+            self._reproject(b, label, force=True)
+        else:
+            self._update_pages(b)                       # page-local actions of that profile since its version
+        return {**ev, 'version': state}
+
+    def preprocess_profiles(self, book_id: str) -> dict:
+        """Run the pre-processing of EVERY output profile again (the shown one first, the others in the background):
+        the manual trigger; it also runs by itself after OCR and after every book update."""
+        b = self._book(book_id)
+        if not b.canonical():
+            raise ServiceError('process the book first')
+        return self.jobs.submit(b.id, 'reproject', ['reproject', '--book', str(b.dir)], 'Προεπεξεργασία όλων των προφίλ',
+                                lane='light', then=variants_job(b, force=True))
 
     def copy_decisions(self, book_id: str, source: str, actor='reviewer') -> dict:
         """Carry every decision profile `source` has NOW into the profile in force (one undoable event; core.scopes).

@@ -73,7 +73,8 @@ class ServiceBase:
         est = b.rebuild_estimate()
         if not force and est is not None and est > config.AUTO_REBUILD_MAX_S:
             return self._update_pages(b)            # banked for the book; touched pages get a preview at once
-        return self.jobs.submit(b.id, 'reproject', ['reproject', '--book', str(b.dir)], label, lane='light')
+        return self.jobs.submit(b.id, 'reproject', ['reproject', '--book', str(b.dir)], label, lane='light',
+                                then=variants_job(b))
 
     def _update_pages(self, b: Book):
         """Rebuild, as page previews, only the pages a PAGE-LOCAL action changed (projection.dirty_pages). Nothing
@@ -120,6 +121,13 @@ class ServiceBase:
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec='seconds')
 
+
+
+def variants_job(b: Book, force: bool = False) -> dict:
+    """The follow-up of a shown-book build: the versions of the other output profiles, in the background (light
+    lane: never queued behind OCR, never delaying the reviewer's next update; processing.build_variants)."""
+    return {'kind': 'variants', 'args': ['variants', '--book', str(b.dir), *(['--all'] if force else [])],
+            'label': 'Προεπεξεργασία των άλλων προφίλ (στο παρασκήνιο)', 'lane': 'light'}
 
 
 def _pages_label(pages: list[int]) -> str:

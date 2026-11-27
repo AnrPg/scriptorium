@@ -10,6 +10,7 @@ Never runs page OCR. Safe to run any number of times; outputs are replaced atomi
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ from ..adapters.storage import (
     read_json,
     read_json_strict,
 )
-from ..core import joblog, lineage, profiles
+from ..core import joblog, lineage, profiles, scopes
 from . import build_history
 from ..core.decisions import event_pages, page_of
 from ..core.reasons import flag
@@ -69,10 +70,17 @@ SCHEMA_VERSION = '2.0'
 
 
 def build(out: Path, log: Log = print, allow_inference: bool = True,
-          runner: SpecializedRunner = specialized.run, progress: Progress | None = None) -> int:
+          runner: SpecializedRunner = specialized.run, progress: Progress | None = None,
+          profile: str | None = None) -> int:
     """Exit codes: 0 ok, 3 source hash changed, 4 event log unreadable, 5 integrity failure, 6 required input
     missing or unreadable.
-    Serialised per book (storage.book_lock): concurrent builds from the UI and the CLI wait for each other."""
+    `profile`: build the version of ANOTHER output profile (its decisions and settings) into its kept place
+    (build_history.variant_dir) — the shown outputs are not touched. None: the profile in force, shown.
+    Serialised per book (storage.book_lock): concurrent builds from the UI and the CLI wait for each other; a
+    profile version has its own lock and never holds the shown book's."""
+    if profile is not None:
+        with book_lock(out, f'variant-{profile}'):
+            return _build(out, log, allow_inference, runner, progress, profile)
     with book_lock(out):
         code = _build(out, log, allow_inference, runner, progress)
         if code in (0, 5):
@@ -104,7 +112,8 @@ class _Inputs:
     human: dict
 
 
-def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner, progress: Progress | None) -> int:
+def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner, progress: Progress | None,
+           for_profile: str | None = None) -> int:
     """Phases: load inputs -> compose pages -> apply decisions -> document structure -> annotations -> publish."""
     progress = progress or (lambda *a, **k: None)
     clock, t0 = {}, time.perf_counter()
@@ -113,10 +122,11 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
         nonlocal t0
         clock[name] = round(time.perf_counter() - t0, 2)
         t0 = time.perf_counter()
-    inp = _load_inputs(out, log)
+    inp = _load_inputs(out, log, for_profile)
     if isinstance(inp, int):
         return inp
-    prev = read_json(out / 'canonical.json') or {}
+    variant = build_history.variant_dir(out, for_profile) if for_profile else None
+    prev = read_json((variant or out) / 'canonical.json') or {}
     lap('load')
     blocks, pages, contexts, versions = _compose_pages(out, inp, progress)
     lap('compose pages')
@@ -162,7 +172,8 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
                   'regions': inp.human['regions'], 'hidden': inp.human['hidden'], 'profiles': inp.human['profiles']},
         'pages': pages, **struct, **annotations, 'notation': notation_summary, 'blocks': blocks,
     }
-    code = _publish(out, canonical, inp, spec, len(result['stale']), log)
+    canonical['run']['signature'] = inp.human['signature']      # what this version saw (core.scopes)
+    code = _publish(out, canonical, inp, spec, len(result['stale']), log, for_profile)
     lap('audit + render + write')
     for line in change_report(prev, canonical, inp.human['history']) + change_facts(prev, canonical, inp.human['history']):
         log(line)
@@ -172,8 +183,9 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
                     recommended=sum(x['review'] == 'recommended' for x in b),
                     critical=sum(f['severity'] == 'critical' for f in canonical['findings']),
                     release_status=canonical['release_status'], seconds=round(sum(clock.values()), 1), timings=clock))
-    atomic_write(out / 'cache' / 'build.json', json.dumps({'seconds': round(sum(clock.values()), 1), 'timings': clock,
-                                                         'built_utc': canonical['run']['built_utc']}))
+    if for_profile is None:                            # the estimate of the shown book's rebuild
+        atomic_write(out / 'cache' / 'build.json', json.dumps({'seconds': round(sum(clock.values()), 1), 'timings': clock,
+                                                             'built_utc': canonical['run']['built_utc']}))
     return code                                        # page previews: superseded in _catch_up_previews
 
 
@@ -259,8 +271,9 @@ def change_report(prev: dict, c: dict, history: list[dict]) -> list[str]:
     return lines
 
 
-def _load_inputs(out: Path, log: Log):
-    """Required inputs, verified; an int is an exit code (previous outputs stay untouched)."""
+def _load_inputs(out: Path, log: Log, profile: str | None = None):
+    """Required inputs, verified; an int is an exit code (previous outputs stay untouched). `profile`: the reviewer's
+    input as it applies in that output profile (core.scopes), default the one in force."""
     try:
         src = read_json_strict(out / 'source' / 'source.json')
         ex = read_json_strict(out / 'raw' / 'extraction_index.json', {})
@@ -276,7 +289,7 @@ def _load_inputs(out: Path, log: Log):
         log('CRITICAL: retained PDF hash changed; aborting')
         return 3
     try:
-        human = EventStore(out).state()
+        human = EventStore(out).state(profile)
     except EventError as exc:
         log(f'EVENT LOG INVALID: {exc}. Previous outputs left untouched.')
         return 4
@@ -529,8 +542,10 @@ def _annotations(out: Path, blocks, human, result) -> dict:
             'latex_check': latex_check.annotate(blocks, latex_render.check)}   # after every content change
 
 
-def _publish(out: Path, canonical: dict, inp: _Inputs, spec, stale: int, log: Log) -> int:
-    """Audit, render and write every output atomically; exit code 5 on an integrity failure."""
+def _publish(out: Path, canonical: dict, inp: _Inputs, spec, stale: int, log: Log, for_profile: str | None = None) -> int:
+    """Audit, render and write every output atomically; exit code 5 on an integrity failure. The shown build
+    writes the book's outputs and becomes its profile's kept version; a profile version (`for_profile`) is written
+    straight into its kept place."""
     blocks = canonical['blocks']
     canonical['findings'] = audit.pre_render(canonical, out)
     md = markdown.markdown(canonical)                 # the reader-facing document (also checked by the audit)
@@ -539,19 +554,29 @@ def _publish(out: Path, canonical: dict, inp: _Inputs, spec, stale: int, log: Lo
                                                  (canonical.get('profile') or {}).get('pending', 0))
     canonical['assets'] = sorted({b['source_crop']['path'] for b in blocks if b.get('source_crop')})
     audit.validate_schema(canonical)
-    build_history.keep_previous(out)                  # undo/redo back to it is shown at once (no rebuild)
-    atomic_write(out / 'chapter.md', md)
-    atomic_write(out / 'canonical.json', json.dumps(canonical, ensure_ascii=False, indent=2))
-    atomic_write(out / 'review_report.html', report.report_html(canonical))
+    dest = out if for_profile is None else out / 'cache' / f'.variant-{for_profile}'
+    if for_profile is None:
+        build_history.keep_previous(out)              # undo/redo back to it is shown at once (no rebuild)
+    else:
+        dest.mkdir(parents=True, exist_ok=True)
+    atomic_write(dest / 'chapter.md', md)
+    atomic_write(dest / 'canonical.json', json.dumps(canonical, ensure_ascii=False, indent=2))
+    atomic_write(dest / 'review_report.html', report.report_html(canonical))
     counts = {'blocks': len(blocks), 'required': sum(b['review'] == 'required' for b in blocks),
               'recommended': sum(b['review'] == 'recommended' for b in blocks),
               'critical': sum(f['severity'] == 'critical' for f in canonical['findings']), 'stale_decisions': stale}
-    atomic_write(out / 'run_manifest.json', json.dumps({
+    atomic_write(dest / 'run_manifest.json', json.dumps({
         'built_utc': canonical['run']['built_utc'], 'source_sha256': inp.src['sha256'],
         'pages': inp.src['pages_processed'], 'release_status': canonical['release_status'],
         'extraction': inp.extraction, 'specialized': spec, 'counts': counts}, ensure_ascii=False, indent=2, default=str))
-    build_history.record(out, canonical, inp.human)
-    log(f'built: {counts} release_status={canonical["release_status"]}')
+    if for_profile is None:
+        build_history.record(out, canonical, inp.human)
+        build_history.keep_variant(out, (canonical.get('profile') or {}).get('name') or profiles.DEFAULT)
+    else:
+        build_history.record(dest, canonical, inp.human, meta_file=dest / 'meta.json')
+        build_history.keep_variant(out, for_profile, src=dest)
+        shutil.rmtree(dest, ignore_errors=True)
+    log(f'built: {counts} release_status={canonical["release_status"]}' + (f' (profile version: {for_profile})' if for_profile else ''))
     integrity = any(f['severity'] == 'critical' and f['type'].startswith('INTEGRITY') for f in canonical['findings'])
     return 5 if integrity else 0
 
@@ -616,8 +641,9 @@ def dirty_pages(out: Path, canonical: dict | None = None) -> list[int]:
     covered: dict[int, int] = {}
     previewed: set[int] = set()
     dirty: set[int] = set()
+    shown = ((c.get('profile') or {}).get('name')) or profiles.DEFAULT      # the profile these outputs were built for
     for e in evs:
-        if e['seq'] <= last:
+        if e['seq'] <= last or not scopes.concerns(e, by_seq, shown):     # another profile's action: not this page
             continue
         for p in event_pages(e, by_seq, regions, merges_) or ():
             if p not in covered:

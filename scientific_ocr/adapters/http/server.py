@@ -484,6 +484,10 @@ class Handler(BaseHTTPRequestHandler):
         p = self._body()
         self._json(200, self.app.set_output_profile(bid, p.get('profile'), p.get('overrides'), self._actor(), p.get('carry')))
 
+    @route('POST', r'/api/books/([\w.-]+)/profile/preprocess')
+    def output_profile_preprocess(self, bid):
+        self._json(200, self.app.preprocess_profiles(bid))
+
     @route('POST', r'/api/books/([\w.-]+)/profile/copy')
     def output_profile_copy(self, bid):
         p = self._body()

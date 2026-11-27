@@ -97,3 +97,37 @@ def test_use_cases_switch_copy_and_export_follow_the_profile(tmp_path):
     a.set_output_profile('run', 'reading', carry='separate')
     assert build(out) == 0
     a.export('run', 'markdown_text')                                              # built for the profile in force
+
+
+def test_every_profile_keeps_its_preprocessed_version_and_a_switch_shows_it_at_once(tmp_path):
+    """After the shown build, the other profiles' versions are built aside (processing.build_variants); a switch
+    puts the right one in place without a rebuild; only a profile whose own inputs changed is rebuilt; the
+    pending count of the shown profile ignores the other profile's decisions."""
+    import json
+
+    from conftest import build, make_run
+    from test_application import FakeJobs
+
+    from scientific_ocr.adapters.storage import Library
+    from scientific_ocr.application import build_history, processing
+    from scientific_ocr.application.services import App
+    out = make_run(tmp_path)
+    lib = Library(tmp_path)
+    lib.adopt(out)
+    assert build(out) == 0
+    assert build_history.variant_state(out, 'reading') == 'current'          # the shown build is kept as its version
+    assert build_history.variant_state(out, 'rag') == 'missing'
+    assert processing.build_variants(out, log=lambda *a: None) == 0
+    assert build_history.variant_state(out, 'rag') == 'current'
+    jobs = FakeJobs()
+    a = App(lib, jobs)
+    r = a.set_output_profile('run', 'rag', carry='separate')
+    assert r['version'] == 'current' and jobs.submitted == []                # shown at once, nothing rebuilt
+    assert json.loads((out / 'canonical.json').read_text())['profile']['name'] == 'rag'
+    assert lib.get('run').pending()['count'] == 0
+    blk = next(b for b in a.page('run', 1)['blocks'] if b['chosen'].get('type') == 'text')
+    a.decide('run', blk['id'], 'mark_image_only')                             # a RAG decision
+    assert build_history.variant_state(out, 'rag') == 'stale' and build_history.variant_state(out, 'reading') == 'current'
+    r = a.set_output_profile('run', 'reading', carry='separate')
+    assert r['version'] == 'current' and lib.get('run').pending()['count'] == 0   # rag's decision is not reading's
+    assert json.loads((out / 'canonical.json').read_text())['profile']['name'] == 'reading'

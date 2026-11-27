@@ -145,6 +145,15 @@ resume points of a paragraph split by a figure or a page break. All of it is gen
 
 ### Output profiles — «RAG» (core/profiles.py, pipeline/profile.py, pipeline/rag.py)
 A book is prepared FOR something, chosen once (Ρυθμίσεις → Προφίλ εξόδου; event `output_profile`, undoable).
+**Pre-processing per profile** (pipeline/profile.text_policy, application/build_history: profiles/<name>/). After
+OCR, and after every book update, each profile has its own pre-processed version, so what you REVIEW is what that
+profile outputs: RAG drops the page's styling, repairs line-break hyphens, normalises Unicode, writes scripts as
+LaTeX and drops caption credit notes (the text as read stays in `chosen.profile_source`; bold terms are kept as the
+chunks' key terms); `reading` keeps the text as read. «Αποτέλεσμα» shows the profile's own rendering (RAG: titles to
+H3, picture captions at the END OF THEIR SECTION right before the next title, tables as rows). Only the shown
+profile is rebuilt while you wait; the others are rebuilt in the background only when their inputs changed (key =
+inputs fingerprint + the profile's events, core.scopes.signature); a switch shows the ready version at once.
+Settings → Προφίλ εξόδου → «Ξανά για όλα» re-runs it.
 **Decisions per profile** (core/scopes.py). Every reviewer decision belongs to the profile it was taken under
 and the outputs follow the decisions of the profile in force (an export refuses a book built under another
 profile). Changing the profile asks: *carry* the current decisions over, or keep the profiles *separate*; nothing is
