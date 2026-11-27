@@ -539,7 +539,8 @@ label.list-item{cursor:pointer}
 .ws-tools .ws-more{display:block}
 .ws-review{flex-wrap:nowrap}
 .ws-review.special>.bound-bar{flex:1 1 auto;min-width:0}
-.ws-review.special>.bound-bar{flex-wrap:nowrap;gap:6px;padding:4px 6px}
+.ws-review.special>.bound-bar{flex-wrap:wrap;gap:6px;row-gap:4px;padding:4px 6px}   /* never cut: what does not fit goes to a 2nd line */
+.ws-review.special>.bound-bar>span.small.mut{flex:1 1 160px;min-width:0;white-space:normal}   /* instructions narrow first */
 .ws-review.special>.bound-bar>*{flex:none}
 .ws-review.special>.bound-bar .typo-ctx{flex:1 1 auto;min-width:40px;max-width:none}
 .ws-review.special>.bound-bar .bound-type{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
