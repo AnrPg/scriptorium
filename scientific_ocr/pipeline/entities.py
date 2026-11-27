@@ -22,7 +22,8 @@ Sources of truth, strongest first:
 Exports may exclude verified entities only — an unverified one always stays in the output.
 
 Learning (stats): every reviewer verdict on a DETECTED entity is an outcome for the rule that produced it —
-right (confirmed with the detected type) or wrong (confirmed with another type, or dismissed). Per rule, with
+right (confirmed with the detected type) or wrong (confirmed with another type, dismissed, or its BOUNDARIES
+corrected by the reviewer: the dismissal carries `boundary: true` and the reviewer's own entity replaces it). Per rule, with
 enough evidence and a 95% upper error bound <= MAX_ERROR, the rule is TRUSTED: its unverified entities are
 offered for one-click bulk confirmation (still a human act — nothing is verified automatically). Outcomes of
 calibration books (same series) count as prior evidence.
@@ -207,6 +208,24 @@ def stats(outs: list[tuple[str, str]]) -> dict:
         a['error_upper'] = round(wilson_upper(a['wrong'], a['n']), 3)
         a['trusted'] = a['n'] >= MIN_EVIDENCE and a['error_upper'] <= MAX_ERROR
     return {'rules': agg, 'min_evidence': MIN_EVIDENCE, 'max_error': MAX_ERROR}
+
+
+MAX_SPAN_PAGES = 40         # a boundary correction longer than this is almost certainly a mis-click
+
+
+def span(blocks: list[dict], first: str, last: str) -> list[str]:
+    """The segments from `first` to `last` (inclusive, either order) in the book's reading order, over the same flow
+    the detectors use (content in the output; page furniture left out): the members of an entity whose boundaries
+    the reviewer set. Raises ValueError when a boundary is not in that flow or the span is implausibly long."""
+    flow = [b for b in blocks if in_output(b) and b.get('flow') != 'furniture']
+    pos = {b['id']: i for i, b in enumerate(flow)}
+    if first not in pos or last not in pos:
+        raise ValueError('a boundary is not a segment of the text (page furniture or removed)')
+    i, j = sorted((pos[first], pos[last]))
+    out = flow[i:j + 1]
+    if out[-1]['page'] - out[0]['page'] >= MAX_SPAN_PAGES:
+        raise ValueError(f'the span covers more than {MAX_SPAN_PAGES} pages')
+    return [b['id'] for b in out]
 
 
 def annotate(blocks: list[dict], entities: list[dict]) -> None:

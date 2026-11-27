@@ -6,6 +6,7 @@ which keeps the segments in the output and counts as a wrong outcome for the det
 from __future__ import annotations
 
 from ...core import profiles, scopes
+from ...pipeline import entities
 from .base import ServiceBase, ServiceError
 
 
@@ -89,7 +90,30 @@ class ProfileService(ServiceBase):
         return self.jobs.submit(b.id, 'rag-context', ['rag-context', '--book', str(b.dir)],
                                 'Προτάσεις πλαισίου για τα κομμάτια RAG (τοπικό μοντέλο)', lane='heavy')
 
+    def set_entity_bounds(self, book_id: str, key: str, first: str, last: str, actor='reviewer') -> dict:
+        """Right kind, wrong boundaries: the entity becomes the segments from `first` to `last` in reading order (any
+        pages; pipeline.entities.span). ONE undoable step: the detection is dismissed as wrongly bounded (a wrong
+        outcome for its rule) — or the reviewer's own entity withdrawn — and the reviewer's entity of the same type
+        takes its place; being the reviewer's, it is verified (the profile excludes it with no further question)."""
+        b = self._book(book_id)
+        known = {e['key']: e for e in (b.canonical() or {}).get('entities', [])}
+        e = known.get(key)
+        if e is None:
+            raise ServiceError('unknown entity')
+        try:
+            members = entities.span(self._seen_list(b), first, last)
+        except ValueError as exc:
+            raise ServiceError(str(exc)) from None
+        if members == e['members']:
+            raise ServiceError('the boundaries are the same')
+        drop = {'type': 'entity_remove', 'key': key} if e['granularity'] == 'human' \
+            else {'type': 'suggestion_dismiss', 'key': key, 'boundary': True}
+        evs = self._append(b, drop, {'type': 'entity_assign', 'key': entities.human_key(members), 'members': members,
+                                     'entity_type': e['type']}, actor=actor)      # one step (and inside a batch)
+        self._reproject(b, f'Νέα όρια: {len(members)} τμήματα')
+        return {'key': evs[1]['key'], 'members': members}
+
     def keep_in_output(self, book_id: str, key: str, actor='reviewer') -> dict:
         """«Not this»: the detection was wrong (not a question, a history note…) — it is dismissed and its segments
-        stay in the output. (A right type with a wrong boundary is corrected by classifying the right segments.)"""
+        stay in the output. (A right type with wrong boundaries: set_entity_bounds.)"""
         return self.remove_entity(book_id, key, actor)

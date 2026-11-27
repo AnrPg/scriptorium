@@ -237,3 +237,38 @@ def test_profile_text_policy_strips_styling_before_review_and_keeps_the_source()
     assert profile.text_policy(blocks, RAG) == 0                                   # idempotent
     u = rag.units(_canon(blocks), RAG)
     assert u[0]['text'] == 'τα γλυκολιπίδια και το γονιδίωμα.' and u[0]['terms'] == ['γονιδίωμα']   # key term kept
+
+
+def test_an_exclusion_with_wrong_boundaries_is_corrected_in_one_step(tmp_path):
+    """Right kind, wrong limits: the segments from the new start to the new end (reading order, furniture left out)
+    become the reviewer's own entity of the same type; the detection is dismissed as wrongly bounded; one undo."""
+    from scientific_ocr.adapters.storage import Library
+    from scientific_ocr.application.services import App, ServiceError
+    from scientific_ocr.pipeline import entities
+    from test_application import FakeJobs
+    blocks = [_b(i, 'paragraph', f't{i}') for i in range(1, 6)]
+    blocks[2]['flow'] = 'furniture'
+    assert entities.span(blocks, 'p1_4', 'p1_2') == ['p1_2', 'p1_4']            # either order; furniture left out
+    with pytest.raises(ValueError):
+        entities.span(blocks, 'p1_3', 'p1_5')                                    # a boundary must be text
+    out = make_run(tmp_path)
+    lib = Library(tmp_path)
+    lib.adopt(out)
+    assert build(out) == 0
+    app = App(lib, FakeJobs())
+    ids = [b['id'] for b in app.page('run', 1)['blocks'] if b.get('flow') != 'furniture']
+    assert len(ids) >= 3
+    detected = {'key': 'Nx', 'type': 'question', 'granularity': 'box', 'members': ids[:1], 'verified': False}
+    c = json.loads((out / 'canonical.json').read_text())
+    c['entities'] = [detected]
+    (out / 'canonical.json').write_text(json.dumps(c))
+    with pytest.raises(ServiceError):
+        app.set_entity_bounds('run', 'Nx', ids[0], ids[0])                     # nothing changes
+    r = app.set_entity_bounds('run', 'Nx', ids[0], ids[2])
+    assert r['members'] == ids[:3]
+    evs = EventStore(out).load()[-2:]
+    assert evs[0]['type'] == 'suggestion_dismiss' and evs[0]['boundary'] and evs[1]['type'] == 'entity_assign'
+    assert evs[1]['entity_type'] == 'question' and evs[0].get('group') == evs[1].get('group')    # one undo
+    assert build(out) == 0
+    ent = next(e for e in json.loads((out / 'canonical.json').read_text())['entities'] if e['key'] == r['key'])
+    assert ent['verified'] and ent['members'] == ids[:3]

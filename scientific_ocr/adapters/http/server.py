@@ -489,6 +489,11 @@ class Handler(BaseHTTPRequestHandler):
         p = self._body()
         self._json(200, self.app.copy_decisions(bid, p.get('from'), self._actor()))
 
+    @route('POST', r'/api/books/([\w.-]+)/profile/bounds')
+    def output_profile_bounds(self, bid):
+        p = self._body()
+        self._json(200, self.app.set_entity_bounds(bid, p.get('key'), p.get('first'), p.get('last'), self._actor()))
+
     @route('POST', r'/api/books/([\w.-]+)/profile/confirm')
     def output_profile_confirm(self, bid):
         self._json(200, self.app.confirm_exclusions(bid, self._body().get('keys'), self._actor()))
