@@ -226,18 +226,33 @@ def _chain_fragments(page_blocks: list[dict], unit: float):
                 continue                                  # «ΕΡΩΤΗΣΗ 1-7», «Παράδειγμα 2.1»: its own element
             label_only_heading = b['kind'] == 'heading' and label and len(rest) < 3
             labelled_paragraph = b['kind'] == 'paragraph' and label and label.split()[0].isupper()
-            if not (b['kind'] == 'caption' or label_only_heading or labelled_paragraph):
+            # a numbered PICTURE/TABLE label opening a title («ΠΙΝΑΚΑΣ 16-4 Μερικές απαντήσεις…») is that element's
+            # caption, never a section heading (layout engines read the printed table title as a section header)
+            labelled_heading = b['kind'] == 'heading' and bool(insert_label(_HEAD_MARKS.sub('', b['chosen'].get('text') or '')))
+            if not (b['kind'] == 'caption' or label_only_heading or labelled_paragraph or labelled_heading):
                 continue
             near = next((c for c in assigned if _adjacent(b, c, unit)), None)
             fig = by_id[near['relations']['caption_for']] if near else \
-                (next((f for f in figs if _adjacent(b, f, unit) or _beside(b, f, unit)), None)
-                 if labelled_paragraph else None)
+                (_matching(label, [f for f in figs if _adjacent(b, f, unit) or _beside(b, f, unit)])
+                 if labelled_paragraph or labelled_heading else None)
             if fig:
                 if b['kind'] != 'caption':                # a caption the layout model typed as heading/paragraph
                     b['original_kind'], b['kind'] = b['kind'], 'caption'
                 _attach(b, fig, True, 'adjacent fragment' if near else 'labelled text next to figure')
                 fig['relations']['captions'].sort(key=lambda cid: page_blocks.index(by_id[cid]))
                 changed = True
+
+
+_HEAD_MARKS = re.compile(r'^\s*#+\s*')
+
+
+def _matching(label: str | None, figs: list[dict]) -> dict | None:
+    """The first of the candidate elements, a TABLE first for a table label («ΠΙΝΑΚΑΣ»), a non-table first for a
+    picture label («ΕΙΚΟΝΑ»); any of them when none is of that kind."""
+    if not figs:
+        return None
+    table = bool(label) and bool(TABLE_LABEL.search(label_key(label)))
+    return next((f for f in figs if (f['kind'] == 'table') == table), figs[0])
 
 
 def _other_element_label(label: str) -> bool:
