@@ -52,6 +52,7 @@ from ..pipeline import (
     notation,
     overlay,
     profile,
+    rag,
     references,
     report,
     rule_suggest,
@@ -574,6 +575,9 @@ def _publish(out: Path, canonical: dict, inp: _Inputs, spec, stale: int, log: Lo
     canonical['findings'] = audit.pre_render(canonical, out)
     md = markdown.markdown(canonical)                 # the reader-facing document (also checked by the audit)
     canonical['findings'] += audit.post_render(canonical, md, out)
+    rag_profile = ((canonical.get('profile') or {}).get('settings') or {})
+    if rag_profile.get('name') == 'rag':              # a RAG book: its RAG output is audited too (it arranges itself)
+        canonical['findings'] += audit.rag_export(canonical, rag_profile, rag.markdown(canonical, rag_profile))
     _mark_first_seen(canonical, out)
     canonical['release_status'] = release_status(blocks, canonical['findings'],
                                                  (canonical.get('profile') or {}).get('pending', 0))

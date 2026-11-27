@@ -210,6 +210,22 @@ def post_render(c: dict, md: str, out: Path, images: bool = True) -> list[dict]:
     return F
 
 
+def rag_export(c: dict, profile: dict, md: str) -> list[dict]:
+    """Audit of the RAG output (pipeline.rag), for a book built with the RAG profile: every piece of text it must
+    carry (rag.expected: titles, paragraphs, table cells, list items, formulas, captions — shaped as the RAG shapes
+    them) is in its Markdown. The RAG arranges the content itself (titles lead their paragraph, picture captions
+    at the end of their section), and an arrangement may lose a piece: reported like any lost content."""
+    from . import rag
+    flat = _norm(md)
+    lost: dict[str, tuple[int, str]] = {}
+    for bid, page, text in rag.expected(c, profile):
+        sn = _snippet(text)
+        if sn and sn not in flat and bid not in lost:
+            lost[bid] = (page, sn)
+    return [finding('INTEGRITY_CONTENT_NOT_EXPORTED', 'critical', page, [bid], f'text not in the RAG export: {sn!r}',
+                    'fix renderer') for bid, (page, sn) in lost.items()]
+
+
 SCHEMA = {
     'type': 'object',
     'required': ['schema_version', 'document_id', 'source', 'run', 'pages', 'blocks', 'findings', 'release_status'],
