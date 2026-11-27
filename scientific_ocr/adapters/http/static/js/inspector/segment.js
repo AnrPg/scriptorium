@@ -43,7 +43,10 @@ export function contentView(blk, value, latex, { codeOpen = null } = {}) {   // 
     h('div', { class: 'small mut' }, `Όπως μπαίνει στην έξοδο: ${blk.table_layout === 'rows' || (!blk.table_layout && blk.table_list?.order === 'rows') ? 'λίστα ανά γραμμές' : 'λίστα ανά στήλες'} (${items.length})`),
     h('ul', { class: 'content-list' }, items.map(t => h('li', {}, textMathBox(t)))))
     : latex ? mathBox(value) : textMathBox(value);
-  return h('div', { class: 'content-view' }, shown, code);
+  // the output profile dropped the page's styling before review (pipeline/profile.py text_policy): say so
+  const styled = blk.chosen?.profile_source && value === currentValue(blk)
+    ? h('div', { class: 'small mut', title: `Όπως διαβάστηκε:\n${blk.chosen.profile_source}` }, 'Προεπεξεργασμένο για το προφίλ (μορφοποίηση, συλλαβισμός, σημειώσεις δικαιωμάτων), όπως θα βγει· το αρχικό κρατιέται (δείξε με το ποντίκι).') : null;
+  return h('div', { class: 'content-view' }, styled, shown, code);
 }
 const NEEDS_REVIEW = ['required', 'recommended', 'unresolved'];
 const DECIDING = new Set();                     // block ids whose decision request is in flight

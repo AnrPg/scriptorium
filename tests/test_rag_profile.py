@@ -221,3 +221,19 @@ def test_a_picture_caption_goes_to_the_end_of_its_section_right_before_the_next_
     assert md[:4] == ['## Ενότητα Α', 'Όπως δείχνει η Εικόνα 1-4, το κύτταρο.', 'Η ενότητα συνεχίζει.',
                       'Λεπτομέρεια. Κι άλλο κείμενο.']
     assert md[4] == 'ΕΙΚΟΝΑ 1-4: Ένα κύτταρο.' and md[5].strip() == '## Ενότητα Β'
+
+
+def test_profile_text_policy_strips_styling_before_review_and_keeps_the_source():
+    """RAG drops the page's styling from the CONTENT before review (the reviewer checks what the output says);
+    formulas and sub/superscripts are notation, not styling; the styled source and the bold terms are kept."""
+    from scientific_ocr.core.text import strip_emphasis
+    assert strip_emphasis('τα *γλυκολιπίδια* (**Εικόνα 11-7**) και <i>x</i> $a*b*c$ H<sub>2</sub>O') == \
+        'τα γλυκολιπίδια (Εικόνα 11-7) και x $a*b*c$ H<sub>2</sub>O'
+    blocks = [_b(1, 'paragraph', 'τα *γλυκολιπίδια* και το **γονιδίωμα**.'), _b(2, 'paragraph', 'απλό κείμενο')]
+    assert profile.text_policy(blocks, profiles.effective('reading')) == 0 and '*' in blocks[0]['chosen']['text']
+    assert profile.text_policy(blocks, RAG) == 1
+    assert blocks[0]['chosen']['text'] == 'τα γλυκολιπίδια και το γονιδίωμα.'
+    assert blocks[0]['chosen']['profile_source'].startswith('τα *γλυκολιπίδια*') and blocks[0]['emphasis_terms'] == ['γονιδίωμα']
+    assert profile.text_policy(blocks, RAG) == 0                                   # idempotent
+    u = rag.units(_canon(blocks), RAG)
+    assert u[0]['text'] == 'τα γλυκολιπίδια και το γονιδίωμα.' and u[0]['terms'] == ['γονιδίωμα']   # key term kept

@@ -33,6 +33,7 @@ from ..core.decisions import CONTENT_ACTIONS
 from ..core.model import FIGURE_KINDS, in_output
 from ..core.profiles import MARKER_PRIMARY_WAIVES
 from ..core.reasons import REASONS, REVIEW_ORDER, flag
+from ..core.text import emphasis_terms, strip_emphasis
 from ..core.vocabulary import family_of
 from .entities import selectors
 
@@ -80,6 +81,43 @@ def _automatic(e: dict, auto: dict, entities: list[dict]) -> list[str] | None:
             return e['members']
         return _items_bound(e, entities)
     return None
+
+
+def text_policy(blocks: list[dict], profile: dict) -> int:
+    """PRE-PROCESSING of the content for the profile, before anything is reviewed: the reviewer checks what the
+    output will say. Each profile has its own rules (core.profiles); 'reading' keeps the text as read. With
+    strip_emphasis (RAG) every text segment is put in its output form by the SAME rule as the export (pipeline.rag
+    clean: styling dropped, line-break hyphens repaired, NFC, sub/superscripts in LaTeX) and a caption also loses its
+    trailing credit note (caption_credits). A table keeps its grid; only the styling inside its cells goes.
+    Kept: the text before pre-processing in chosen['profile_source'] (provenance) and the bold terms in
+    blk['emphasis_terms'] (key terms of the RAG chunks). Runs after structure and entities (they read the styling as
+    evidence: bold labels, captions) and before spelling and review. Idempotent; returns the segments changed."""
+    if not profile.get('strip_emphasis'):
+        return 0
+    from .rag import clean                              # the export's own text rule: one definition
+    credits = [re.compile(p, re.I) for p in profile.get('caption_credits') or ()]
+    changed = 0
+    for b in blocks:
+        ch = b.get('chosen') or {}
+        if ch.get('type') != 'text':
+            continue
+        src = b.get('text_norm') or ch.get('text') or ''          # the text as the outputs read it (notation)
+        if '<table' in src.lower():
+            out = strip_emphasis(src)
+        else:
+            out = clean(src, True)[0]
+            if b['kind'] == 'caption':
+                for rx in credits:
+                    out = rx.sub('', out).rstrip()
+        if out == (ch.get('text') or '') and not b.get('text_norm'):
+            continue
+        terms = emphasis_terms(src)
+        b['chosen'] = {**ch, 'text': out, 'profile_source': ch.get('profile_source') or ch.get('text') or ''}
+        b.pop('text_norm', None)                                   # the pre-processed text IS the output text now
+        if terms:
+            b['emphasis_terms'] = terms
+        changed += 1
+    return changed
 
 
 def apply(blocks: list[dict], entities: list[dict], excursus_list: list[dict], profile: dict) -> dict:

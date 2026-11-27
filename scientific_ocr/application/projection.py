@@ -140,6 +140,7 @@ def _build(out: Path, log: Log, allow_inference: bool, runner: SpecializedRunner
     _final_flow(blocks, struct, inp.human)
     tables.annotate(blocks)                               # term grids read as lists (hint; entities known)
     struct['profile'] = _output_profile(blocks, struct, inp.human)
+    struct['profile']['text_policy'] = profile.text_policy(blocks, book_profile(inp.human))   # before review + spelling
     lap('entities')
     annotations = _annotations(out, blocks, inp.human, result)
     annotations['spelling'] = _spelling(out, blocks, inp.human)
@@ -658,6 +659,7 @@ def _build_page(out: Path, page: int, log: Log, runner: SpecializedRunner) -> in
     result, _ = _apply_decisions(blocks, pages, contexts, _Inputs(one.src, one.pdf, one.extraction, one.regions_index, human))
     notation.annotate(blocks)
     captions.finalize(blocks)
+    profile.text_policy(blocks, book_profile(inp.human))  # the reviewer sees what the output will say
     old = {b['id']: b for b in prev.get('blocks', []) if b['page'] == page}
     merged = [_preview_block(b, old.get(b['id'])) for b in blocks]
     tables.annotate(merged)                               # entities kept from the full build
