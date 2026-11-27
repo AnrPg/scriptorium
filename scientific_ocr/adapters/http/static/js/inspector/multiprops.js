@@ -6,7 +6,7 @@ import { B, api } from '../core/api.js';
 import { h } from '../core/dom.js';
 import { S, kindLabel } from '../core/state.js';
 import { CAPROLE_EL } from '../core/strings.js';
-import { dropdown } from '../inspector/multi.js';
+import { dropdown, openGroupMenu, openMergeMenu } from '../inspector/multi.js';
 import { act, toast } from '../ui/feedback.js';
 import { labelPicker } from '../ui/math.js';
 import { excursusDialog } from '../inspector/excursus.js';
@@ -31,7 +31,13 @@ export function selectionProps(ids, state) {
     h('option', { value: '' }, '—'), h('option', { value: 0 }, 'Κείμενο'), [1, 2, 3, 4, 5, 6].map(n => h('option', { value: n }, `Τίτλος H${n}`)));
   const figures = S.page.blocks.filter(b => FIG.includes(b.kind) && !ids.includes(b.id));
   const groups = (S.book.groups || []).filter(g => g.members.some(m => S.page.blocks.some(b => b.id === m)) && !g.members.some(m => ids.includes(m)));
+  // merge needs one page (an unknown page counts as another one); grouping may span pages
+  const pages = new Set(ids.map(id => S.multi.get(id)?.page ?? null)), multiPage = pages.size > 1 || pages.has(null);
   return h('div', { class: 'props card' }, h('div', { class: 'prop-title' }, `Ιδιότητες επιλογής (${ids.length})`),
+    row('join', 'Μαζί', h('span', { class: 'mut small' }, 'σημείωση ομάδας / ένα νέο τμήμα'), h('span', { class: 'row' },
+      h('button', { class: 'small', title: 'Τα τμήματα μένουν ως έχουν· σημειώνεται ότι ανήκουν μαζί (και σε πολλές σελίδες) — G', onclick: (e) => openGroupMenu(e.currentTarget) }, 'Ομαδοποίηση…'),
+      h('button', { class: 'small', disabled: multiPage, title: multiPage ? 'Η συγχώνευση γίνεται μέσα σε μία σελίδα· σε πολλές σελίδες: ομαδοποίηση' : 'Ένα νέο τμήμα με τα κείμενά τους, με τη σειρά της επιλογής — M',
+        onclick: (e) => openMergeMenu(e.currentTarget) }, 'Συγχώνευση σε ένα…'))),
     row('cat', 'Κατηγορία', h('span', { class: 'mut small' }, 'όλα μαζί = μία οντότητα'), assignSelectionButton(ids)),
     row('lvl', 'Δομή', h('span', { class: 'mut prop-line' }, summary(b => b.kind === 'heading' ? `H${b.heading_level || 1}` : 'κείμενο')), levelSel),
     row('cap', 'Λεζάντα', h('span', { class: 'prop-line' }, summary(b => b.kind === 'caption' ? 'λεζάντα' : 'όχι')), btn('cap', 'Αλλαγή ▾'), () => h('div', { class: 'col' },
