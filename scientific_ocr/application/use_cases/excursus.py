@@ -24,7 +24,7 @@ class ExcursusService(ServiceBase):
 
     def set_excursus(self, book_id: str, first: str | None = None, last: str | None = None, pages: list | None = None,
                      type: str = 'other', name: str = '', placement: str = 'inplace', excursus_id: str | None = None,
-                     actor: str = 'reviewer', blocks: list | None = None) -> dict:
+                     actor: str = 'reviewer', blocks: list | None = None, tag: dict | None = None) -> dict:
         """Create (or, with excursus_id, change) an excursus from its first to its last segment, over whole pages
         [first page, last page], or over a selection (its first to its last segment in reading order)."""
         b = self._book(book_id)
@@ -60,7 +60,7 @@ class ExcursusService(ServiceBase):
         placement = placement if placement in EXCURSUS_PLACEMENTS else (old or {}).get('placement', 'inplace')
         ex = {'id': excursus_id or 'X' + uuid.uuid4().hex[:8], 'first': first, 'last': last, 'type': type,
               'name': (name if name is not None else (old or {}).get('name', '')).strip()[:120], 'placement': placement}
-        self._append(b, {'type': 'excursus_set', 'excursus': ex}, actor=actor)
+        self._append(b, {'type': 'excursus_set', 'excursus': ex, **(tag or {})}, actor=actor)   # tag: where it was decided
         self._reproject(b, f'Παρέκβαση σ. {order[first][0]}–{order[last][0]}')
         return ex
 
@@ -74,15 +74,16 @@ class ExcursusService(ServiceBase):
         return self.set_excursus(book_id, merged['first'], merged['last'], None, merged['type'], merged.get('name', ''),
                                  merged['placement'], excursus_id, actor)
 
-    def remove_excursus(self, book_id: str, excursus_id: str, actor: str = 'reviewer') -> dict:
+    def remove_excursus(self, book_id: str, excursus_id: str, actor: str = 'reviewer', tag: dict | None = None) -> dict:
         b = self._book(book_id)
+        tag = tag or {}
         if not any(x['id'] == excursus_id for x in b.events.state()['excursus']):
             if self._auto(b, excursus_id) is None:
                 raise ServiceError('no such excursus')
-            ev = self._append(b, {'type': 'suggestion_dismiss', 'key': excursus_id}, actor=actor)[0]   # automatic: not one
+            ev = self._append(b, {'type': 'suggestion_dismiss', 'key': excursus_id, **tag}, actor=actor)[0]   # automatic: not one
             self._reproject(b, 'Η παρέκβαση αφαιρέθηκε')
             return ev
-        ev = self._append(b, {'type': 'excursus_remove', 'excursus_id': excursus_id}, actor=actor)[0]
+        ev = self._append(b, {'type': 'excursus_remove', 'excursus_id': excursus_id, **tag}, actor=actor)[0]
         self._reproject(b, 'Η παρέκβαση αφαιρέθηκε')
         return ev
 

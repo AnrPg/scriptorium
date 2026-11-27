@@ -352,3 +352,40 @@ def test_a_tables_caption_keeps_its_printed_place_above_or_below_the_table():
         cap['relations']['caption_for'], tbl['relations']['captions'] = tbl['id'], [cap['id']]
         md = rag.markdown(_c([cap, tbl] if above else [tbl, cap]), RAG)
         assert (md.index('ΠΙΝΑΚΑΣ 16-4') < md.index('| Μόριο')) == above
+
+
+def test_an_excursus_removed_by_the_profile_takes_every_verdict_of_the_exclusions_loop(tmp_path):
+    """Root cause of «unknown entity» on a historical note: an exclusion may be an EXCURSUS (its type removed by the
+    profile), not an entity. New ends re-bound it (it becomes the reviewer's), «Σωστό» makes it the reviewer's,
+    «Όχι αυτό» removes it; each is a verdict of the loop (listed, undoable)."""
+    from scientific_ocr.adapters.storage import Library
+    from scientific_ocr.application.services import App, ServiceError
+    from test_application import FakeJobs
+    out = make_run(tmp_path)
+    lib = Library(tmp_path)
+    lib.adopt(out)
+    assert build(out) == 0
+    app = App(lib, FakeJobs())
+    ids = [b['id'] for b in app.page('run', 1)['blocks'] if b.get('flow') != 'furniture']
+    assert len(ids) >= 4
+    c = json.loads((out / 'canonical.json').read_text())
+    auto = lambda i, a, z: {'id': i, 'first': a, 'last': z, 'type': 'history', 'name': 'Ιστορία', 'placement': 'inplace',
+                            'source': 'entity', 'members': [a, z], 'pages': [1]}
+    c['excursus'] = [auto('xe1', ids[0], ids[1]), auto('xe2', ids[2], ids[2]), auto('xe3', ids[3], ids[3])]
+    c['profile'] = {**(c.get('profile') or {}), 'excluded': [
+        {'key': x['id'], 'type': 'excursus:history', 'label': '', 'pages': [1], 'members': x['members'], 'confirmed': True}
+        for x in c['excursus']], 'suggested': []}
+    (out / 'canonical.json').write_text(json.dumps(c))
+    assert {e['key'] for e in app.output_profile('run')['excluded'] if not e['confirmed']} == {'xe1', 'xe2', 'xe3'}
+    with pytest.raises(ServiceError):
+        app.set_entity_bounds('run', 'xe1', ids[0], ids[1])                       # the same ends
+    r = app.set_entity_bounds('run', 'xe1', ids[0], ids[2])                       # new ends
+    assert (r['first'], r['last']) == (ids[0], ids[2])
+    ev = EventStore(out).load()[-1]
+    assert ev['type'] == 'excursus_set' and ev['excursus']['id'] == 'xe1' and ev['verdict'] == 'bounds'
+    app.confirm_exclusions('run', ['xe2'])                                          # «Σωστό»
+    app.keep_in_output('run', 'xe3')                                                # «Όχι αυτό»
+    assert EventStore(out).load()[-1]['type'] == 'suggestion_dismiss'
+    verdicts = {d['key']: d['verdict'] for d in app.output_profile('run')['decided']}
+    assert verdicts == {'xe1': 'bounds', 'xe2': 'confirmed', 'xe3': 'kept'}
+    assert app.undo_exclusion('run')['keys'] == ['xe3']                             # the loop's ↶ finds it

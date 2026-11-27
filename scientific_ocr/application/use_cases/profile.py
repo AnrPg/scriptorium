@@ -2,7 +2,11 @@
 book-wide event, optionally with per-book overrides), see what it excludes, and settle its automatic exclusions
 with one confirmation each (or all at once) — the reviewer confirms BOUNDARIES, never re-reads the content.
 Confirming = the existing entity verdicts (entity_confirm); "not this" = dismissing the detection (suggestion_dismiss),
-which keeps the segments in the output and counts as a wrong outcome for the detector's rule."""
+which keeps the segments in the output and counts as a wrong outcome for the detector's rule.
+An exclusion comes from an ENTITY (a question, a summary…) or from an EXCURSUS whose type the profile removes (a
+historical note…): every verdict goes to what the exclusion is made of — an excursus is confirmed by becoming the
+reviewer's, re-bounded with new ends, «not this» by being removed (all tagged `about`, so the review lists and
+undoes them like the others)."""
 from __future__ import annotations
 
 from ...core import profiles, scopes
@@ -11,7 +15,7 @@ from .. import build_history
 from .base import ServiceBase, ServiceError, variants_job
 
 ABOUT = 'exclusion'                     # tag of the verdicts given while reviewing the profile's exclusions
-VERDICT_EVENTS = {'entity_confirm', 'entity_assign', 'entity_remove', 'suggestion_dismiss'}
+VERDICT_EVENTS = {'entity_confirm', 'entity_assign', 'entity_remove', 'suggestion_dismiss', 'excursus_set', 'excursus_remove'}
 
 
 class ProfileService(ServiceBase):
@@ -106,6 +110,8 @@ class ProfileService(ServiceBase):
 
     @staticmethod
     def _verdict_of(step: list[dict], e: dict) -> str:
+        if e.get('verdict') in ('confirmed', 'bounds', 'kept'):     # an excursus verdict says what it was
+            return e['verdict']
         if len({x['type'] for x in step}) > 1:           # dismiss/withdraw + the reviewer's entity: new boundaries
             return 'bounds'
         return 'confirmed' if e['type'] in ('entity_confirm', 'entity_assign') else 'kept'                                     # «not this»: it stays in the output
@@ -116,7 +122,8 @@ class ProfileService(ServiceBase):
         latest: dict = {}
         for step in self._verdict_steps(st, built):
             for e in step:
-                latest[e['key']] = (step, e)
+                if e.get('key'):                          # (an excursus event of the step without one: not a verdict)
+                    latest[e['key']] = (step, e)
         known = {e['key']: e for e in (built.get('excluded') or []) + (built.get('suggested') or [])}
         ents = {e['key']: e for e in (b.canonical() or {}).get('entities', [])}
         excursus = {x['id'] for x in st['excursus']}
@@ -158,9 +165,9 @@ class ProfileService(ServiceBase):
                 step = steps[-1] if steps else []
                 events = step
             else:
-                step = next((s for s in reversed(steps) if any(e['key'] == key for e in s)), [])
-                events = step if len({e['type'] for e in step}) > 1 else [e for e in step if e['key'] == key]
-            undone_keys[:] = [e['key'] for e in events]
+                step = next((s for s in reversed(steps) if any(e.get('key') == key for e in s)), [])
+                events = step if len({e['type'] for e in step}) > 1 else [e for e in step if e.get('key') == key]
+            undone_keys[:] = [e.get('key') for e in events]
             return [e['seq'] for e in events]
 
         out = b.events.undo_seqs(pick, actor)
@@ -176,7 +183,15 @@ class ProfileService(ServiceBase):
         keys = pending if keys is None else [k for k in keys if k in pending]
         if not keys:
             raise ServiceError('nothing to confirm')
-        return self.confirm_entities(book_id, keys, None, actor, about=ABOUT)
+        b = self._book(book_id)
+        autos = {k: a for k in keys if (a := self._auto(b, k))}          # automatic excursus: they become yours
+        if autos:
+            self._append(b, *[{'type': 'excursus_set', 'excursus': a, 'key': k, 'about': ABOUT, 'verdict': 'confirmed'}
+                              for k, a in autos.items()], actor=actor)
+            self._reproject(b, f'Επιβεβαίωση {len(autos)} παρεκβάσεων')
+        rest = [k for k in keys if k not in autos]
+        out = self.confirm_entities(book_id, rest, None, actor, about=ABOUT) if rest else {'confirmed': 0}
+        return {'confirmed': out['confirmed'] + len(autos)}
 
     def exclude_suggested(self, book_id: str, keys: list[str], actor='reviewer') -> dict:
         """A suggested exclusion (no independent boundary evidence) accepted by the reviewer: it is verified, so
@@ -204,10 +219,17 @@ class ProfileService(ServiceBase):
         outcome for its rule) — or the reviewer's own entity withdrawn — and the reviewer's entity of the same type
         takes its place; being the reviewer's, it is verified (the profile excludes it with no further question)."""
         b = self._book(book_id)
+        x = self._excursus_of(b, key)
+        if x is not None:                                 # an excursus removed by the profile: its new ends
+            if (x.get('first'), x.get('last')) == (first, last):
+                raise ServiceError('the boundaries are the same')
+            ex = self.set_excursus(book_id, first, last, None, x.get('type'), x.get('name', ''), x.get('placement'), key, actor,
+                                   tag={'key': key, 'about': ABOUT, 'verdict': 'bounds'})
+            return {'key': key, 'first': ex['first'], 'last': ex['last']}
         known = {e['key']: e for e in (b.canonical() or {}).get('entities', [])}
         e = known.get(key)
         if e is None:
-            raise ServiceError('unknown entity')
+            raise ServiceError('unknown exclusion')
         try:
             members = entities.span(self._seen_list(b), first, last)
         except ValueError as exc:
@@ -223,5 +245,12 @@ class ProfileService(ServiceBase):
 
     def keep_in_output(self, book_id: str, key: str, actor='reviewer') -> dict:
         """«Not this»: the detection was wrong (not a question, a history note…) — it is dismissed and its segments
-        stay in the output. (A right type with wrong boundaries: set_entity_bounds.)"""
+        stay in the output. (A right type with wrong boundaries: set_entity_bounds.) An excursus: removed."""
+        if self._excursus_of(self._book(book_id), key) is not None:
+            return self.remove_excursus(book_id, key, actor, tag={'key': key, 'about': ABOUT, 'verdict': 'kept'})
         return self.remove_entity(book_id, key, actor, about=ABOUT)
+
+    @staticmethod
+    def _excursus_of(b, key: str) -> dict | None:
+        """The excursus (the reviewer's or automatic, as last built) an exclusion of the profile is made of."""
+        return next((x for x in (b.canonical() or {}).get('excursus') or [] if x.get('id') == key), None)
